@@ -6,6 +6,7 @@ import { createLogger } from "./logger.js";
 import { createServer } from "./server.js";
 import { ModelSettingsService } from "./settings/service.js";
 import { SettingsStore } from "./settings/store.js";
+import { ContextStore } from "./storage/store.js";
 import { createBot } from "./telegram/bot.js";
 
 async function main(): Promise<void> {
@@ -18,8 +19,9 @@ async function main(): Promise<void> {
     timeoutMs: config.requestTimeoutMs,
   });
   const store = new SettingsStore(resolve(config.databasePath));
+  const contexts = new ContextStore(resolve(config.databasePath));
   const settings = new ModelSettingsService(client, store);
-  const bot = createBot(config.telegramBotToken, { client, logger, settings });
+  const bot = createBot(config.telegramBotToken, { client, logger, settings, contexts });
   await bot.init();
   const server = createServer({
     logger,
@@ -42,6 +44,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, "Stopping Mia");
     await server.close();
     store.close();
+    contexts.close();
   };
 
   process.once("SIGINT", () => void stop("SIGINT"));

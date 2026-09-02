@@ -5,20 +5,81 @@ import type { APIMasterClient } from "../clients/apimaster.js";
 import { ResolverError } from "../clients/apimaster.js";
 import { DEFAULT_MODELS } from "../constants.js";
 import type { ModelSettingsService } from "../settings/service.js";
+import type { ContextStore } from "../storage/store.js";
 import { userFacingError } from "./messages.js";
 import { promptFromMessage, shouldRespond } from "./policy.js";
 import { splitText } from "./split-text.js";
 
 type TextContext = Filter<Context, "message:text">;
+type EditedTextContext = Filter<Context, "edited_message:text">;
+type StorableTextMessage = TextContext["message"] | EditedTextContext["editedMessage"];
 
 interface BotDependencies {
   client: APIMasterClient;
   logger: Logger;
   settings: Pick<ModelSettingsService, "getPreferences">;
+  contexts: Pick<ContextStore, "upsertUser" | "upsertChat" | "upsertMember" | "saveMessage">;
 }
 
-export function createTextHandler({ client, logger, settings }: BotDependencies) {
+function captureTextMessage(message: StorableTextMessage, contexts: BotDependencies["contexts"]): void {
+  const from = message.from;
+  contexts.upsertUser({
+    telegramUserId: from.id,
+    firstName: from.first_name,
+    lastName: from.last_name ?? null,
+    username: from.username ?? null,
+    languageCode: from.language_code ?? null,
+    isBot: from.is_bot,
+  });
+  contexts.upsertChat({
+    chatId: message.chat.id,
+    type: message.chat.type,
+    title: "title" in message.chat ? message.chat.title ?? null : null,
+    username: "username" in message.chat ? message.chat.username ?? null : null,
+    description: null,
+    isForum: "is_forum" in message.chat ? message.chat.is_forum ?? false : false,
+  });
+  contexts.upsertMember({
+    chatId: message.chat.id,
+    telegramUserId: from.id,
+    status: null,
+  });
+  contexts.saveMessage({
+    chatId: message.chat.id,
+    messageId: message.message_id,
+    threadId: message.message_thread_id ?? null,
+    senderUserId: from.id,
+    senderChatId: message.sender_chat?.id ?? null,
+    replyToMessageId: message.reply_to_message?.message_id ?? null,
+    contentType: "text",
+    text: message.text,
+    caption: null,
+    entitiesJson: message.entities ? JSON.stringify(message.entities) : null,
+    mediaFileId: null,
+    mediaUniqueId: null,
+    sentAt: new Date(message.date * 1000).toISOString(),
+    editedAt: message.edit_date ? new Date(message.edit_date * 1000).toISOString() : null,
+  });
+}
+
+function persistTextMessage(
+  message: StorableTextMessage,
+  contexts: BotDependencies["contexts"],
+  logger: Logger,
+): void {
+  try {
+    captureTextMessage(message, contexts);
+  } catch (error) {
+    logger.error(
+      { err: error, chatId: message.chat.id, messageId: message.message_id },
+      "Failed to persist Telegram message context",
+    );
+  }
+}
+
+export function createTextHandler({ client, logger, settings, contexts }: BotDependencies) {
   return async (ctx: TextContext): Promise<void> => {
+    persistTextMessage(ctx.message, contexts, logger);
     const input = {
       chatType: ctx.chat.type,
       text: ctx.message.text,
@@ -63,6 +124,9 @@ export function createTextHandler({ client, logger, settings }: BotDependencies)
 export function createBot(token: string, dependencies: BotDependencies): Bot {
   const bot = new Bot(token);
   bot.on("message:text", createTextHandler(dependencies));
+  bot.on("edited_message:text", (ctx) => {
+    persistTextMessage(ctx.editedMessage, dependencies.contexts, dependencies.logger);
+  });
   bot.catch(({ ctx, error }) => {
     dependencies.logger.error(
       { err: error, updateId: ctx.update.update_id },
