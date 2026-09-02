@@ -142,6 +142,9 @@ done
 [[ "$healthy" -eq 1 ]] || rollback
 
 declare -A keep=(["$release"]=1)
+if [[ -n "$current_release" && -d "$current_release" && "$current_release" != "$release" ]]; then
+  keep["$current_release"]=1
+fi
 while IFS= read -r candidate && [[ "${#keep[@]}" -lt "$keep_releases" ]]; do
   [[ "$candidate" == "$release" ]] && continue
   keep["$candidate"]=1
