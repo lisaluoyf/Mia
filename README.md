@@ -1,0 +1,41 @@
+# Mia
+
+Mia is a Telegram AI assistant that uses an already-bound APIMaster account and
+one of that user's existing API Keys. The first release supports stateless text
+chat with the fixed `grok-4.5` model.
+
+## Behavior
+
+- Private chats: every text message triggers Mia.
+- Groups: Mia responds only when mentioned or directly replied to.
+- APIMaster owns accounts, Keys, quota checks, and model routing.
+- Mia never persists or sends a user's API Key to Telegram.
+
+## Local development
+
+Requirements: Node.js 22+ and pnpm.
+
+```bash
+pnpm install
+cp .env.example .env
+pnpm dev
+```
+
+The APIMaster `new-api` process must have the same `MIA_INTERNAL_SERVICE_KEY`
+and expose `POST /api/user/internal/telegram-api-key`. Mia exposes `GET /health`
+on `127.0.0.1:3001` by default.
+
+## Production with PM2
+
+Provide the environment variables through the server's secret/environment
+management, then run:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+pm2 start ecosystem.config.cjs
+```
+
+Mia uses Telegram long polling. Before the first production start, verify the
+Bot's current `getWebhookInfo`; do not remove an active webhook until its owner
+and purpose are confirmed.
