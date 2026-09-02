@@ -23,7 +23,8 @@ pnpm dev
 
 The APIMaster `new-api` process must have the same `MIA_INTERNAL_SERVICE_KEY`
 and expose `POST /api/user/internal/telegram-api-key`. Mia exposes `GET /health`
-on `127.0.0.1:3001` by default.
+and the authenticated `POST /telegram/update` receiver on `127.0.0.1:3010` by
+default.
 
 ## Production with PM2
 
@@ -36,6 +37,6 @@ pnpm build
 pm2 start ecosystem.config.cjs
 ```
 
-Mia uses Telegram long polling. Before the first production start, verify the
-Bot's current `getWebhookInfo`; do not remove an active webhook until its owner
-and purpose are confirmed.
+Mia does not own Telegram's public webhook. APIMaster's existing `new-api`
+webhook keeps handling account-verification commands and forwards all other
+updates to Mia over the authenticated internal receiver.

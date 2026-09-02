@@ -1,7 +1,7 @@
 import { APIMasterClient } from "./clients/apimaster.js";
 import { loadConfig } from "./config.js";
-import { createHealthServer } from "./health.js";
 import { createLogger } from "./logger.js";
+import { createServer } from "./server.js";
 import { createBot } from "./telegram/bot.js";
 
 async function main(): Promise<void> {
@@ -14,7 +14,12 @@ async function main(): Promise<void> {
     timeoutMs: config.requestTimeoutMs,
   });
   const bot = createBot(config.telegramBotToken, { client, logger });
-  const healthServer = createHealthServer(logger);
+  await bot.init();
+  const server = createServer({
+    logger,
+    serviceKey: config.miaInternalServiceKey,
+    handleUpdate: (update) => bot.handleUpdate(update),
+  });
   let stopping = false;
 
   const stop = async (signal: string): Promise<void> => {
@@ -23,19 +28,19 @@ async function main(): Promise<void> {
     }
     stopping = true;
     logger.info({ signal }, "Stopping Mia");
-    await Promise.allSettled([bot.stop(), healthServer.close()]);
+    await server.close();
   };
 
   process.once("SIGINT", () => void stop("SIGINT"));
   process.once("SIGTERM", () => void stop("SIGTERM"));
 
-  await healthServer.listen({ host: config.host, port: config.port });
-  logger.info({ host: config.host, port: config.port }, "Mia health server is listening");
-  await bot.start({
-    onStart: (botInfo) => {
-      logger.info({ botId: botInfo.id, username: botInfo.username }, "Mia long polling started");
-    },
-  });
+  await server.listen({ host: config.host, port: config.port });
+  logger.info({
+    host: config.host,
+    port: config.port,
+    botId: bot.botInfo.id,
+    username: bot.botInfo.username,
+  }, "Mia webhook receiver is listening");
 }
 
 main().catch((error: unknown) => {

@@ -6,7 +6,7 @@ const environmentSchema = z.object({
   APIMASTER_INTERNAL_BASE_URL: z.url().optional(),
   MIA_INTERNAL_SERVICE_KEY: z.string().trim().min(16),
   HOST: z.string().trim().min(1).default("127.0.0.1"),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3010),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
