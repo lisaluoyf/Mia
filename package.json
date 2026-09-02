@@ -6,13 +6,14 @@
   "engines": {
     "node": ">=20"
   },
-  "packageManager": "pnpm@11.25.0",
+  "packageManager": "pnpm@10.28.2",
   "scripts": {
     "build": "pnpm build:server && pnpm build:web",
     "build:server": "tsc -p tsconfig.json",
     "build:web": "tsc -p web/tsconfig.json && vite build --config web/vite.config.ts",
     "dev": "tsx watch src/index.ts",
     "dev:web": "vite --config web/vite.config.ts",
+    "deploy:production": "bash scripts/deploy-production.sh",
     "lint": "eslint .",
     "start": "node dist/index.js",
     "test": "vitest run",

@@ -49,16 +49,19 @@ defaults to `gpt-5.4` for the ten-turn background compaction. Mia exposes `GET /
 and the authenticated `POST /telegram/update` receiver on `127.0.0.1:3010` by
 default.
 
-## Production with PM2
+## Production deployment
 
-Provide the environment variables through the server's secret/environment
-management, then run:
+Mia production releases must be committed and pushed to GitHub before the
+server fetches and builds the exact commit. From a clean `main` branch, run:
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm build
-pm2 start ecosystem.config.cjs
+pnpm deploy:production
 ```
+
+The deployment reuses a lockfile-keyed dependency cache, performs an atomic
+PM2 switch with health-check rollback, and keeps exactly three runnable server
+releases. Local `dist/` uploads are reserved for explicitly requested emergency
+deployments.
 
 Mia does not own Telegram's public webhook. APIMaster's existing `new-api`
 webhook keeps handling account-verification commands and forwards all other
