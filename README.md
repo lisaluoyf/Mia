@@ -13,7 +13,7 @@ chat with the fixed `grok-4.5` model.
 
 ## Local development
 
-Requirements: Node.js 22+ and pnpm.
+Requirements: Node.js 20+ and pnpm.
 
 ```bash
 pnpm install
