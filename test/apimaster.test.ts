@@ -65,6 +65,8 @@ describe("APIMaster client", () => {
           vendor: "MiniMax",
           capability: "video",
           recommended: true,
+          supports_vision: false,
+          vision_recommended: false,
           supported_endpoint_types: ["openai-video"],
         }],
       },
@@ -79,6 +81,8 @@ describe("APIMaster client", () => {
         vendor: "MiniMax",
         capability: "video",
         recommended: true,
+        supportsVision: false,
+        visionRecommended: false,
       }],
     });
     expect(JSON.stringify(fetcher.mock.calls)).not.toContain("user-api-key");

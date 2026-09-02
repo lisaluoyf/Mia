@@ -7,6 +7,7 @@ import { MiniAppAuthError, type TelegramMiniAppUser, verifyTelegramInitData } fr
 
 const settingsSchema = z.object({
   chatModel: z.string().trim().min(1).nullable(),
+  visionModel: z.string().trim().min(1).nullable().optional(),
   imageModel: z.string().trim().min(1).nullable(),
   videoModel: z.string().trim().min(1).nullable(),
 });
@@ -83,7 +84,11 @@ export function registerMiniAppRoutes(app: FastifyInstance, options: MiniAppRout
       if (!parsed.success) {
         return reply.code(400).send({ success: false, code: "invalid_request" });
       }
-      const settings = await options.settings.save(user.id, parsed.data);
+      const current = options.settings.getPreferences(user.id);
+      const settings = await options.settings.save(user.id, {
+        ...parsed.data,
+        visionModel: parsed.data.visionModel === undefined ? current.visionModel : parsed.data.visionModel,
+      });
       return { success: true, data: settings };
     } catch (error) {
       return sendError(error, reply);

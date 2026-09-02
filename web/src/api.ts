@@ -12,15 +12,33 @@ const previewData: BootstrapData = {
   user: { id: 1, firstName: "Lisa", lastName: null, username: "lisa", languageCode: "en", photoUrl: null },
   apimasterUserId: 1,
   models: [
-    { id: "grok-4.5", displayName: "Grok 4.5", vendor: "xAI", capability: "chat", recommended: true },
-    { id: "gpt-5.5", displayName: "GPT-5.5", vendor: "OpenAI", capability: "chat", recommended: false },
-    { id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", vendor: "Anthropic", capability: "chat", recommended: false },
-    { id: "gpt-image-2", displayName: "GPT Image 2", vendor: "OpenAI", capability: "image", recommended: true },
-    { id: "gemini-3.1-flash-image", displayName: "Gemini 3.1 Flash Image", vendor: "Google", capability: "image", recommended: false },
-    { id: "minimax-h3", displayName: "MiniMax H3", vendor: "MiniMax", capability: "video", recommended: true },
-    { id: "sora-2", displayName: "Sora 2", vendor: "OpenAI", capability: "video", recommended: false },
+    { id: "grok-4.5", displayName: "Grok 4.5", vendor: "xAI", capability: "chat", recommended: true, supportsVision: true, visionRecommended: true },
+    { id: "gpt-5.5", displayName: "GPT-5.5", vendor: "OpenAI", capability: "chat", recommended: false, supportsVision: true, visionRecommended: false },
+    { id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6", vendor: "Anthropic", capability: "chat", recommended: false, supportsVision: false, visionRecommended: false },
+    { id: "gpt-image-2", displayName: "GPT Image 2", vendor: "OpenAI", capability: "image", recommended: true, supportsVision: false, visionRecommended: false },
+    { id: "gemini-3.1-flash-image", displayName: "Gemini 3.1 Flash Image", vendor: "Google", capability: "image", recommended: false, supportsVision: false, visionRecommended: false },
+    {
+      id: "minimax-h3", displayName: "MiniMax H3", vendor: "MiniMax", capability: "video", recommended: true,
+      supportsVision: false, visionRecommended: false,
+      videoCapabilities: {
+        modes: ["text_to_video", "image_to_video"],
+        durationSeconds: { min: 6, max: 10, default: 6 },
+        resolutions: ["768P", "1080P"], defaultResolution: "768P",
+        aspectRatios: ["16:9", "9:16", "1:1"], defaultAspectRatio: "16:9", maxReferenceImages: 1,
+      },
+    },
+    {
+      id: "sora-2", displayName: "Sora 2", vendor: "OpenAI", capability: "video", recommended: false,
+      supportsVision: false, visionRecommended: false,
+      videoCapabilities: {
+        modes: ["text_to_video", "image_to_video"],
+        durationSeconds: { min: 4, max: 12, default: 8 },
+        resolutions: ["720P"], defaultResolution: "720P",
+        aspectRatios: ["16:9", "9:16"], defaultAspectRatio: "16:9", maxReferenceImages: 1,
+      },
+    },
   ],
-  settings: { chatModel: "grok-4.5", imageModel: "gpt-image-2", videoModel: "minimax-h3" },
+  settings: { chatModel: "grok-4.5", visionModel: "grok-4.5", imageModel: "gpt-image-2", videoModel: "minimax-h3" },
   unavailable: [],
 };
 

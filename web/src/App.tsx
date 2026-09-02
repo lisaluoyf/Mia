@@ -8,27 +8,31 @@ import {
   MessageCircle,
   RotateCcw,
   Search,
+  ScanEye,
+  Sparkles,
   Video,
   X,
 } from "lucide-react";
 
 import { ApiError, loadBootstrap, savePreferences } from "./api";
-import type { Capability, BootstrapData, ModelOption, Preferences } from "./types";
+import type { PreferenceCapability, BootstrapData, ModelOption, Preferences } from "./types";
 import type { TranslationKey } from "./i18n";
-import { enableClosingConfirmation, notifyHaptic } from "./telegram";
+import { notifyHaptic } from "./telegram";
 
 interface AppProps {
   t: (key: TranslationKey) => string;
 }
 
-const preferenceKeys: Record<Capability, keyof Preferences> = {
+const preferenceKeys: Record<PreferenceCapability, keyof Preferences> = {
   chat: "chatModel",
+  vision: "visionModel",
   image: "imageModel",
   video: "videoModel",
 };
 
 const icons = {
   chat: MessageCircle,
+  vision: ScanEye,
   image: Image,
   video: Video,
 };
@@ -47,27 +51,31 @@ function displayName(user: BootstrapData["user"]): string {
   return [user.firstName, user.lastName].filter(Boolean).join(" ");
 }
 
-function Avatar({ user }: { user: BootstrapData["user"] }) {
-  if (user.photoUrl) return <img className="avatar" src={user.photoUrl} alt="" />;
-  return <div className="avatar avatar-fallback" aria-hidden="true">{user.firstName.slice(0, 1).toUpperCase()}</div>;
-}
-
 interface ModelSheetProps {
-  capability: Capability;
+  capability: PreferenceCapability;
   models: ModelOption[];
   selected: string | null;
+  saving: boolean;
   t: AppProps["t"];
   onSelect: (model: string) => void;
   onClose: () => void;
 }
 
-function ModelSheet({ capability, models, selected, t, onSelect, onClose }: ModelSheetProps) {
+function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose }: ModelSheetProps) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return models;
-    return models.filter((model) => `${model.displayName} ${model.id} ${model.vendor}`.toLowerCase().includes(needle));
-  }, [models, query]);
+    const matching = needle
+      ? models.filter((model) => `${model.displayName} ${model.id} ${model.vendor}`.toLowerCase().includes(needle))
+      : models;
+    return [...matching].sort((left, right) => {
+      const selectedRank = Number(right.id === selected) - Number(left.id === selected);
+      if (selectedRank !== 0) return selectedRank;
+      const leftRecommended = capability === "vision" ? left.visionRecommended : left.recommended;
+      const rightRecommended = capability === "vision" ? right.visionRecommended : right.recommended;
+      return Number(rightRecommended) - Number(leftRecommended);
+    });
+  }, [capability, models, query, selected]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -109,13 +117,21 @@ function ModelSheet({ capability, models, selected, t, onSelect, onClose }: Mode
               type="button"
               key={model.id}
               onClick={() => onSelect(model.id)}
+              disabled={saving}
             >
               <span className="model-copy">
                 <span className="model-name">{model.displayName}</span>
-                <span className="model-meta">{model.vendor || model.id}</span>
+                {model.vendor && model.vendor.toLowerCase() !== "custom" && (
+                  <span className="model-meta">{model.vendor}</span>
+                )}
               </span>
-              {model.recommended && <span className="recommended">{t("recommended")}</span>}
-              <span className="selection-mark" aria-hidden="true">{selected === model.id && <Check size={16} />}</span>
+              {(capability === "vision" ? model.visionRecommended : model.recommended)
+                && <span className="recommended">{t("recommended")}</span>}
+              <span className="selection-mark" aria-hidden="true">
+                {saving && selected !== model.id
+                  ? null
+                  : selected === model.id && <Check size={16} />}
+              </span>
             </button>
           ))}
         </div>
@@ -127,9 +143,9 @@ function ModelSheet({ capability, models, selected, t, onSelect, onClose }: Mode
 export function App({ t }: AppProps) {
   const [data, setData] = useState<BootstrapData | null>(null);
   const [settings, setSettings] = useState<Preferences | null>(null);
-  const [active, setActive] = useState<Capability | null>(null);
+  const [active, setActive] = useState<PreferenceCapability | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState<PreferenceCapability | null>(null);
   const [error, setError] = useState<TranslationKey | null>(null);
   const [toast, setToast] = useState<TranslationKey | null>(null);
 
@@ -149,21 +165,26 @@ export function App({ t }: AppProps) {
 
   useEffect(() => { void load(); }, []);
 
-  useEffect(() => {
-    if (!data || !settings) return;
-    const dirty = JSON.stringify(settings) !== JSON.stringify(data.settings);
-    if (dirty) enableClosingConfirmation();
-  }, [data, settings]);
+  const saveSelection = async (capability: PreferenceCapability, model: string) => {
+    if (!settings || !data || saving) return;
+    const key = preferenceKeys[capability];
+    if (settings[key] === model) {
+      setActive(null);
+      return;
+    }
 
-  const dirty = Boolean(data && settings && JSON.stringify(settings) !== JSON.stringify(data.settings));
-
-  const save = async () => {
-    if (!settings || !data || !dirty || saving) return;
-    setSaving(true);
+    const nextSettings = { ...settings, [key]: model };
+    setSaving(capability);
+    setToast(null);
     try {
-      const saved = await savePreferences(settings);
+      const saved = await savePreferences(nextSettings);
       setSettings(saved);
-      setData({ ...data, settings: saved, unavailable: [] });
+      setData({
+        ...data,
+        settings: saved,
+        unavailable: data.unavailable.filter((item) => item !== capability),
+      });
+      setActive(null);
       setToast("saved");
       notifyHaptic("success");
       window.setTimeout(() => setToast(null), 2200);
@@ -171,7 +192,7 @@ export function App({ t }: AppProps) {
       setToast("saveFailed");
       notifyHaptic("error");
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   };
 
@@ -191,55 +212,65 @@ export function App({ t }: AppProps) {
     );
   }
 
+  const visibleCapabilities: PreferenceCapability[] = data.models.some(
+    (model) => model.capability === "chat" && model.supportsVision,
+  )
+    ? ["chat", "vision", "image", "video"]
+    : ["chat", "image", "video"];
+
   return (
     <main className="app-shell">
-      <header className="profile-header">
-        <Avatar user={data.user} />
-        <div className="profile-copy">
-          <span className="product-name">Mia</span>
+      <header className="brand-header">
+        <div className="assistant-portrait">
+          <img src="/mia/mia-assistant.jpg" alt="Mia" />
+          <span className="presence-dot" aria-hidden="true" />
+        </div>
+        <div className="brand-copy">
+          <span className="product-name">Mia <Sparkles size={17} aria-hidden="true" /></span>
           <span className="user-name">{displayName(data.user)}</span>
         </div>
-        <h1>{t("settings")}</h1>
       </header>
 
-      <section className="settings-list" aria-label={t("settings")}>
-        {(["chat", "image", "video"] as const).map((capability) => {
-          const Icon = icons[capability];
-          const key = preferenceKeys[capability];
-          const selected = data.models.find((model) => model.id === settings[key] && model.capability === capability);
-          const options = data.models.filter((model) => model.capability === capability);
-          return (
-            <button className="setting-row" type="button" key={capability} onClick={() => setActive(capability)} disabled={options.length === 0}>
-              <span className={`capability-icon ${capability}`}><Icon size={20} aria-hidden="true" /></span>
-              <span className="setting-copy">
+      <section className="settings-section" aria-labelledby="settings-title">
+        <h1 id="settings-title">{t("settings")}</h1>
+        <div className="settings-list">
+          {visibleCapabilities.map((capability) => {
+            const Icon = icons[capability];
+            const key = preferenceKeys[capability];
+            const options = data.models.filter((model) => capability === "vision"
+              ? model.capability === "chat" && model.supportsVision
+              : model.capability === capability);
+            const selected = options.find((model) => model.id === settings[key]);
+            return (
+              <button className="setting-row" type="button" key={capability} onClick={() => setActive(capability)} disabled={options.length === 0 || saving !== null}>
+                <span className={`capability-icon ${capability}`}><Icon size={20} aria-hidden="true" /></span>
                 <span className="setting-label">{t(capability)}</span>
-                <span className="setting-value">{selected?.displayName ?? t("noModels")}</span>
-              </span>
-              {data.unavailable.includes(capability) && <span className="unavailable">{t("unavailable")}</span>}
-              <ChevronRight className="chevron" size={19} aria-hidden="true" />
-            </button>
-          );
-        })}
+                <span className="setting-selection">
+                  <span className="setting-value">{selected?.displayName ?? settings[key] ?? t("noModels")}</span>
+                  {data.unavailable.includes(capability) && <span className="unavailable">{t("unavailable")}</span>}
+                </span>
+                {saving === capability
+                  ? <LoaderCircle className="spinner row-spinner" size={18} aria-hidden="true" />
+                  : <ChevronRight className="chevron" size={19} aria-hidden="true" />}
+              </button>
+            );
+          })}
+        </div>
       </section>
-
-      <button className="save-button" type="button" disabled={!dirty || saving} onClick={() => void save()}>
-        {saving ? <LoaderCircle className="spinner" size={18} /> : <Check size={18} />}
-        {t(saving ? "saving" : "save")}
-      </button>
 
       {toast && <div className={`toast${toast === "saveFailed" ? " error" : ""}`} role="status">{t(toast)}</div>}
 
       {active && (
         <ModelSheet
           capability={active}
-          models={data.models.filter((model) => model.capability === active)}
+          models={data.models.filter((model) => active === "vision"
+            ? model.capability === "chat" && model.supportsVision
+            : model.capability === active)}
           selected={settings[preferenceKeys[active]]}
+          saving={saving === active}
           t={t}
           onClose={() => setActive(null)}
-          onSelect={(model) => {
-            setSettings({ ...settings, [preferenceKeys[active]]: model });
-            setActive(null);
-          }}
+          onSelect={(model) => void saveSelection(active, model)}
         />
       )}
     </main>

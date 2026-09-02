@@ -38,6 +38,8 @@ const modelCatalogResponseSchema = z.object({
       vendor: z.string(),
       capability: z.enum(["chat", "image", "video"]),
       recommended: z.boolean(),
+      supports_vision: z.boolean().optional().default(false),
+      vision_recommended: z.boolean().optional().default(false),
       supported_endpoint_types: z.array(z.string()),
     })),
   }),
@@ -166,6 +168,8 @@ export class APIMasterClient {
         vendor: model.vendor,
         capability: model.capability,
         recommended: model.recommended,
+        supportsVision: model.supports_vision,
+        visionRecommended: model.vision_recommended,
       })),
     };
   }

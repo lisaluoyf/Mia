@@ -24,6 +24,7 @@ describe("shared Mia database", () => {
       telegramUserId: 42,
       apimasterUserId: 7,
       chatModel: "grok-4.5",
+      visionModel: null,
       imageModel: "gpt-image-2",
       videoModel: "minimax-h3",
     });

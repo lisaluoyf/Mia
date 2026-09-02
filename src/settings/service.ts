@@ -1,9 +1,15 @@
 import type { APIMasterClient, ModelCatalog } from "../clients/apimaster.js";
-import { DEFAULT_PREFERENCES, preferenceKey, type ModelCapability, type ModelPreferences } from "./types.js";
+import {
+  DEFAULT_PREFERENCES,
+  preferenceKey,
+  type ModelOption,
+  type ModelPreferenceCapability,
+  type ModelPreferences,
+} from "./types.js";
 import type { SettingsStore } from "./store.js";
 
 export class InvalidModelPreferenceError extends Error {
-  constructor(public readonly capability: ModelCapability) {
+  constructor(public readonly capability: ModelPreferenceCapability) {
     super(`Invalid ${capability} model preference`);
     this.name = "InvalidModelPreferenceError";
   }
@@ -11,21 +17,36 @@ export class InvalidModelPreferenceError extends Error {
 
 export interface SettingsSnapshot extends ModelCatalog {
   settings: ModelPreferences;
-  unavailable: ModelCapability[];
+  unavailable: ModelPreferenceCapability[];
+}
+
+function sameModel(left: string | null, right: string | null): boolean {
+  return left !== null && right !== null && left.toLowerCase() === right.toLowerCase();
+}
+
+function candidatesFor(capability: ModelPreferenceCapability, catalog: ModelCatalog): ModelOption[] {
+  return catalog.models.filter((model) => capability === "vision"
+    ? model.capability === "chat" && model.supportsVision
+    : model.capability === capability);
 }
 
 function availableModel(
   requested: string | null,
-  capability: ModelCapability,
+  capability: ModelPreferenceCapability,
   catalog: ModelCatalog,
 ): string | null {
-  const candidates = catalog.models.filter((model) => model.capability === capability);
-  if (requested && candidates.some((model) => model.id === requested)) {
-    return requested;
+  const candidates = candidatesFor(capability, catalog);
+  const requestedModel = requested && candidates.find((model) => sameModel(model.id, requested));
+  if (requestedModel) {
+    return requestedModel.id;
   }
   const defaultModel = DEFAULT_PREFERENCES[preferenceKey(capability)];
-  if (defaultModel && candidates.some((model) => model.id === defaultModel)) {
-    return defaultModel;
+  const catalogDefault = defaultModel && candidates.find((model) => sameModel(model.id, defaultModel));
+  if (catalogDefault) {
+    return catalogDefault.id;
+  }
+  if (capability === "vision") {
+    return candidates.find((model) => model.visionRecommended)?.id ?? candidates[0]?.id ?? null;
   }
   return candidates.find((model) => model.recommended)?.id ?? candidates[0]?.id ?? null;
 }
@@ -43,13 +64,13 @@ export class ModelSettingsService {
   async getSnapshot(telegramUserId: number): Promise<SettingsSnapshot> {
     const catalog = await this.client.listModels(telegramUserId);
     const stored = this.store.get(telegramUserId);
-    const unavailable: ModelCapability[] = [];
+    const unavailable: ModelPreferenceCapability[] = [];
     const normalized = { ...stored };
-    for (const capability of ["chat", "image", "video"] as const) {
+    for (const capability of ["chat", "vision", "image", "video"] as const) {
       const key = preferenceKey(capability);
       const selected = stored[key];
       const effective = availableModel(selected, capability, catalog);
-      if (selected && selected !== effective) {
+      if (selected && (!effective || !sameModel(selected, effective))) {
         unavailable.push(capability);
       }
       normalized[key] = effective;
@@ -59,16 +80,22 @@ export class ModelSettingsService {
 
   async save(telegramUserId: number, preferences: ModelPreferences): Promise<ModelPreferences> {
     const catalog = await this.client.listModels(telegramUserId);
-    for (const capability of ["chat", "image", "video"] as const) {
-      const selected = preferences[preferenceKey(capability)];
-      if (selected && !catalog.models.some((model) => model.id === selected && model.capability === capability)) {
+    const normalized = { ...preferences };
+    for (const capability of ["chat", "vision", "image", "video"] as const) {
+      const key = preferenceKey(capability);
+      const selected = preferences[key];
+      const canonical = selected === null
+        ? undefined
+        : candidatesFor(capability, catalog).find((model) => sameModel(model.id, selected));
+      if (selected && !canonical) {
         throw new InvalidModelPreferenceError(capability);
       }
+      normalized[key] = canonical?.id ?? null;
     }
     return this.store.save({
       telegramUserId,
       apimasterUserId: catalog.apimasterUserId,
-      ...preferences,
+      ...normalized,
     });
   }
 }

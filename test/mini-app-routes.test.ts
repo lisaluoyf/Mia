@@ -28,10 +28,10 @@ function modelCatalogResponse() {
     data: {
       user_id: 7,
       models: [
-        { id: "grok-4.5", display_name: "Grok 4.5", vendor: "xAI", capability: "chat", recommended: true, supported_endpoint_types: ["openai"] },
-        { id: "gpt-5.5", display_name: "GPT-5.5", vendor: "OpenAI", capability: "chat", recommended: false, supported_endpoint_types: ["openai"] },
+        { id: "grok-4.5", display_name: "Grok 4.5", vendor: "xAI", capability: "chat", recommended: true, supports_vision: false, vision_recommended: false, supported_endpoint_types: ["openai"] },
+        { id: "gpt-5.5", display_name: "GPT-5.5", vendor: "OpenAI", capability: "chat", recommended: false, supports_vision: true, vision_recommended: true, supported_endpoint_types: ["openai"] },
         { id: "gpt-image-2", display_name: "GPT Image 2", vendor: "OpenAI", capability: "image", recommended: true, supported_endpoint_types: ["image-generation"] },
-        { id: "minimax-h3", display_name: "MiniMax H3", vendor: "MiniMax", capability: "video", recommended: true, supported_endpoint_types: ["openai-video"] },
+        { id: "MiniMax-H3", display_name: "MiniMax H3", vendor: "MiniMax", capability: "video", recommended: true, supported_endpoint_types: ["openai-video"] },
       ],
     },
   });
@@ -63,7 +63,8 @@ describe("Mini App routes", () => {
       success: true,
       data: {
         user: { id: 42, firstName: "Lisa", languageCode: "zh-CN" },
-        settings: { chatModel: "grok-4.5", imageModel: "gpt-image-2", videoModel: "minimax-h3" },
+        settings: { chatModel: "grok-4.5", visionModel: "gpt-5.5", imageModel: "gpt-image-2", videoModel: "MiniMax-H3" },
+        unavailable: [],
       },
     });
 
@@ -71,7 +72,7 @@ describe("Mini App routes", () => {
       method: "PUT",
       url: "/mia/api/settings",
       headers,
-      payload: { chatModel: "minimax-h3", imageModel: "gpt-image-2", videoModel: "minimax-h3" },
+      payload: { chatModel: "minimax-h3", visionModel: "gpt-5.5", imageModel: "gpt-image-2", videoModel: "minimax-h3" },
     });
     expect(invalid.statusCode).toBe(422);
     expect(invalid.json()).toMatchObject({ code: "invalid_model", field: "chat" });
@@ -80,11 +81,20 @@ describe("Mini App routes", () => {
       method: "PUT",
       url: "/mia/api/settings",
       headers,
-      payload: { chatModel: "gpt-5.5", imageModel: "gpt-image-2", videoModel: "minimax-h3" },
+      payload: { chatModel: "gpt-5.5", visionModel: "gpt-5.5", imageModel: "gpt-image-2", videoModel: "minimax-h3" },
     });
     expect(saved.statusCode).toBe(200);
     const reread = await app.inject({ method: "GET", url: "/mia/api/settings", headers });
-    expect(reread.json()).toMatchObject({ data: { chatModel: "gpt-5.5" } });
+    expect(reread.json()).toMatchObject({ data: { chatModel: "gpt-5.5", visionModel: "gpt-5.5", videoModel: "MiniMax-H3" } });
+
+    const legacySave = await app.inject({
+      method: "PUT",
+      url: "/mia/api/settings",
+      headers,
+      payload: { chatModel: "grok-4.5", imageModel: "gpt-image-2", videoModel: "minimax-h3" },
+    });
+    expect(legacySave.statusCode).toBe(200);
+    expect(legacySave.json()).toMatchObject({ data: { visionModel: "gpt-5.5", videoModel: "MiniMax-H3" } });
 
     const forged = await app.inject({
       method: "GET",
