@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-import { CHAT_MODEL, SYSTEM_PROMPT } from "../constants.js";
+import { SYSTEM_PROMPT } from "../constants.js";
+import type { ModelOption } from "../settings/types.js";
 
 type Fetcher = typeof fetch;
 
@@ -26,6 +27,26 @@ const chatResponseSchema = z.object({
     }),
   ).min(1),
 });
+
+const modelCatalogResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({
+    user_id: z.number().int().positive(),
+    models: z.array(z.object({
+      id: z.string().min(1),
+      display_name: z.string().min(1),
+      vendor: z.string(),
+      capability: z.enum(["chat", "image", "video"]),
+      recommended: z.boolean(),
+      supported_endpoint_types: z.array(z.string()),
+    })),
+  }),
+});
+
+export interface ModelCatalog {
+  apimasterUserId: number;
+  models: ModelOption[];
+}
 
 export type ResolverErrorCode =
   | "telegram_not_bound"
@@ -65,7 +86,7 @@ export class APIMasterClient {
     this.fetcher = options.fetcher ?? fetch;
   }
 
-  async resolveAPIKey(telegramUserId: number): Promise<string> {
+  async resolveAPIKey(telegramUserId: number, model: string): Promise<string> {
     let response: Response;
     try {
       response = await this.fetcher(
@@ -78,7 +99,7 @@ export class APIMasterClient {
           },
           body: JSON.stringify({
             telegram_user_id: String(telegramUserId),
-            model: CHAT_MODEL,
+            model,
           }),
           signal: AbortSignal.timeout(this.options.timeoutMs),
         },
@@ -105,7 +126,51 @@ export class APIMasterClient {
     return parsed.data.data.api_key;
   }
 
-  async chat(apiKey: string, userMessage: string): Promise<string> {
+  async listModels(telegramUserId: number): Promise<ModelCatalog> {
+    let response: Response;
+    try {
+      response = await this.fetcher(
+        `${this.options.internalBaseUrl}/api/user/internal/mia-models`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-mia-internal-key": this.options.serviceKey,
+          },
+          body: JSON.stringify({ telegram_user_id: String(telegramUserId) }),
+          signal: AbortSignal.timeout(this.options.timeoutMs),
+        },
+      );
+    } catch {
+      throw new ResolverError("service_unavailable");
+    }
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch(() => undefined);
+      const parsedError = errorResponseSchema.safeParse(payload);
+      const code = parsedError.success ? parsedError.data.code : undefined;
+      if (code === "telegram_not_bound" || code === "user_disabled" || code === "no_usable_api_key") {
+        throw new ResolverError(code, response.status);
+      }
+      throw new ResolverError("service_unavailable", response.status);
+    }
+    const payload: unknown = await response.json().catch(() => undefined);
+    const parsed = modelCatalogResponseSchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new ResolverError("service_unavailable", response.status);
+    }
+    return {
+      apimasterUserId: parsed.data.data.user_id,
+      models: parsed.data.data.models.map((model) => ({
+        id: model.id,
+        displayName: model.display_name,
+        vendor: model.vendor,
+        capability: model.capability,
+        recommended: model.recommended,
+      })),
+    };
+  }
+
+  async chat(apiKey: string, model: string, userMessage: string): Promise<string> {
     let response: Response;
     try {
       response = await this.fetcher(`${this.options.baseUrl}/v1/chat/completions`, {
@@ -115,7 +180,7 @@ export class APIMasterClient {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          model: CHAT_MODEL,
+          model,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: userMessage },

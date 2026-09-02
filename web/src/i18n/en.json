@@ -1,0 +1,22 @@
+{
+  "settings": "Settings",
+  "chat": "Chat",
+  "image": "Image",
+  "video": "Video",
+  "recommended": "Recommended",
+  "unavailable": "Unavailable",
+  "selectModel": "Select model",
+  "search": "Search models",
+  "noModels": "No available models",
+  "save": "Save changes",
+  "saving": "Saving",
+  "saved": "Settings saved",
+  "retry": "Try again",
+  "close": "Close",
+  "authFailed": "Open this page from the Mia Telegram bot.",
+  "notBound": "Connect this Telegram account to APIMaster first.",
+  "accountDisabled": "Your APIMaster account is unavailable.",
+  "noKey": "No usable APIMaster API Key was found.",
+  "serviceUnavailable": "The service is temporarily unavailable.",
+  "saveFailed": "Could not save your settings. Try again."
+}

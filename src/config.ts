@@ -11,6 +11,8 @@ const environmentSchema = z.object({
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
   REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(60000),
+  DATABASE_PATH: z.string().trim().min(1).default("data/mia.sqlite"),
+  MINI_APP_AUTH_MAX_AGE_SECONDS: z.coerce.number().int().min(60).max(604800).default(86400),
 });
 
 export interface AppConfig {
@@ -22,6 +24,8 @@ export interface AppConfig {
   port: number;
   logLevel: string;
   requestTimeoutMs: number;
+  databasePath: string;
+  miniAppAuthMaxAgeSeconds: number;
 }
 
 function withoutTrailingSlash(value: string): string {
@@ -41,5 +45,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     port: parsed.PORT,
     logLevel: parsed.LOG_LEVEL,
     requestTimeoutMs: parsed.REQUEST_TIMEOUT_MS,
+    databasePath: parsed.DATABASE_PATH,
+    miniAppAuthMaxAgeSeconds: parsed.MINI_APP_AUTH_MAX_AGE_SECONDS,
   };
 }

@@ -1,7 +1,11 @@
+import { resolve } from "node:path";
+
 import { APIMasterClient } from "./clients/apimaster.js";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
 import { createServer } from "./server.js";
+import { ModelSettingsService } from "./settings/service.js";
+import { SettingsStore } from "./settings/store.js";
 import { createBot } from "./telegram/bot.js";
 
 async function main(): Promise<void> {
@@ -13,12 +17,20 @@ async function main(): Promise<void> {
     serviceKey: config.miaInternalServiceKey,
     timeoutMs: config.requestTimeoutMs,
   });
-  const bot = createBot(config.telegramBotToken, { client, logger });
+  const store = new SettingsStore(resolve(config.databasePath));
+  const settings = new ModelSettingsService(client, store);
+  const bot = createBot(config.telegramBotToken, { client, logger, settings });
   await bot.init();
   const server = createServer({
     logger,
     serviceKey: config.miaInternalServiceKey,
     handleUpdate: (update) => bot.handleUpdate(update),
+    miniApp: {
+      botToken: config.telegramBotToken,
+      maxAuthAgeSeconds: config.miniAppAuthMaxAgeSeconds,
+      settings,
+      staticRoot: resolve("dist/web"),
+    },
   });
   let stopping = false;
 
@@ -29,6 +41,7 @@ async function main(): Promise<void> {
     stopping = true;
     logger.info({ signal }, "Stopping Mia");
     await server.close();
+    store.close();
   };
 
   process.once("SIGINT", () => void stop("SIGINT"));

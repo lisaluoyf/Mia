@@ -1,0 +1,22 @@
+{
+  "settings": "设置",
+  "chat": "聊天",
+  "image": "图片",
+  "video": "视频",
+  "recommended": "推荐",
+  "unavailable": "不可用",
+  "selectModel": "选择模型",
+  "search": "搜索模型",
+  "noModels": "暂无可用模型",
+  "save": "保存更改",
+  "saving": "正在保存",
+  "saved": "设置已保存",
+  "retry": "重试",
+  "close": "关闭",
+  "authFailed": "请从 Mia Telegram Bot 内打开此页面。",
+  "notBound": "请先将这个 Telegram 账号绑定到 APIMaster。",
+  "accountDisabled": "你的 APIMaster 账号目前不可用。",
+  "noKey": "没有找到可用的 APIMaster API Key。",
+  "serviceUnavailable": "服务暂时不可用。",
+  "saveFailed": "设置保存失败，请重试。"
+}

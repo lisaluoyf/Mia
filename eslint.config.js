@@ -8,10 +8,10 @@ export default tseslint.config(
     ignores: ["dist/**", "coverage/**", "eslint.config.js", "ecosystem.config.cjs"],
   },
   {
-    files: ["src/**/*.ts", "test/**/*.ts"],
+    files: ["src/**/*.ts", "test/**/*.ts", "web/**/*.ts", "web/**/*.tsx"],
     languageOptions: {
       parserOptions: {
-        project: ["./tsconfig.json", "./tsconfig.test.json"],
+        project: ["./tsconfig.json", "./tsconfig.test.json", "./web/tsconfig.json"],
         tsconfigRootDir: import.meta.dirname,
       },
     },
