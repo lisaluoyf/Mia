@@ -1,14 +1,19 @@
 import { timingSafeEqual } from "node:crypto";
+import { Readable } from "node:stream";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Update } from "grammy/types";
 import type { Logger } from "pino";
 import { z } from "zod";
 
 import { registerMiniAppRoutes } from "./mini-app/routes.js";
 import type { ModelSettingsService } from "./settings/service.js";
+import type { APIMasterClient } from "./clients/apimaster.js";
+import type { MediaStore } from "./media/store.js";
 
 const telegramUpdateSchema = z.object({
   update_id: z.number().int().nonnegative(),
@@ -24,6 +29,10 @@ interface ServerOptions {
     settings: ModelSettingsService;
     staticRoot?: string;
   };
+  mediaDownload?: {
+    store: MediaStore;
+    client: APIMasterClient;
+  };
 }
 
 function authenticated(provided: string | string[] | undefined, expected: string): boolean {
@@ -35,7 +44,7 @@ function authenticated(provided: string | string[] | undefined, expected: string
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
-export function createServer({ logger, serviceKey, handleUpdate, miniApp }: ServerOptions) {
+export function createServer({ logger, serviceKey, handleUpdate, miniApp, mediaDownload }: ServerOptions) {
   const app = Fastify({ loggerInstance: logger, bodyLimit: 1024 * 1024, trustProxy: true });
 
   app.addHook("onRequest", (request, reply, done) => {
@@ -65,6 +74,37 @@ export function createServer({ logger, serviceKey, handleUpdate, miniApp }: Serv
   }
 
   app.get("/health", () => ({ status: "ok" }));
+  if (mediaDownload) {
+    const handleMediaDownload = async (
+      request: FastifyRequest<{ Params: { token: string } }>,
+      reply: FastifyReply,
+    ) => {
+      const access = mediaDownload.store.getAccessToken(request.params.token, "download");
+      const job = access ? mediaDownload.store.getJob(access.jobId) : null;
+      if (!job?.resultUrl || job.status !== "succeeded") {
+        return reply.code(404).send({ error: "download_not_found" });
+      }
+      try {
+        const apiKey = await mediaDownload.client.resolveAPIKey(job.telegramUserId, job.model);
+        const upstream = await mediaDownload.client.streamContent(apiKey, job.resultUrl);
+        if (!upstream.body) return reply.code(502).send({ error: "download_unavailable" });
+        const contentType = upstream.headers.get("content-type");
+        const contentLength = upstream.headers.get("content-length");
+        if (contentType) reply.header("content-type", contentType);
+        if (contentLength) reply.header("content-length", contentLength);
+        reply.header("content-disposition", `attachment; filename="mia-${job.type === "video_generate" ? "video.mp4" : "image.png"}"`);
+        reply.header("cache-control", "private, no-store");
+        return reply.send(Readable.fromWeb(upstream.body as NodeReadableStream));
+      } catch {
+        return reply.code(502).send({ error: "download_unavailable" });
+      }
+    };
+    // The public reverse proxy mounts Mia below /mia. Keep the short route for
+    // internal callers and old links, while making the externally shared URL
+    // resolve through the same handler.
+    app.get<{ Params: { token: string } }>("/media/download/:token", handleMediaDownload);
+    app.get<{ Params: { token: string } }>("/mia/media/download/:token", handleMediaDownload);
+  }
   app.post("/telegram/update", (request, reply) => {
     if (!authenticated(request.headers["x-mia-internal-key"], serviceKey)) {
       return reply.code(401).send({ accepted: false });

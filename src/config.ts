@@ -13,6 +13,12 @@ const environmentSchema = z.object({
   REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(60000),
   DATABASE_PATH: z.string().trim().min(1).default("data/mia.sqlite"),
   MINI_APP_AUTH_MAX_AGE_SECONDS: z.coerce.number().int().min(60).max(604800).default(86400),
+  MIA_ROUTER_MODEL: z.string().trim().min(1).default("gpt-5.4"),
+  MIA_ROUTER_TIMEOUT_MS: z.coerce.number().int().min(500).max(30000).default(8000),
+  MIA_CONTEXT_MODEL: z.string().trim().min(1).default("gpt-5.4"),
+  MIA_PUBLIC_BASE_URL: z.url().optional(),
+  MEDIA_WORKER_INTERVAL_MS: z.coerce.number().int().min(1000).max(60000).default(5000),
+  MEDIA_RESULT_MAX_BYTES: z.coerce.number().int().min(1_000_000).max(2_000_000_000).default(50_000_000),
 });
 
 export interface AppConfig {
@@ -26,6 +32,12 @@ export interface AppConfig {
   requestTimeoutMs: number;
   databasePath: string;
   miniAppAuthMaxAgeSeconds: number;
+  miaRouterModel: string;
+  miaRouterTimeoutMs: number;
+  miaContextModel: string;
+  publicBaseUrl: string | null;
+  mediaWorkerIntervalMs: number;
+  mediaResultMaxBytes: number;
 }
 
 function withoutTrailingSlash(value: string): string {
@@ -47,5 +59,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     requestTimeoutMs: parsed.REQUEST_TIMEOUT_MS,
     databasePath: parsed.DATABASE_PATH,
     miniAppAuthMaxAgeSeconds: parsed.MINI_APP_AUTH_MAX_AGE_SECONDS,
+    miaRouterModel: parsed.MIA_ROUTER_MODEL,
+    miaRouterTimeoutMs: parsed.MIA_ROUTER_TIMEOUT_MS,
+    miaContextModel: parsed.MIA_CONTEXT_MODEL,
+    publicBaseUrl: parsed.MIA_PUBLIC_BASE_URL === undefined ? null : withoutTrailingSlash(parsed.MIA_PUBLIC_BASE_URL),
+    mediaWorkerIntervalMs: parsed.MEDIA_WORKER_INTERVAL_MS,
+    mediaResultMaxBytes: parsed.MEDIA_RESULT_MAX_BYTES,
   };
 }

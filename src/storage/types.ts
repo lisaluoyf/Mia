@@ -94,3 +94,16 @@ export interface SummaryRecord extends SummaryInput {
   id: number;
   createdAt: string;
 }
+
+export interface CompletedTurnInput {
+  chatId: number;
+  userId: number;
+  userMessageId: number;
+  assistantMessageId: number;
+}
+
+export interface CompletedTurn extends CompletedTurnInput {
+  id: number;
+  completedAt: string;
+  compactedAt: string | null;
+}

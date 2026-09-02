@@ -25,10 +25,11 @@
     "better-sqlite3": "^12.11.1",
     "fastify": "^5.6.2",
     "grammy": "^1.38.3",
+    "lucide-react": "^1.38.0",
     "pino": "^10.1.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "lucide-react": "^1.38.0",
+    "sharp": "^0.34.5",
     "zod": "^4.1.12"
   },
   "devDependencies": {

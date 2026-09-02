@@ -11,6 +11,15 @@ export interface ModelOption {
   recommended: boolean;
   supportsVision: boolean;
   visionRecommended: boolean;
+  videoCapabilities?: {
+    modes: Array<"text_to_video" | "image_to_video">;
+    durationSeconds: { min: number; max: number; default: number };
+    resolutions: string[];
+    defaultResolution: string;
+    aspectRatios: string[];
+    defaultAspectRatio: string;
+    maxReferenceImages: number;
+  } | undefined;
 }
 
 export interface ModelPreferences {

@@ -26,4 +26,19 @@ describe("logger redaction", () => {
     expect(output).not.toContain("secret-service-key");
     expect(output).not.toContain("secret-api-key");
   });
+
+  it("redacts expiring media download tokens from request URLs", async () => {
+    let output = "";
+    const destination = new Writable({
+      write(chunk: unknown, _encoding, callback) {
+        output += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+        callback();
+      },
+    });
+    const logger = createLogger("info", destination);
+    logger.info({ req: { method: "GET", url: "/media/download/private-token-value" } });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(output).not.toContain("private-token-value");
+    expect(output).toContain("/media/download/[REDACTED]");
+  });
 });

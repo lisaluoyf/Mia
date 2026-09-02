@@ -18,6 +18,15 @@ const sensitivePaths = [
 export function createLogger(level: string, destination?: DestinationStream): Logger {
   const options = {
       level,
+      serializers: {
+        req(request: { method?: string; url?: string; raw?: { url?: string } }) {
+          const url = request.url ?? request.raw?.url;
+          return {
+            method: request.method,
+            url: url?.replace(/(\/media\/download\/)[^/?]+/g, "$1[REDACTED]"),
+          };
+        },
+      },
       redact: {
         paths: sensitivePaths,
         censor: "[REDACTED]",

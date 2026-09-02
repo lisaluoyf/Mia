@@ -7,6 +7,8 @@ import type {
   ChatInput,
   ChatMemberInput,
   ChatRecord,
+  CompletedTurn,
+  CompletedTurnInput,
   ConversationScope,
   MemoryInput,
   MemoryRecord,
@@ -85,6 +87,16 @@ interface SummaryRow extends ScopedRow {
   from_message_id: number | null;
   through_message_id: number;
   created_at: string;
+}
+
+interface CompletedTurnRow {
+  id: number;
+  chat_id: number;
+  user_id: number;
+  user_message_id: number;
+  assistant_message_id: number;
+  completed_at: string;
+  compacted_at: string | null;
 }
 
 interface ScopeQuery {
@@ -212,6 +224,18 @@ function summaryFromRow(row: SummaryRow): SummaryRecord {
   };
 }
 
+function completedTurnFromRow(row: CompletedTurnRow): CompletedTurn {
+  return {
+    id: row.id,
+    chatId: row.chat_id,
+    userId: row.user_id,
+    userMessageId: row.user_message_id,
+    assistantMessageId: row.assistant_message_id,
+    completedAt: row.completed_at,
+    compactedAt: row.compacted_at,
+  };
+}
+
 export class ContextStore {
   private readonly database: Database.Database;
 
@@ -323,6 +347,20 @@ export class ContextStore {
 
       CREATE INDEX IF NOT EXISTS idx_mia_memories_scope
         ON mia_memories(scope_type, user_id, chat_id, thread_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS mia_completed_turns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id INTEGER NOT NULL REFERENCES mia_chats(chat_id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES mia_users(telegram_user_id) ON DELETE CASCADE,
+        user_message_id INTEGER NOT NULL CHECK (user_message_id > 0),
+        assistant_message_id INTEGER NOT NULL CHECK (assistant_message_id > 0),
+        completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        compacted_at TEXT,
+        UNIQUE (chat_id, user_message_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mia_completed_turns_pending
+        ON mia_completed_turns(chat_id, compacted_at, id);
     `);
   }
 
@@ -478,6 +516,34 @@ export class ContextStore {
     return rows.map(messageFromRow);
   }
 
+  listMessagesAfter(scope: ConversationScope, afterMessageId: number | null, limit = 100): StoredMessage[] {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+      throw new RangeError("limit must be between 1 and 500");
+    }
+    if (afterMessageId !== null) requireSafeInteger(afterMessageId, "afterMessageId");
+    const { chatId, threadId } = conversationCoordinates(scope);
+    const rows = this.database.prepare(`
+      SELECT * FROM mia_messages
+      WHERE chat_id = ? AND thread_id = ? AND message_id > ?
+      ORDER BY message_id ASC
+      LIMIT ?
+    `).all(chatId, threadId, afterMessageId ?? 0, limit) as MessageRow[];
+    return rows.map(messageFromRow);
+  }
+
+  listMessagesBetween(scope: ConversationScope, fromMessageId: number, throughMessageId: number): StoredMessage[] {
+    requireSafeInteger(fromMessageId, "fromMessageId");
+    requireSafeInteger(throughMessageId, "throughMessageId");
+    if (throughMessageId < fromMessageId) throw new RangeError("throughMessageId must not precede fromMessageId");
+    const { chatId, threadId } = conversationCoordinates(scope);
+    const rows = this.database.prepare(`
+      SELECT * FROM mia_messages
+      WHERE chat_id = ? AND thread_id = ? AND message_id BETWEEN ? AND ?
+      ORDER BY message_id ASC
+    `).all(chatId, threadId, fromMessageId, throughMessageId) as MessageRow[];
+    return rows.map(messageFromRow);
+  }
+
   getReplyChain(chatId: number, messageId: number, maxDepth = 20): StoredMessage[] {
     if (!Number.isSafeInteger(maxDepth) || maxDepth < 1 || maxDepth > 100) {
       throw new RangeError("maxDepth must be between 1 and 100");
@@ -584,6 +650,88 @@ export class ContextStore {
     return rows.map(memoryFromRow);
   }
 
+  recordCompletedTurn(input: CompletedTurnInput): CompletedTurn {
+    requireSafeInteger(input.chatId, "chatId", true);
+    requireSafeInteger(input.userId, "userId");
+    requireSafeInteger(input.userMessageId, "userMessageId");
+    requireSafeInteger(input.assistantMessageId, "assistantMessageId");
+    this.database.prepare(`
+      INSERT INTO mia_completed_turns (chat_id, user_id, user_message_id, assistant_message_id)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(chat_id, user_message_id) DO UPDATE SET
+        assistant_message_id = excluded.assistant_message_id,
+        completed_at = CURRENT_TIMESTAMP
+    `).run(input.chatId, input.userId, input.userMessageId, input.assistantMessageId);
+    const row = this.database.prepare(`
+      SELECT * FROM mia_completed_turns WHERE chat_id = ? AND user_message_id = ?
+    `).get(input.chatId, input.userMessageId) as CompletedTurnRow | undefined;
+    if (!row) throw new Error("Failed to store completed turn");
+    return completedTurnFromRow(row);
+  }
+
+  listPendingCompletedTurns(chatId: number, limit = 10): CompletedTurn[] {
+    requireSafeInteger(chatId, "chatId", true);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError("limit must be between 1 and 100");
+    }
+    const rows = this.database.prepare(`
+      SELECT * FROM mia_completed_turns
+      WHERE chat_id = ? AND compacted_at IS NULL
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(chatId, limit) as CompletedTurnRow[];
+    return rows.map(completedTurnFromRow);
+  }
+
+  applyPrivateCompaction(input: {
+    chatId: number;
+    userId: number;
+    turnIds: readonly number[];
+    summary: string;
+    fromMessageId: number;
+    throughMessageId: number;
+    memories: readonly { category: string; content: string }[];
+  }): void {
+    requireSafeInteger(input.chatId, "chatId", true);
+    requireSafeInteger(input.userId, "userId");
+    requireSafeInteger(input.fromMessageId, "fromMessageId");
+    requireSafeInteger(input.throughMessageId, "throughMessageId");
+    if (input.turnIds.length === 0) throw new TypeError("turnIds must not be empty");
+    for (const id of input.turnIds) requireSafeInteger(id, "turnId");
+    const placeholders = input.turnIds.map(() => "?").join(", ");
+    const transaction = this.database.transaction(() => {
+      const pending = this.database.prepare(`
+        SELECT COUNT(*) AS count FROM mia_completed_turns
+        WHERE chat_id = ? AND user_id = ? AND compacted_at IS NULL AND id IN (${placeholders})
+      `).get(input.chatId, input.userId, ...input.turnIds) as { count: number };
+      if (pending.count !== input.turnIds.length) throw new Error("Compaction turns are no longer pending");
+
+      this.addSummary({
+        scope: { type: "private", chatId: input.chatId },
+        content: input.summary,
+        fromMessageId: input.fromMessageId,
+        throughMessageId: input.throughMessageId,
+      });
+      this.database.prepare(`
+        DELETE FROM mia_memories
+        WHERE scope_type = 'user' AND user_id = ? AND chat_id IS NULL AND thread_id = 0
+      `).run(input.userId);
+      for (const memory of input.memories) {
+        this.addMemory({
+          scope: { type: "user", userId: input.userId },
+          category: memory.category,
+          content: memory.content,
+          createdByUserId: input.userId,
+        });
+      }
+      this.database.prepare(`
+        UPDATE mia_completed_turns SET compacted_at = CURRENT_TIMESTAMP
+        WHERE id IN (${placeholders})
+      `).run(...input.turnIds);
+    });
+    transaction.immediate();
+  }
+
   clearConversation(scope: ConversationScope): void {
     const normalized = normalizeScope(scope);
     if (normalized.chatId === null) throw new TypeError("Conversation scope requires a chatId");
@@ -599,6 +747,9 @@ export class ContextStore {
         DELETE FROM mia_memories
         WHERE scope_type = ? AND chat_id = ? AND thread_id = ?
       `).run(normalized.type, normalized.chatId, normalized.threadId);
+      this.database.prepare(
+        "DELETE FROM mia_completed_turns WHERE chat_id = ?",
+      ).run(normalized.chatId);
     })();
   }
 

@@ -52,6 +52,9 @@ describe("Telegram context capture", () => {
       telegramUserId: 42,
       status: null,
     });
+    expect(contexts.upsertChat.mock.invocationCallOrder[0]).toBeLessThan(
+      contexts.upsertMember.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
     expect(contexts.saveMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: -1001,
       messageId: 7,
@@ -59,5 +62,63 @@ describe("Telegram context capture", () => {
       text: "大家好",
     }));
     expect(reply).not.toHaveBeenCalled();
+  });
+
+  it("stores the assistant reply before recording a successful private turn", async () => {
+    const contexts = {
+      upsertUser: vi.fn(),
+      upsertChat: vi.fn(),
+      upsertMember: vi.fn(),
+      saveMessage: vi.fn(),
+    };
+    const compactor = { recordSuccessfulPrivateTurn: vi.fn() };
+    const sendMessage = vi.fn().mockResolvedValue({
+      message_id: 8,
+      date: 1_788_333_601,
+      chat: { id: 42, type: "private", first_name: "Roma" },
+      from: { id: 100, is_bot: true, first_name: "Mia", username: "MiaAssistantBot" },
+      text: "你好，Roma",
+      reply_to_message: { message_id: 7 },
+    });
+    const handler = createTextHandler({
+      client: {
+        resolveAPIKey: vi.fn().mockResolvedValue("user-key"),
+        chat: vi.fn().mockResolvedValue("你好，Roma"),
+      } as unknown as APIMasterClient,
+      logger: createLogger("silent"),
+      settings: { getPreferences: vi.fn().mockReturnValue({
+        chatModel: "grok-4.5", visionModel: null, imageModel: "gpt-image-2", videoModel: "minimax-h3",
+      }) },
+      contexts,
+      compactor: compactor as never,
+    });
+
+    await handler({
+      update: { update_id: 100 },
+      chat: { id: 42, type: "private", first_name: "Roma" },
+      from: { id: 42, is_bot: false, first_name: "Roma", language_code: "zh-CN" },
+      message: {
+        message_id: 7,
+        date: 1_788_333_600,
+        chat: { id: 42, type: "private", first_name: "Roma" },
+        from: { id: 42, is_bot: false, first_name: "Roma", language_code: "zh-CN" },
+        text: "你好",
+      },
+      me: { id: 100, is_bot: true, first_name: "Mia", username: "MiaAssistantBot" },
+      api: { sendChatAction: vi.fn(), sendMessage },
+      reply: vi.fn(),
+    } as never);
+
+    expect(contexts.saveMessage).toHaveBeenCalledWith(expect.objectContaining({ messageId: 7, text: "你好" }));
+    expect(contexts.saveMessage).toHaveBeenCalledWith(expect.objectContaining({ messageId: 8, text: "你好，Roma" }));
+    expect(compactor.recordSuccessfulPrivateTurn).toHaveBeenCalledWith({
+      chatId: 42,
+      userId: 42,
+      userMessageId: 7,
+      assistantMessageId: 8,
+    });
+    expect(contexts.saveMessage.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      compactor.recordSuccessfulPrivateTurn.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
   });
 });

@@ -155,4 +155,38 @@ describe("context store", () => {
     expect(current.listMemories({ type: "topic", chatId: -1001, threadId: 10 })).toEqual([]);
     expect(current.listRecentMessages({ type: "topic", chatId: -1001, threadId: 20 })).toHaveLength(1);
   });
+
+  it("tracks completed turns and atomically applies a private compaction", () => {
+    const current = createStore();
+    current.upsertUser({ ...user, telegramUserId: 99, firstName: "Mia Bot", isBot: true });
+    current.saveMessage(message({ messageId: 1, text: "Call me Roma" }));
+    current.saveMessage(message({ messageId: 2, senderUserId: 99, replyToMessageId: 1, text: "Sure" }));
+    current.addMemory({ scope: { type: "user", userId: 42 }, category: "preference", content: "Old memory" });
+    const turn = current.recordCompletedTurn({
+      chatId: 42,
+      userId: 42,
+      userMessageId: 1,
+      assistantMessageId: 2,
+    });
+
+    expect(current.listPendingCompletedTurns(42)).toHaveLength(1);
+    current.applyPrivateCompaction({
+      chatId: 42,
+      userId: 42,
+      turnIds: [turn.id],
+      summary: "The user asked to be called Roma.",
+      fromMessageId: 1,
+      throughMessageId: 2,
+      memories: [{ category: "identity", content: "The user prefers to be called Roma" }],
+    });
+
+    expect(current.listPendingCompletedTurns(42)).toEqual([]);
+    expect(current.getLatestSummary({ type: "private", chatId: 42 })).toMatchObject({
+      content: "The user asked to be called Roma.",
+      throughMessageId: 2,
+    });
+    expect(current.listMemories({ type: "user", userId: 42 }).map((item) => item.content)).toEqual([
+      "The user prefers to be called Roma",
+    ]);
+  });
 });

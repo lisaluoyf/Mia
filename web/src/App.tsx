@@ -51,6 +51,10 @@ function displayName(user: BootstrapData["user"]): string {
   return [user.firstName, user.lastName].filter(Boolean).join(" ");
 }
 
+function sameModelId(left: string | null, right: string | null): boolean {
+  return left !== null && right !== null && left.toLowerCase() === right.toLowerCase();
+}
+
 interface ModelSheetProps {
   capability: PreferenceCapability;
   models: ModelOption[];
@@ -69,7 +73,7 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
       ? models.filter((model) => `${model.displayName} ${model.id} ${model.vendor}`.toLowerCase().includes(needle))
       : models;
     return [...matching].sort((left, right) => {
-      const selectedRank = Number(right.id === selected) - Number(left.id === selected);
+      const selectedRank = Number(sameModelId(right.id, selected)) - Number(sameModelId(left.id, selected));
       if (selectedRank !== 0) return selectedRank;
       const leftRecommended = capability === "vision" ? left.visionRecommended : left.recommended;
       const rightRecommended = capability === "vision" ? right.visionRecommended : right.recommended;
@@ -113,7 +117,7 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
           {filtered.length === 0 && <div className="empty-state">{t("noModels")}</div>}
           {filtered.map((model) => (
             <button
-              className={`model-option${selected === model.id ? " selected" : ""}`}
+              className={`model-option${sameModelId(selected, model.id) ? " selected" : ""}`}
               type="button"
               key={model.id}
               onClick={() => onSelect(model.id)}
@@ -128,9 +132,9 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
               {(capability === "vision" ? model.visionRecommended : model.recommended)
                 && <span className="recommended">{t("recommended")}</span>}
               <span className="selection-mark" aria-hidden="true">
-                {saving && selected !== model.id
+                {saving && !sameModelId(selected, model.id)
                   ? null
-                  : selected === model.id && <Check size={16} />}
+                  : sameModelId(selected, model.id) && <Check size={16} />}
               </span>
             </button>
           ))}
@@ -168,7 +172,7 @@ export function App({ t }: AppProps) {
   const saveSelection = async (capability: PreferenceCapability, model: string) => {
     if (!settings || !data || saving) return;
     const key = preferenceKeys[capability];
-    if (settings[key] === model) {
+    if (sameModelId(settings[key], model)) {
       setActive(null);
       return;
     }
@@ -239,8 +243,10 @@ export function App({ t }: AppProps) {
             const key = preferenceKeys[capability];
             const options = data.models.filter((model) => capability === "vision"
               ? model.capability === "chat" && model.supportsVision
-              : model.capability === capability);
-            const selected = options.find((model) => model.id === settings[key]);
+              : capability === "video"
+                ? model.capability === "video" && model.videoCapabilities !== undefined
+                : model.capability === capability);
+            const selected = options.find((model) => sameModelId(model.id, settings[key]));
             return (
               <button className="setting-row" type="button" key={capability} onClick={() => setActive(capability)} disabled={options.length === 0 || saving !== null}>
                 <span className={`capability-icon ${capability}`}><Icon size={20} aria-hidden="true" /></span>
@@ -265,7 +271,9 @@ export function App({ t }: AppProps) {
           capability={active}
           models={data.models.filter((model) => active === "vision"
             ? model.capability === "chat" && model.supportsVision
-            : model.capability === active)}
+            : active === "video"
+              ? model.capability === "video" && model.videoCapabilities !== undefined
+              : model.capability === active)}
           selected={settings[preferenceKeys[active]]}
           saving={saving === active}
           t={t}

@@ -31,7 +31,16 @@ function modelCatalogResponse() {
         { id: "grok-4.5", display_name: "Grok 4.5", vendor: "xAI", capability: "chat", recommended: true, supports_vision: false, vision_recommended: false, supported_endpoint_types: ["openai"] },
         { id: "gpt-5.5", display_name: "GPT-5.5", vendor: "OpenAI", capability: "chat", recommended: false, supports_vision: true, vision_recommended: true, supported_endpoint_types: ["openai"] },
         { id: "gpt-image-2", display_name: "GPT Image 2", vendor: "OpenAI", capability: "image", recommended: true, supported_endpoint_types: ["image-generation"] },
-        { id: "MiniMax-H3", display_name: "MiniMax H3", vendor: "MiniMax", capability: "video", recommended: true, supported_endpoint_types: ["openai-video"] },
+        {
+          id: "MiniMax-H3", display_name: "MiniMax H3", vendor: "MiniMax", capability: "video", recommended: true,
+          video_capabilities: {
+            modes: ["text_to_video", "image_to_video"],
+            duration_seconds: { min: 4, max: 15, default: 4 },
+            resolutions: ["768P"], default_resolution: "768P",
+            aspect_ratios: ["1:1", "16:9", "9:16"], default_aspect_ratio: "16:9", max_reference_images: 10,
+          },
+          supported_endpoint_types: ["openai-video"],
+        },
       ],
     },
   });
@@ -86,6 +95,15 @@ describe("Mini App routes", () => {
     expect(saved.statusCode).toBe(200);
     const reread = await app.inject({ method: "GET", url: "/mia/api/settings", headers });
     expect(reread.json()).toMatchObject({ data: { chatModel: "gpt-5.5", visionModel: "gpt-5.5", videoModel: "MiniMax-H3" } });
+
+    const invalidVision = await app.inject({
+      method: "PUT",
+      url: "/mia/api/settings",
+      headers,
+      payload: { chatModel: "gpt-5.5", visionModel: "grok-4.5", imageModel: "gpt-image-2", videoModel: "minimax-h3" },
+    });
+    expect(invalidVision.statusCode).toBe(422);
+    expect(invalidVision.json()).toMatchObject({ code: "invalid_model", field: "vision" });
 
     const legacySave = await app.inject({
       method: "PUT",

@@ -20,14 +20,18 @@ export interface SettingsSnapshot extends ModelCatalog {
   unavailable: ModelPreferenceCapability[];
 }
 
-function sameModel(left: string | null, right: string | null): boolean {
+export function sameModelId(left: string | null, right: string | null): boolean {
   return left !== null && right !== null && left.toLowerCase() === right.toLowerCase();
 }
 
 function candidatesFor(capability: ModelPreferenceCapability, catalog: ModelCatalog): ModelOption[] {
-  return catalog.models.filter((model) => capability === "vision"
-    ? model.capability === "chat" && model.supportsVision
-    : model.capability === capability);
+  return catalog.models.filter((model) => (
+    capability === "vision"
+      ? model.capability === "chat" && model.supportsVision
+      : capability === "video"
+        ? model.capability === "video" && model.videoCapabilities !== undefined
+        : model.capability === capability
+  ));
 }
 
 function availableModel(
@@ -36,12 +40,12 @@ function availableModel(
   catalog: ModelCatalog,
 ): string | null {
   const candidates = candidatesFor(capability, catalog);
-  const requestedModel = requested && candidates.find((model) => sameModel(model.id, requested));
+  const requestedModel = requested && candidates.find((model) => sameModelId(model.id, requested));
   if (requestedModel) {
     return requestedModel.id;
   }
   const defaultModel = DEFAULT_PREFERENCES[preferenceKey(capability)];
-  const catalogDefault = defaultModel && candidates.find((model) => sameModel(model.id, defaultModel));
+  const catalogDefault = defaultModel && candidates.find((model) => sameModelId(model.id, defaultModel));
   if (catalogDefault) {
     return catalogDefault.id;
   }
@@ -70,7 +74,7 @@ export class ModelSettingsService {
       const key = preferenceKey(capability);
       const selected = stored[key];
       const effective = availableModel(selected, capability, catalog);
-      if (selected && (!effective || !sameModel(selected, effective))) {
+      if (selected && (!effective || !sameModelId(selected, effective))) {
         unavailable.push(capability);
       }
       normalized[key] = effective;
@@ -86,7 +90,7 @@ export class ModelSettingsService {
       const selected = preferences[key];
       const canonical = selected === null
         ? undefined
-        : candidatesFor(capability, catalog).find((model) => sameModel(model.id, selected));
+        : candidatesFor(capability, catalog).find((model) => sameModelId(model.id, selected));
       if (selected && !canonical) {
         throw new InvalidModelPreferenceError(capability);
       }

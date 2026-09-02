@@ -1,0 +1,237 @@
+export const BOT_LOCALES = [
+  "ar", "cs", "de", "en", "es", "fa", "fr", "hi", "id", "it", "ja", "ko", "ms", "nl", "pl",
+  "pt", "pt-BR", "ru", "th", "tr", "uk", "uz", "vi", "zh-CN", "zh-TW",
+] as const;
+
+export type BotLocale = typeof BOT_LOCALES[number];
+
+const ENGLISH = {
+  contextCleared: "Context cleared.",
+  maxImages: "Use at most 10 images. Please split the request; Mia did not discard any silently.",
+  imageActionQuestion: "What would you like me to do with the image: analyze it or modify it?",
+  mediaDisabled: "Media features are disabled in this group by an administrator.",
+  modelUnavailable: "Your saved {capability} model is unavailable. Mia will use {model}.",
+  noVisionModel: "No compatible vision model is available. Choose one in Mia settings.",
+  queuedImage: "Queued image generation...",
+  generatingNewImage: "Generating a new image...",
+  activeLimit: "You already have 3 media jobs in progress.",
+  requestAlready: "This request is already {status}.",
+  videoMetadataMissing: "The selected video model has no complete Mia capability metadata. Choose a supported model.",
+  unsupportedVideo: "Unsupported video parameters. This model supports 4-15 seconds, 768P, and 1:1 / 16:9 / 9:16.",
+  actionUnavailable: "This action is unavailable.",
+  videoQueuedShort: "Video queued",
+  videoQueued: "Video queued. Mia will deliver it here when ready.",
+  draftExpiredOrUsed: "This draft is expired or already used.",
+  cancelled: "Cancelled",
+  draftUnavailable: "Draft unavailable",
+  videoDraftCancelled: "Video draft cancelled.",
+  editInstruction: "Reply to the result with your edit instruction.",
+  draftCreated: "Draft created",
+  jobsAlreadyRunning: "3 media jobs are already running.",
+  queued: "Queued",
+  originalUnavailable: "The original file is unavailable.",
+  sent: "Sent",
+  downloadUnavailable: "Download unavailable.",
+  adminOnly: "Only group administrators can change media settings.",
+  mediaEnabled: "Mia media features are enabled.",
+  mediaDisabledConfirmation: "Mia media features are disabled.",
+  chatModelFallback: "The selected model {selected} is unavailable. Using {model} for this reply.",
+  videoDraftTitle: "Video draft (not charged)",
+  modelLabel: "Model: {value}",
+  modeLabel: "Mode: {value}",
+  modeTextToVideo: "Text to video",
+  modeImageToVideo: "Image to video",
+  promptLabel: "Prompt: {value}",
+  durationLabel: "Duration: {value} seconds",
+  aspectRatioLabel: "Aspect ratio: {value}",
+  resolutionLabel: "Resolution: {value}",
+  draftExpires: "Expires in 10 minutes.",
+  ratioButton: "Ratio",
+  generateVideoButton: "Generate video",
+  cancelButton: "Cancel",
+  clarificationImage: "Please send or reply to the image you want to use.",
+  clarificationQuestion: "What would you like to know about the image?",
+  clarificationInstruction: "What should Mia create or change?",
+  tooManyImages: "Use at most 10 images.",
+  fileTooLarge: "Each image must be 10 MB or smaller.",
+  totalTooLarge: "The images must total 30 MB or less. Please split the request.",
+  unsupportedImage: "One of the files is not a supported image.",
+  telegramNotBound: "Connect this Telegram account to APIMaster first, then try again.",
+  accountDisabled: "This APIMaster account is currently unavailable. Check the account status first.",
+  noUsableKey: "Your APIMaster account has no API Key available for {model}.",
+  quotaUnavailable: "This request could not be completed. Check your APIMaster quota and try again.",
+  serviceUnavailable: "The service is temporarily unavailable. Please try again later.",
+  temporaryError: "A temporary error occurred. Mia is still processing and will check again.",
+  videoDraftExpired: "This video draft expired.",
+  mediaTimedOut: "This media task timed out.",
+  submissionUnknown: "The request outcome could not be confirmed, so Mia did not submit it again.",
+  submitted: "Submitted. Mia will deliver the result here when it is ready.",
+  submissionFailed: "The media request could not be submitted. No automatic retry was made.",
+  generationFailed: "Media generation failed.",
+  stillProcessing: "Still processing{progress}...",
+  videoReadyLink: "Video ready: {url}",
+  generateAgain: "Generate again",
+  generateAnother: "Generate another",
+  continueEditing: "Continue editing",
+  downloadOriginal: "Download original",
+  share: "Share",
+  videoReady: "Video ready",
+  imageReady: "Image ready",
+} as const;
+
+export type BotMessageKey = keyof typeof ENGLISH;
+type MessageOverrides = Partial<Record<BotMessageKey, string>>;
+
+const CHINESE_SIMPLIFIED: MessageOverrides = {
+  contextCleared: "上下文已清除。",
+  maxImages: "一次最多使用 10 张图片，请拆分后重试；Mia 不会静默丢弃图片。",
+  imageActionQuestion: "你想让我分析这张图片，还是修改它？",
+  mediaDisabled: "管理员已关闭本群的媒体功能。",
+  modelUnavailable: "你保存的{capability}模型不可用，Mia 将改用 {model}。",
+  noVisionModel: "目前没有兼容的视觉模型，请在 Mia 设置中选择一个。",
+  queuedImage: "图片生成任务已排队……",
+  generatingNewImage: "正在生成新图片……",
+  activeLimit: "你已经有 3 个媒体任务正在处理。",
+  requestAlready: "这个请求已处于“{status}”状态。",
+  videoMetadataMissing: "所选视频模型缺少完整的 Mia 能力信息，请选择受支持的模型。",
+  unsupportedVideo: "视频参数不受支持。此模型支持 4–15 秒、768P，以及 1:1、16:9、9:16 画幅。",
+  actionUnavailable: "这个操作不可用。",
+  videoQueuedShort: "视频已排队",
+  videoQueued: "视频任务已排队，完成后 Mia 会发送到这里。",
+  draftExpiredOrUsed: "这个草稿已过期或已经使用。",
+  cancelled: "已取消",
+  draftUnavailable: "草稿不可用",
+  videoDraftCancelled: "视频草稿已取消。",
+  editInstruction: "请回复生成结果，并说明你想如何修改。",
+  draftCreated: "草稿已创建",
+  jobsAlreadyRunning: "已有 3 个媒体任务正在处理。",
+  queued: "已排队",
+  originalUnavailable: "原始文件不可用。",
+  sent: "已发送",
+  downloadUnavailable: "暂时无法下载。",
+  adminOnly: "只有群管理员可以更改媒体设置。",
+  mediaEnabled: "Mia 媒体功能已开启。",
+  mediaDisabledConfirmation: "Mia 媒体功能已关闭。",
+  chatModelFallback: "所选模型 {selected} 不可用，本次回复将使用 {model}。",
+  videoDraftTitle: "视频生成草稿（尚未扣费）",
+  modelLabel: "模型：{value}",
+  modeLabel: "模式：{value}",
+  modeTextToVideo: "文生视频",
+  modeImageToVideo: "图生视频",
+  promptLabel: "提示词：{value}",
+  durationLabel: "时长：{value} 秒",
+  aspectRatioLabel: "画幅：{value}",
+  resolutionLabel: "清晰度：{value}",
+  draftExpires: "草稿将在 10 分钟后过期。",
+  ratioButton: "切换画幅",
+  generateVideoButton: "生成视频",
+  cancelButton: "取消",
+  clarificationImage: "请发送或回复你想使用的图片。",
+  clarificationQuestion: "你想了解图片中的什么内容？",
+  clarificationInstruction: "你想让 Mia 创建或修改什么？",
+  tooManyImages: "一次最多使用 10 张图片。",
+  fileTooLarge: "每张图片不能超过 10 MB。",
+  totalTooLarge: "图片总大小不能超过 30 MB，请拆分后重试。",
+  unsupportedImage: "其中一个文件不是受支持的图片。",
+  telegramNotBound: "请先在 APIMaster 绑定这个 Telegram 账号，然后再试。",
+  accountDisabled: "这个 APIMaster 账号目前不可用，请先检查账号状态。",
+  noUsableKey: "你的 APIMaster 账号目前没有可用于 {model} 的 API Key。",
+  quotaUnavailable: "本次请求暂时无法完成，请检查 APIMaster 额度后再试。",
+  serviceUnavailable: "服务暂时不可用，请稍后再试。",
+  temporaryError: "发生了临时错误，Mia 仍在处理，稍后会再次检查。",
+  videoDraftExpired: "这个视频草稿已过期。",
+  mediaTimedOut: "媒体任务处理超时。",
+  submissionUnknown: "无法确认上游是否收到请求。为避免重复扣费，Mia 没有再次提交。",
+  submitted: "已提交，生成完成后 Mia 会把结果发送到这里。",
+  submissionFailed: "媒体请求提交失败，Mia 没有自动重试，以免重复扣费。",
+  generationFailed: "媒体生成失败。",
+  stillProcessing: "仍在处理中{progress}……",
+  videoReadyLink: "视频已生成：{url}",
+  generateAgain: "再次生成",
+  generateAnother: "再生成一张",
+  continueEditing: "继续修改",
+  downloadOriginal: "下载原图",
+  share: "分享",
+  videoReady: "视频已生成",
+  imageReady: "图片已生成",
+};
+
+const CHINESE_TRADITIONAL: MessageOverrides = {
+  ...CHINESE_SIMPLIFIED,
+  contextCleared: "對話內容已清除。",
+  queuedImage: "圖片生成任務已排隊……",
+  generatingNewImage: "正在生成新圖片……",
+  submitted: "已提交，生成完成後 Mia 會把結果傳送到這裡。",
+  stillProcessing: "仍在處理中{progress}……",
+  imageReady: "圖片已生成",
+  videoReady: "影片已生成",
+  generateAgain: "再次生成",
+  generateAnother: "再生成一張",
+  continueEditing: "繼續修改",
+  downloadOriginal: "下載原圖",
+  share: "分享",
+  ratioButton: "切換畫幅",
+  generateVideoButton: "生成影片",
+  cancelButton: "取消",
+};
+
+// Core asynchronous media copy is localized for every language offered by the Mini App.
+// Less common administrative and validation copy falls back to English unless overridden.
+const CORE_TRANSLATIONS: Record<Exclude<BotLocale, "en" | "zh-CN" | "zh-TW">, MessageOverrides> = {
+  ar: { queuedImage: "تمت إضافة مهمة إنشاء الصورة إلى قائمة الانتظار…", submitted: "تم الإرسال. سترسل Mia النتيجة هنا عندما تصبح جاهزة.", imageReady: "الصورة جاهزة", videoReady: "الفيديو جاهز", generateAgain: "إنشاء مرة أخرى", generateAnother: "إنشاء صورة أخرى", continueEditing: "متابعة التعديل", downloadOriginal: "تنزيل الأصل", share: "مشاركة", stillProcessing: "لا تزال المعالجة جارية{progress}…", generationFailed: "فشل إنشاء الوسائط.", temporaryError: "حدث خطأ مؤقت. لا تزال Mia تعالج الطلب وستتحقق مرة أخرى.", activeLimit: "لديك بالفعل 3 مهام وسائط قيد التنفيذ." },
+  cs: { queuedImage: "Generování obrázku bylo zařazeno do fronty…", submitted: "Odesláno. Mia sem výsledek po dokončení doručí.", imageReady: "Obrázek je připraven", videoReady: "Video je připraveno", generateAgain: "Generovat znovu", generateAnother: "Generovat další", continueEditing: "Pokračovat v úpravách", downloadOriginal: "Stáhnout originál", share: "Sdílet", stillProcessing: "Stále se zpracovává{progress}…", generationFailed: "Generování médií selhalo.", temporaryError: "Došlo k dočasné chybě. Mia požadavek stále zpracovává a zkusí to znovu.", activeLimit: "Již máte 3 probíhající mediální úlohy." },
+  de: { queuedImage: "Bildgenerierung wurde eingereiht…", submitted: "Übermittelt. Mia sendet das Ergebnis hierher, sobald es fertig ist.", imageReady: "Bild ist fertig", videoReady: "Video ist fertig", generateAgain: "Erneut generieren", generateAnother: "Weiteres generieren", continueEditing: "Weiter bearbeiten", downloadOriginal: "Original herunterladen", share: "Teilen", stillProcessing: "Wird noch verarbeitet{progress}…", generationFailed: "Mediengenerierung fehlgeschlagen.", temporaryError: "Ein vorübergehender Fehler ist aufgetreten. Mia verarbeitet weiter und prüft erneut.", activeLimit: "Du hast bereits 3 laufende Medienaufträge." },
+  es: { queuedImage: "Generación de imagen en cola…", submitted: "Enviado. Mia publicará el resultado aquí cuando esté listo.", imageReady: "Imagen lista", videoReady: "Vídeo listo", generateAgain: "Generar de nuevo", generateAnother: "Generar otra", continueEditing: "Seguir editando", downloadOriginal: "Descargar original", share: "Compartir", stillProcessing: "Aún procesando{progress}…", generationFailed: "Falló la generación del contenido.", temporaryError: "Se produjo un error temporal. Mia sigue procesando y volverá a comprobarlo.", activeLimit: "Ya tienes 3 tareas multimedia en curso." },
+  fa: { queuedImage: "درخواست ساخت تصویر در صف قرار گرفت…", submitted: "ارسال شد. Mia پس از آماده شدن نتیجه را اینجا می‌فرستد.", imageReady: "تصویر آماده است", videoReady: "ویدیو آماده است", generateAgain: "ساخت دوباره", generateAnother: "ساخت تصویر دیگر", continueEditing: "ادامه ویرایش", downloadOriginal: "دانلود نسخه اصلی", share: "اشتراک‌گذاری", stillProcessing: "همچنان در حال پردازش{progress}…", generationFailed: "ساخت رسانه ناموفق بود.", temporaryError: "خطای موقتی رخ داد. Mia همچنان در حال پردازش است و دوباره بررسی می‌کند.", activeLimit: "در حال حاضر ۳ کار رسانه‌ای در حال اجرا دارید." },
+  fr: { queuedImage: "Génération de l’image mise en attente…", submitted: "Envoyé. Mia publiera le résultat ici dès qu’il sera prêt.", imageReady: "Image prête", videoReady: "Vidéo prête", generateAgain: "Générer à nouveau", generateAnother: "Générer une autre", continueEditing: "Continuer les modifications", downloadOriginal: "Télécharger l’original", share: "Partager", stillProcessing: "Traitement en cours{progress}…", generationFailed: "La génération du média a échoué.", temporaryError: "Une erreur temporaire est survenue. Mia poursuit le traitement et vérifiera à nouveau.", activeLimit: "Vous avez déjà 3 tâches multimédias en cours." },
+  hi: { queuedImage: "इमेज जनरेशन कतार में जोड़ दिया गया है…", submitted: "सबमिट हो गया। तैयार होने पर Mia परिणाम यहीं भेजेगी।", imageReady: "इमेज तैयार है", videoReady: "वीडियो तैयार है", generateAgain: "फिर से बनाएँ", generateAnother: "एक और बनाएँ", continueEditing: "संपादन जारी रखें", downloadOriginal: "मूल डाउनलोड करें", share: "शेयर करें", stillProcessing: "अभी प्रोसेस हो रहा है{progress}…", generationFailed: "मीडिया जनरेशन विफल रहा।", temporaryError: "एक अस्थायी त्रुटि हुई। Mia अभी भी प्रोसेस कर रही है और फिर जाँच करेगी।", activeLimit: "आपके 3 मीडिया कार्य पहले से चल रहे हैं।" },
+  id: { queuedImage: "Pembuatan gambar masuk antrean…", submitted: "Terkirim. Mia akan mengirim hasilnya ke sini setelah siap.", imageReady: "Gambar siap", videoReady: "Video siap", generateAgain: "Buat lagi", generateAnother: "Buat gambar lain", continueEditing: "Lanjutkan pengeditan", downloadOriginal: "Unduh versi asli", share: "Bagikan", stillProcessing: "Masih diproses{progress}…", generationFailed: "Pembuatan media gagal.", temporaryError: "Terjadi kesalahan sementara. Mia masih memproses dan akan memeriksa lagi.", activeLimit: "Anda sudah memiliki 3 tugas media yang sedang berjalan." },
+  it: { queuedImage: "Generazione dell’immagine in coda…", submitted: "Inviato. Mia pubblicherà qui il risultato quando sarà pronto.", imageReady: "Immagine pronta", videoReady: "Video pronto", generateAgain: "Genera di nuovo", generateAnother: "Generane un’altra", continueEditing: "Continua a modificare", downloadOriginal: "Scarica originale", share: "Condividi", stillProcessing: "Elaborazione in corso{progress}…", generationFailed: "Generazione dei contenuti non riuscita.", temporaryError: "Si è verificato un errore temporaneo. Mia continua l’elaborazione e verificherà di nuovo.", activeLimit: "Hai già 3 attività multimediali in corso." },
+  ja: { queuedImage: "画像生成をキューに追加しました…", submitted: "送信しました。完了すると Mia がここに結果を送ります。", imageReady: "画像が完成しました", videoReady: "動画が完成しました", generateAgain: "もう一度生成", generateAnother: "もう1枚生成", continueEditing: "編集を続ける", downloadOriginal: "元データをダウンロード", share: "共有", stillProcessing: "処理中です{progress}…", generationFailed: "メディアの生成に失敗しました。", temporaryError: "一時的なエラーが発生しました。Mia は処理を続け、再度確認します。", activeLimit: "すでに3件のメディアタスクが処理中です。" },
+  ko: { queuedImage: "이미지 생성 작업이 대기열에 추가되었습니다…", submitted: "제출되었습니다. 완료되면 Mia가 여기에 결과를 보냅니다.", imageReady: "이미지가 준비되었습니다", videoReady: "동영상이 준비되었습니다", generateAgain: "다시 생성", generateAnother: "하나 더 생성", continueEditing: "계속 편집", downloadOriginal: "원본 다운로드", share: "공유", stillProcessing: "처리 중입니다{progress}…", generationFailed: "미디어 생성에 실패했습니다.", temporaryError: "일시적인 오류가 발생했습니다. Mia가 계속 처리하고 다시 확인합니다.", activeLimit: "이미 3개의 미디어 작업이 진행 중입니다." },
+  ms: { queuedImage: "Penjanaan imej dimasukkan dalam baris gilir…", submitted: "Telah dihantar. Mia akan menghantar hasil di sini apabila siap.", imageReady: "Imej sedia", videoReady: "Video sedia", generateAgain: "Jana semula", generateAnother: "Jana satu lagi", continueEditing: "Teruskan mengedit", downloadOriginal: "Muat turun asal", share: "Kongsi", stillProcessing: "Masih diproses{progress}…", generationFailed: "Penjanaan media gagal.", temporaryError: "Ralat sementara berlaku. Mia masih memproses dan akan menyemak semula.", activeLimit: "Anda sudah mempunyai 3 tugas media yang sedang berjalan." },
+  nl: { queuedImage: "Afbeelding genereren staat in de wachtrij…", submitted: "Verzonden. Mia plaatst het resultaat hier zodra het klaar is.", imageReady: "Afbeelding is klaar", videoReady: "Video is klaar", generateAgain: "Opnieuw genereren", generateAnother: "Nog een genereren", continueEditing: "Verder bewerken", downloadOriginal: "Origineel downloaden", share: "Delen", stillProcessing: "Nog bezig{progress}…", generationFailed: "Media genereren is mislukt.", temporaryError: "Er is een tijdelijke fout opgetreden. Mia verwerkt de taak nog en controleert opnieuw.", activeLimit: "Je hebt al 3 mediataken in uitvoering." },
+  pl: { queuedImage: "Generowanie obrazu dodano do kolejki…", submitted: "Wysłano. Mia dostarczy wynik tutaj, gdy będzie gotowy.", imageReady: "Obraz jest gotowy", videoReady: "Film jest gotowy", generateAgain: "Wygeneruj ponownie", generateAnother: "Wygeneruj kolejny", continueEditing: "Kontynuuj edycję", downloadOriginal: "Pobierz oryginał", share: "Udostępnij", stillProcessing: "Nadal przetwarzam{progress}…", generationFailed: "Generowanie multimediów nie powiodło się.", temporaryError: "Wystąpił tymczasowy błąd. Mia nadal przetwarza zadanie i sprawdzi ponownie.", activeLimit: "Masz już 3 trwające zadania multimedialne." },
+  pt: { queuedImage: "Geração de imagem adicionada à fila…", submitted: "Enviado. A Mia publicará o resultado aqui quando estiver pronto.", imageReady: "Imagem pronta", videoReady: "Vídeo pronto", generateAgain: "Gerar novamente", generateAnother: "Gerar outra", continueEditing: "Continuar a editar", downloadOriginal: "Descarregar original", share: "Partilhar", stillProcessing: "Ainda a processar{progress}…", generationFailed: "A geração de multimédia falhou.", temporaryError: "Ocorreu um erro temporário. A Mia continua a processar e verificará novamente.", activeLimit: "Já tem 3 tarefas multimédia em curso." },
+  "pt-BR": { queuedImage: "Geração de imagem adicionada à fila…", submitted: "Enviado. A Mia publicará o resultado aqui quando estiver pronto.", imageReady: "Imagem pronta", videoReady: "Vídeo pronto", generateAgain: "Gerar novamente", generateAnother: "Gerar outra", continueEditing: "Continuar editando", downloadOriginal: "Baixar original", share: "Compartilhar", stillProcessing: "Ainda processando{progress}…", generationFailed: "A geração de mídia falhou.", temporaryError: "Ocorreu um erro temporário. A Mia continua processando e verificará novamente.", activeLimit: "Você já tem 3 tarefas de mídia em andamento." },
+  ru: { queuedImage: "Генерация изображения поставлена в очередь…", submitted: "Отправлено. Mia пришлёт результат сюда, когда он будет готов.", imageReady: "Изображение готово", videoReady: "Видео готово", generateAgain: "Создать снова", generateAnother: "Создать ещё", continueEditing: "Продолжить редактирование", downloadOriginal: "Скачать оригинал", share: "Поделиться", stillProcessing: "Обработка продолжается{progress}…", generationFailed: "Не удалось создать медиафайл.", temporaryError: "Произошла временная ошибка. Mia продолжает обработку и проверит ещё раз.", activeLimit: "У вас уже выполняются 3 медиазадачи." },
+  th: { queuedImage: "เพิ่มงานสร้างรูปภาพลงในคิวแล้ว…", submitted: "ส่งแล้ว Mia จะส่งผลลัพธ์ที่นี่เมื่อพร้อม", imageReady: "รูปภาพพร้อมแล้ว", videoReady: "วิดีโอพร้อมแล้ว", generateAgain: "สร้างอีกครั้ง", generateAnother: "สร้างเพิ่ม", continueEditing: "แก้ไขต่อ", downloadOriginal: "ดาวน์โหลดต้นฉบับ", share: "แชร์", stillProcessing: "กำลังประมวลผล{progress}…", generationFailed: "สร้างสื่อไม่สำเร็จ", temporaryError: "เกิดข้อผิดพลาดชั่วคราว Mia ยังประมวลผลอยู่และจะตรวจสอบอีกครั้ง", activeLimit: "คุณมีงานสื่อที่กำลังดำเนินการอยู่แล้ว 3 งาน" },
+  tr: { queuedImage: "Görsel oluşturma sıraya alındı…", submitted: "Gönderildi. Hazır olduğunda Mia sonucu buraya iletecek.", imageReady: "Görsel hazır", videoReady: "Video hazır", generateAgain: "Yeniden oluştur", generateAnother: "Bir tane daha oluştur", continueEditing: "Düzenlemeye devam et", downloadOriginal: "Orijinali indir", share: "Paylaş", stillProcessing: "İşlenmeye devam ediyor{progress}…", generationFailed: "Medya oluşturulamadı.", temporaryError: "Geçici bir hata oluştu. Mia işlemeye devam ediyor ve tekrar kontrol edecek.", activeLimit: "Zaten devam eden 3 medya göreviniz var." },
+  uk: { queuedImage: "Створення зображення додано до черги…", submitted: "Надіслано. Mia доставить результат сюди, коли він буде готовий.", imageReady: "Зображення готове", videoReady: "Відео готове", generateAgain: "Створити знову", generateAnother: "Створити ще", continueEditing: "Продовжити редагування", downloadOriginal: "Завантажити оригінал", share: "Поділитися", stillProcessing: "Обробка триває{progress}…", generationFailed: "Не вдалося створити медіафайл.", temporaryError: "Сталася тимчасова помилка. Mia продовжує обробку й перевірить ще раз.", activeLimit: "У вас уже виконується 3 медіазавдання." },
+  uz: { queuedImage: "Rasm yaratish navbatga qo‘shildi…", submitted: "Yuborildi. Tayyor bo‘lgach, Mia natijani shu yerga jo‘natadi.", imageReady: "Rasm tayyor", videoReady: "Video tayyor", generateAgain: "Qayta yaratish", generateAnother: "Yana birini yaratish", continueEditing: "Tahrirlashni davom ettirish", downloadOriginal: "Aslini yuklab olish", share: "Ulashish", stillProcessing: "Hali qayta ishlanmoqda{progress}…", generationFailed: "Media yaratilmadi.", temporaryError: "Vaqtinchalik xato yuz berdi. Mia ishlov berishni davom ettirib, yana tekshiradi.", activeLimit: "Sizda allaqachon 3 ta media vazifa bajarilmoqda." },
+  vi: { queuedImage: "Đã đưa tác vụ tạo ảnh vào hàng đợi…", submitted: "Đã gửi. Mia sẽ gửi kết quả tại đây khi hoàn tất.", imageReady: "Ảnh đã sẵn sàng", videoReady: "Video đã sẵn sàng", generateAgain: "Tạo lại", generateAnother: "Tạo thêm ảnh", continueEditing: "Tiếp tục chỉnh sửa", downloadOriginal: "Tải bản gốc", share: "Chia sẻ", stillProcessing: "Vẫn đang xử lý{progress}…", generationFailed: "Tạo nội dung đa phương tiện thất bại.", temporaryError: "Đã xảy ra lỗi tạm thời. Mia vẫn đang xử lý và sẽ kiểm tra lại.", activeLimit: "Bạn đã có 3 tác vụ đa phương tiện đang chạy." },
+};
+
+const LOCALE_SET = new Set<string>(BOT_LOCALES);
+
+export function resolveBotLocale(language?: string | null): BotLocale {
+  const normalized = language?.replaceAll("_", "-").toLowerCase() ?? "";
+  if (normalized.includes("hant") || /^zh-(tw|hk|mo)(-|$)/.test(normalized)) return "zh-TW";
+  if (normalized.startsWith("zh")) return "zh-CN";
+  if (normalized === "pt-br" || normalized.startsWith("pt-br-")) return "pt-BR";
+  const base = normalized.split("-")[0] ?? "";
+  return LOCALE_SET.has(base) ? base as BotLocale : "en";
+}
+
+function overrides(locale: BotLocale): MessageOverrides {
+  if (locale === "zh-CN") return CHINESE_SIMPLIFIED;
+  if (locale === "zh-TW") return CHINESE_TRADITIONAL;
+  if (locale === "en") return {};
+  return CORE_TRANSLATIONS[locale];
+}
+
+export function botText(
+  languageOrLocale: string | null | undefined,
+  key: BotMessageKey,
+  values: Readonly<Record<string, string | number>> = {},
+): string {
+  const locale = resolveBotLocale(languageOrLocale);
+  const template = overrides(locale)[key] ?? ENGLISH[key];
+  return template.replace(/\{([a-z_]+)\}/gi, (match, name: string) => (
+    Object.hasOwn(values, name) ? String(values[name]) : match
+  ));
+}
+
+export function mediaJobLocale(options: Readonly<Record<string, unknown>>, fallback?: string | null): BotLocale {
+  return resolveBotLocale(typeof options.locale === "string" ? options.locale : fallback);
+}
