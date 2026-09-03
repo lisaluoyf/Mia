@@ -64,7 +64,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 
 | 组件 | 当前基线 | 状态 |
 | --- | --- | --- |
-| Mia | `52918a6` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、专用群聊总结、媒体能力、Responses 自动 Web Search 和开发者 Debug 控制台 |
+| Mia | `f99cb8a` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、精简版专用群聊总结、媒体与贴纸能力、Responses 自动 Web Search 和开发者 Debug 控制台 |
 | APIMaster new-api | `9130c1d` | GHCR 镜像蓝绿部署，提供 Telegram 用户 Key 解析、规范化 Mia 模型目录、产品名和 Debug 身份解析 |
 | APIMaster Web | `7d62618` | Next.js PM2 双实例运行，提供登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
 | Mini App | `/mia/` | 已由 Nginx 公开，Telegram 默认菜单按钮 `Mia` 已配置 |
@@ -320,6 +320,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - Mia 免费文字聊天：提交 `74dca62` 已从 GitHub 精确 SHA 由生产服务器构建并发布，耗时 8 秒；未绑定或无可用 Token 的用户使用仅限 `gpt-5.4` 的部署凭证完成私聊、群聊、意图路由和上下文整理，媒体任务保持用户 Key 严格门控并提供三类激活入口。118/118 全量测试、Lint、前后端 TypeScript、生产构建和 `git diff --check` 通过；生产 `/health` 正常，PM2 `online` 且 0 次重启，访客 `gpt-5.4` 实际调用 HTTP 200，错误日志为空，服务器保留 3 个 release（2026-09-03）。
 - Mia Responses 与 Web Search：提交 `2a684df` 已从 GitHub 精确 SHA 由生产服务器构建并发布；核心意图判断和最终文字回复改用 `/v1/responses`，由 `gpt-5.4` 通过 `tool_choice: auto` 自主决定是否调用 `web_search`。119/119 全量测试、ESLint、前后端 TypeScript、生产构建和 `git diff --check` 通过；真实 APIMaster strict JSON Schema 请求 HTTP 200 并执行 1 次搜索，完整生产 `IntentRouter` 实测返回北京次日天气。Telegram 回复默认不展示引用来源，查询词、调用次数和隐藏来源保留在 Debug；生产 `/health` 正常，PM2 `online` 且 0 次重启，错误日志为空，APIMaster 只读生产冒烟 19/19 通过，未修改或重启 APIMaster Web 与 new-api（2026-09-03）。
 - Mia 专用群聊总结：提交 `52918a6` 已从 GitHub 精确 SHA 构建并发布到 `/srv/mia/releases/mia-git-52918a6efcb1-20260903T105633Z`；136/136 全量测试、ESLint、服务端与前端 TypeScript、生产构建和 `git diff --check` 通过。生产 Node.js 20.20.2、PM2 `online` 且 0 次重启，内部 `/health` 正常，SQLite 完整性为 `ok`，错误日志为空，Prompt Registry 已展示 `mia.group-summary@v1` 和 `mia.group-summary-input@v1`，APIMaster 只读冒烟 19/19 通过，服务器保留 3 个 release。尚待在 `Bot玩家` 群使用同一组问题完成真实对比验收（2026-09-03）。
+- Mia 精简群聊总结：提交 `f99cb8a` 已从最新 `main` 精确 SHA 发布到 `/srv/mia/releases/mia-git-f99cb8af579e-20260903T111437Z`；Prompt Registry 已升级为 `mia.group-summary@v2`。用户可见总结默认控制在一屏内，中文目标不超过约 500 字，核心话题最多 3 个，结论、待办和未决问题各最多 3 条，限制参与者与历史关联，并禁止跨栏目重复同一事实；滚动摘要和长期记忆仍保持完整。145/145 测试、ESLint、前后端 TypeScript、生产构建、`git diff --check` 和 APIMaster 只读冒烟 19/19 均通过；生产 PM2 `online`、0 次重启、健康检查正常且错误日志为空（2026-09-03）。
 - Mia `70c6774` 生产验收：服务器从 GitHub 精确 SHA 构建，内部 `/health` 返回 200，PM2 在线且 0 次重启，运行目录与 release 元数据均指向 `70c67745c9ff19d8fe6ea81ce4db3c3a1dbd8e22`；SQLite 完整性为 `ok`，`mia_user_onboarding`、`mia_summaries` 和 `mia_memories` 均存在，新进程错误日志为空。APIMaster Web、new-api、Flask 和静态资源只读冒烟为 19/19 通过，未修改或重启 APIMaster 主服务（2026-09-03）。
 
 ## 下一阶段优先级
