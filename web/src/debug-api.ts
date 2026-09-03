@@ -69,9 +69,9 @@ const previewRequests: DebugRequest[] = [
 
 function previewData() {
   const prompts: DebugPrompt[] = [
-    { id: "mia.system", version: 1, name: "Mia System", purpose: "聊天和视觉理解的基础行为规则", text: promptText },
-    { id: "mia.intent-router", version: 1, name: "Intent Router", purpose: "判断聊天、看图、图片和视频意图", text: `${promptText}\n\n你还负责判断用户当前请求属于哪种操作。` },
-    { id: "mia.context-compaction", version: 1, name: "Context Compaction", purpose: "每 10 轮整理长期记忆与滚动摘要", text: "你负责整理 Mia 的长期记忆和当前私聊的历史摘要。" },
+    { id: "mia.system", version: 1, name: "Mia 系统规则", purpose: "聊天和视觉理解的基础行为规则", text: promptText },
+    { id: "mia.intent-router", version: 1, name: "意图路由", purpose: "判断聊天、看图、图片和视频意图", text: `${promptText}\n\n你还负责判断用户当前请求属于哪种操作。` },
+    { id: "mia.context-compaction", version: 1, name: "上下文整理", purpose: "每 10 轮整理长期记忆与滚动摘要", text: "你负责整理 Mia 的长期记忆和当前私聊的历史摘要。" },
   ];
   const memory: DebugMemory = {
     memories: [
@@ -97,4 +97,3 @@ export async function loadDebugConsole(): Promise<{ requests: DebugRequest[]; pr
 export async function clearDebugRequests(): Promise<void> {
   await request<{ cleared: number }>("requests", { method: "DELETE" });
 }
-

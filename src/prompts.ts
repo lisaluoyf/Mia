@@ -96,28 +96,28 @@ export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
   {
     id: "mia.system",
     version: 1,
-    name: "Mia System",
+    name: "Mia 系统规则",
     purpose: "聊天、视觉理解和所有用户请求的基础行为规则",
     text: MIA_SYSTEM_PROMPT,
   },
   {
     id: "mia.intent-router",
     version: 1,
-    name: "Intent Router",
+    name: "意图路由",
     purpose: "判断聊天、看图、图片生成/编辑和视频生成意图",
     text: INTENT_ROUTER_SYSTEM_PROMPT,
   },
   {
     id: "mia.context-compaction",
     version: 1,
-    name: "Context Compaction",
+    name: "上下文整理",
     purpose: "每 10 轮整理长期记忆与滚动会话摘要",
     text: CONTEXT_COMPACTION_SYSTEM_PROMPT,
   },
   {
     id: "mia.context-compaction-input",
     version: 1,
-    name: "Context Compaction Input",
+    name: "上下文整理输入",
     purpose: "把已有记忆、已有摘要和最近 10 轮按固定结构交给压缩模型",
     text: contextCompactionInputPrompt({
       memories: "{{existing_memories}}",
