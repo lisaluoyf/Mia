@@ -68,6 +68,7 @@ describe("media worker transient regeneration status", () => {
       intervalMs: 1_000,
       resultMaxBytes: 10_000_000,
       publicBaseUrl: null,
+      botUsername: "MiaAssistantBot",
     });
 
     await worker.tick();
@@ -104,6 +105,7 @@ describe("media worker transient regeneration status", () => {
       intervalMs: 1_000,
       resultMaxBytes: 10_000_000,
       publicBaseUrl: null,
+      botUsername: "MiaAssistantBot",
     });
 
     await worker.tick();
@@ -131,6 +133,7 @@ describe("media worker transient regeneration status", () => {
       intervalMs: 1_000,
       resultMaxBytes: 10_000_000,
       publicBaseUrl: null,
+      botUsername: "MiaAssistantBot",
     });
 
     await worker.tick();
@@ -211,6 +214,7 @@ describe("media worker transient regeneration status", () => {
       intervalMs: 1_000,
       resultMaxBytes: 10_000_000,
       publicBaseUrl: null,
+      botUsername: "MiaAssistantBot",
     });
 
     await worker.tick();

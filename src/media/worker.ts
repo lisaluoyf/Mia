@@ -7,6 +7,11 @@ import type { DebugRecorder } from "../debug/recorder.js";
 import type { MediaStore } from "./store.js";
 import type { MediaJob } from "./types.js";
 import { dataUrl, downloadTelegramImages } from "./intake.js";
+import {
+  isStickerSetNameOccupied,
+  prepareTelegramSticker,
+  stickerSetName,
+} from "../stickers/service.js";
 import { botText, mediaJobLocale } from "../telegram/localization.js";
 
 interface WorkerOptions {
@@ -18,6 +23,7 @@ interface WorkerOptions {
   intervalMs: number;
   resultMaxBytes: number;
   publicBaseUrl: string | null;
+  botUsername: string;
   debug?: DebugRecorder;
 }
 
@@ -248,11 +254,9 @@ export class MediaWorker {
     if (state.resultBase64) {
       media = { bytes: new Uint8Array(Buffer.from(state.resultBase64, "base64")), mimeType: "image/png", filename: "mia-image.png" };
       if (media.bytes.byteLength > this.options.resultMaxBytes) throw new Error("content_too_large");
-      this.options.store.saveLocalResult(job.id, media.bytes);
     } else if (state.resultUrl) {
       try {
         media = await this.options.client.getContent(apiKey, state.resultUrl, this.options.resultMaxBytes);
-        this.options.store.saveLocalResult(job.id, media.bytes);
       } catch (error) {
         if (job.type === "video_generate" && errorCode(error) === "content_too_large" && this.options.publicBaseUrl) {
           const token = this.options.store.createAccessToken("download", job.id);
@@ -271,6 +275,13 @@ export class MediaWorker {
     } else {
       throw new Error("missing_media_result");
     }
+    if (stringOption(job.options.outputMode, "") === "telegram_sticker") {
+      const sticker = await prepareTelegramSticker(media.bytes);
+      this.options.store.saveLocalResult(job.id, sticker);
+      await this.deliverSticker(job, state, sticker);
+      return;
+    }
+    this.options.store.saveLocalResult(job.id, media.bytes);
     const input = new InputFile(media.bytes, media.filename);
     const keyboard = new InlineKeyboard()
       .text(botText(locale, job.type === "video_generate" ? "generateAgain" : "generateAnother"), `media:${job.id}:again`)
@@ -347,6 +358,54 @@ export class MediaWorker {
       resultMimeType: media.mimeType,
       resultTelegramFileId: file?.file_id ?? null,
       resultTelegramUniqueId: file?.file_unique_id ?? null,
+    });
+  }
+
+  private async deliverSticker(
+    job: MediaJob,
+    state: NormalizedTaskStatus,
+    bytes: Uint8Array,
+  ): Promise<void> {
+    if (job.chatId !== job.telegramUserId) throw new Error("sticker_private_only");
+    const locale = mediaJobLocale(job.options);
+    const setName = stickerSetName(job.telegramUserId, job.id, this.options.botUsername);
+    const title = stringOption(job.options.stickerTitle, "Mia Sticker");
+    try {
+      await this.options.api.createNewStickerSet(
+        job.telegramUserId,
+        setName,
+        title,
+        [{
+          sticker: new InputFile(bytes, "sticker.webp"),
+          format: "static",
+          emoji_list: ["👍"],
+        }],
+        { sticker_type: "regular" },
+      );
+    } catch (error) {
+      if (!isStickerSetNameOccupied(error)) throw error;
+    }
+    const set = await this.options.api.getStickerSet(setName);
+    const sticker = set.stickers[0];
+    if (!sticker) throw new Error("empty_sticker_set");
+    const keyboard = new InlineKeyboard().url(
+      botText(locale, "addStickerPack"),
+      `https://t.me/addstickers/${setName}`,
+    );
+    const sent = await this.options.api.sendSticker(job.chatId, sticker.file_id, {
+      ...replyOptions(job),
+      reply_markup: keyboard,
+    });
+    if (hasEphemeralStatus(job) && job.statusMessageId) {
+      await this.options.api.deleteMessage(job.chatId, job.statusMessageId).catch(() => undefined);
+    }
+    this.options.store.transitionJob(job.id, [job.status], "succeeded", {
+      statusMessageId: sent.message_id,
+      progress: 100,
+      resultUrl: state.resultUrl,
+      resultMimeType: "image/webp",
+      resultTelegramFileId: sticker.file_id,
+      resultTelegramUniqueId: sticker.file_unique_id,
     });
   }
 

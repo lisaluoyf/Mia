@@ -90,6 +90,7 @@ function createWorker(publicBaseUrl: string | null) {
     intervalMs: 5_000,
     resultMaxBytes: 50_000_000,
     publicBaseUrl,
+    botUsername: "MiaAssistantBot",
   });
   return { worker, store, sendPhoto };
 }

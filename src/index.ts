@@ -106,6 +106,7 @@ async function main(): Promise<void> {
     intervalMs: config.mediaWorkerIntervalMs,
     resultMaxBytes: config.mediaResultMaxBytes,
     publicBaseUrl: config.publicBaseUrl,
+    botUsername: bot.botInfo.username,
     debug,
   });
   worker.start();

@@ -29,6 +29,7 @@ import { sameModelId, type ModelSettingsService, type SettingsSnapshot } from ".
 import type { ContextStore } from "../storage/store.js";
 import type { ConversationScope } from "../storage/types.js";
 import { MIA_SYSTEM_PROMPT, promptReference } from "../prompts.js";
+import { isStickerRequest, stickerPrompt, stickerSetTitle } from "../stickers/service.js";
 import { botText, mediaJobLocale, resolveBotLocale, type BotLocale } from "./localization.js";
 import { renderGroupSummaryHtml } from "./group-summary-html.js";
 import { userFacingError } from "./messages.js";
@@ -206,6 +207,16 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   const namedMediaReply = message.reply_to_message !== undefined && /^(?:@?mia)(?:\s|[,，:：])/i.test(request.text.trim());
   if (!shouldRespond(policyInput, identity) && !explicit && !namedMediaReply && !explicitSummaryPhrase) return;
 
+  const stickerIntent = request.inputs.length > 0 && isStickerRequest(request.text);
+  if (stickerIntent && message.chat.type !== "private") {
+    await replyTo(ctx, message, botText(locale, "stickerPrivateOnly"));
+    return;
+  }
+  if (stickerIntent && request.inputs.length !== 1) {
+    await replyTo(ctx, message, botText(locale, "stickerSingleImage"));
+    return;
+  }
+
   if (explicit?.command === "media_on" || explicit?.command === "media_off") {
     await handleMediaAdmin(ctx, explicit.command === "media_on", dependencies.mediaStore);
     return;
@@ -277,7 +288,9 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   let routerDebugId: string | null = null;
   let routerCredential: ChatCredential | null = null;
   let onboardingEligibility: OnboardingEligibility | null = null;
-  if (savedCallbackIntent?.success) {
+  if (stickerIntent) {
+    routed = directIntent("image_edit", stickerPrompt(request.text), "message");
+  } else if (savedCallbackIntent?.success) {
     routed = {
       ...savedCallbackIntent.data,
       instruction: request.text.trim(),
@@ -496,7 +509,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     return;
   }
   dependencies.mediaStore.clearPendingIntent(scopeFor(message));
-  await executeMediaIntent(ctx, message, routed, inputs, dependencies);
+  await executeMediaIntent(ctx, message, routed, inputs, dependencies, stickerIntent);
 }
 
 async function executeMediaIntent(
@@ -505,6 +518,7 @@ async function executeMediaIntent(
   routed: RoutedIntent,
   inputs: MediaInput[],
   dependencies: BotDependencies,
+  stickerIntent = false,
 ): Promise<void> {
   if (!message.from || !dependencies.mediaStore || !dependencies.botToken) return;
   const locale = resolveBotLocale(message.from.language_code);
@@ -580,7 +594,14 @@ async function executeMediaIntent(
       statusMessageId: status.message_id,
       model,
       instruction: routed.instruction,
-      options: { aspectRatio: routed.image_options?.aspect_ratio ?? "1:1", locale },
+      options: {
+        aspectRatio: routed.image_options?.aspect_ratio ?? "1:1",
+        locale,
+        ...(stickerIntent ? {
+          outputMode: "telegram_sticker",
+          stickerTitle: stickerSetTitle(message.from.first_name),
+        } : {}),
+      },
     }, inputs);
     if (claim.outcome === "limit_reached") {
       await ctx.api.editMessageText(message.chat.id, status.message_id, botText(locale, "activeLimit"));

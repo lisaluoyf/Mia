@@ -85,6 +85,9 @@ const ENGLISH = {
   share: "Share on X",
   videoReady: "Video ready",
   imageReady: "Image ready",
+  stickerPrivateOnly: "Sticker creation is currently available in a private chat with Mia only.",
+  stickerSingleImage: "Send one image at a time to create a sticker.",
+  addStickerPack: "Add sticker pack",
 } as const;
 
 export type BotMessageKey = keyof typeof ENGLISH;
@@ -170,6 +173,9 @@ const CHINESE_SIMPLIFIED: MessageOverrides = {
   share: "分享到 X",
   videoReady: "视频已生成",
   imageReady: "图片已生成",
+  stickerPrivateOnly: "贴纸生成功能目前只支持和 Mia 私聊。",
+  stickerSingleImage: "一次请只发一张图片来制作贴纸。",
+  addStickerPack: "添加贴纸包",
 };
 
 const CHINESE_TRADITIONAL: MessageOverrides = {
@@ -180,6 +186,9 @@ const CHINESE_TRADITIONAL: MessageOverrides = {
   submitted: "已提交，生成完成後 Mia 會把結果傳送到這裡。",
   stillProcessing: "仍在處理中{progress}……",
   imageReady: "圖片已生成",
+  stickerPrivateOnly: "貼紙生成功能目前只支援與 Mia 私聊。",
+  stickerSingleImage: "一次請只傳送一張圖片來製作貼紙。",
+  addStickerPack: "加入貼紙包",
   videoReady: "影片已生成",
   generateAgain: "再次生成",
   generateAnother: "再生成一張",
