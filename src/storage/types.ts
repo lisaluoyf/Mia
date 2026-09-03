@@ -63,6 +63,22 @@ export type MemoryScope =
   | { type: "topic"; chatId: number; threadId: number };
 
 export type ConversationScope = Exclude<MemoryScope, { type: "user" }>;
+export type GroupConversationScope = Extract<ConversationScope, { type: "group" | "topic" }>;
+
+export interface GroupFollowUpState {
+  scope: GroupConversationScope;
+  awakenedByUserId: number | null;
+  lastHandledAt: string;
+  evaluationWindowStartedAt: string;
+  evaluationCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type GroupFollowUpEvaluationClaim =
+  | { outcome: "claimed"; state: GroupFollowUpState }
+  | { outcome: "inactive"; state: null }
+  | { outcome: "rate_limited"; state: GroupFollowUpState };
 
 export interface MemoryInput {
   scope: MemoryScope;

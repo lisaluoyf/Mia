@@ -95,6 +95,10 @@ async function main(): Promise<void> {
     resultMaxBytes: config.mediaResultMaxBytes,
     debug,
     onboarding,
+    followUpCredential: {
+      apiKey: config.miaGuestChatApiKey,
+      model: config.miaGuestChatModel,
+    },
   });
   await bot.init();
   const worker = new MediaWorker({

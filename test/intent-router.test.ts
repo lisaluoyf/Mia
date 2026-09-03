@@ -240,6 +240,83 @@ describe("Mia intent router", () => {
     });
   });
 
+  it("silently observes unrelated messages in selective follow-up mode", async () => {
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      intent: "chat", should_respond: false, response_to_message_id: null,
+      confidence: 0.98, instruction: "", media_source: "none", media_message_ids: [],
+      image_options: null, video_options: null, reply: null,
+      conversation_mode: "casual", onboarding_opportunity: false, profile_updates: null,
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 1000 });
+
+    await expect(router.classify({
+      ...base,
+      text: "[message_id=21 sender_user_id=7]\n好的，我和小王继续聊",
+      participationMode: "selective",
+      followUpBatchMessageIds: [21],
+    }, "public-key")).resolves.toMatchObject({
+      should_respond: false,
+      response_to_message_id: null,
+    });
+    const messages = structuredResponse.mock.calls[0]?.[2] as Array<{ content: unknown }>;
+    const payload = JSON.parse(String(messages[1]?.content)) as Record<string, unknown>;
+    expect(payload.participation_mode).toBe("selective");
+    expect(payload.follow_up_batch_message_ids).toEqual([21]);
+  });
+
+  it("requires selective replies to target a real message in the current batch", async () => {
+    const validReply = {
+      version: 1 as const,
+      title: null,
+      blocks: [{ type: "paragraph" as const, heading: null, emoji: null, text: "可以，我继续处理。", items: [], ordered: false, language: null }],
+      actions: [],
+    };
+    const structuredResponse = vi.fn()
+      .mockResolvedValueOnce(response({
+        intent: "chat", should_respond: true, response_to_message_id: 22,
+        confidence: 0.99, instruction: "继续处理", media_source: "none", media_message_ids: [],
+        image_options: null, video_options: null, reply: validReply,
+        conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+      }))
+      .mockResolvedValueOnce(response({
+        intent: "chat", should_respond: true, response_to_message_id: 999,
+        confidence: 0.99, instruction: "继续处理", media_source: "none", media_message_ids: [],
+        image_options: null, video_options: null, reply: validReply,
+        conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+      }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 1000 });
+    const input = {
+      ...base,
+      participationMode: "selective" as const,
+      followUpBatchMessageIds: [21, 22],
+    };
+
+    await expect(router.classify(input, "public-key")).resolves.toMatchObject({
+      should_respond: true,
+      response_to_message_id: 22,
+    });
+    await expect(router.classify(input, "public-key")).resolves.toMatchObject({
+      should_respond: false,
+      response_to_message_id: null,
+      fallbackReason: "invalid_output",
+    });
+  });
+
+  it("keeps router failures silent in selective mode while preserving direct fallback", async () => {
+    const router = new IntentRouter({ structuredResponse: vi.fn().mockRejectedValue(new Error("timeout")) }, {
+      model: "gpt-5.4", timeoutMs: 1000,
+    });
+    await expect(router.classify({
+      ...base,
+      participationMode: "selective",
+      followUpBatchMessageIds: [21],
+    }, "public-key")).resolves.toMatchObject({ should_respond: false, fallbackReason: "router_unavailable" });
+    await expect(router.classify(base, "user-key")).resolves.toMatchObject({
+      should_respond: true,
+      fallbackReason: "router_unavailable",
+    });
+  });
+
   it("registers mia.system as a base module included once by the actual router prompt", () => {
     const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");

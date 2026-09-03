@@ -41,7 +41,7 @@ const memorySchema = z.object({
 const groupSummaryResultSchema = z.object({
   title: evidenceTextSchema,
   overview: evidenceTextSchema,
-  topics: z.array(topicSchema).max(3),
+  topics: z.array(topicSchema).max(5),
   decisions: z.array(evidenceTextSchema).max(3),
   todos: z.array(evidenceTextSchema).max(3),
   open_questions: z.array(evidenceTextSchema).max(3),
@@ -69,7 +69,7 @@ const GROUP_SUMMARY_JSON_SCHEMA = {
   properties: {
     title: evidenceTextJsonSchema,
     overview: evidenceTextJsonSchema,
-    topics: { type: "array", maxItems: 3, items: {
+    topics: { type: "array", maxItems: 5, items: {
       type: "object", additionalProperties: false, required: ["title", "detail", "source_message_ids"],
       properties: {
         title: { type: "string", minLength: 1, maxLength: 300 },

@@ -1,10 +1,25 @@
 import { z } from "zod";
 
 import type { APIMasterClient, MediaBinary, StructuredMessage, WebSearchUsage } from "../clients/apimaster.js";
+import { MIA_RESPONSE_JSON_SCHEMA, miaResponseFromText, miaResponseSchema } from "../presentation/schema.js";
 import { INTENT_ROUTER_SYSTEM_PROMPT } from "../prompts.js";
 
-export const mediaIntentSchema = z.object({
+function withLegacyReply(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if ("reply" in record || !("final_response" in record)) return value;
+  return {
+    ...record,
+    reply: typeof record.final_response === "string" && record.final_response.trim()
+      ? miaResponseFromText(record.final_response)
+      : null,
+  };
+}
+
+export const mediaIntentSchema = z.preprocess(withLegacyReply, z.object({
   intent: z.enum(["chat", "group_summary", "image_generate", "image_edit", "sticker_create", "vision_qa", "video_generate"]),
+  should_respond: z.boolean().optional().default(true),
+  response_to_message_id: z.number().int().positive().nullable().optional().default(null),
   confidence: z.number().min(0).max(1),
   instruction: z.string().max(8000),
   media_source: z.enum(["none", "message", "reply", "active_private_image", "context"]),
@@ -19,6 +34,7 @@ export const mediaIntentSchema = z.object({
     resolution: z.string().nullable(),
     image_roles: z.array(z.enum(["first_frame", "last_frame", "reference_image"])).max(10),
   }).nullable(),
+  reply: miaResponseSchema.nullable().optional().default(null),
   final_response: z.string().max(20000).nullable().optional().default(null),
   conversation_mode: z.enum(["casual", "task"]).optional().default("task"),
   onboarding_opportunity: z.boolean().optional().default(false),
@@ -27,7 +43,7 @@ export const mediaIntentSchema = z.object({
     primary_role: z.string().trim().min(1).max(500).nullable(),
     primary_goal: z.string().trim().min(1).max(1000).nullable(),
   }).strict().nullable().optional().default(null),
-}).strict();
+}).strict());
 
 export type MediaIntent = z.infer<typeof mediaIntentSchema>;
 export type IntentName = MediaIntent["intent"];
@@ -53,6 +69,15 @@ export interface RouterMediaCandidate {
 
 export interface IntentRouterInput {
   text: string;
+  participationMode?: "required" | "selective";
+  followUpBatchMessageIds?: readonly number[];
+  followUpContext?: {
+    scopeType: "group" | "topic";
+    chatId: number;
+    threadId: number | null;
+    awakenedByUserId: number | null;
+    lastHandledAt: string;
+  } | null;
   mediaType: "none" | "image" | "video";
   mediaCount: number;
   replyMediaCount: number;
@@ -81,11 +106,14 @@ const ROUTER_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: [
-    "intent", "confidence", "instruction", "media_source", "media_message_ids", "image_options", "video_options", "final_response",
+    "intent", "should_respond", "response_to_message_id", "confidence", "instruction", "media_source",
+    "media_message_ids", "image_options", "video_options", "reply",
     "conversation_mode", "onboarding_opportunity", "profile_updates",
   ],
   properties: {
     intent: { type: "string", enum: ["chat", "group_summary", "image_generate", "image_edit", "sticker_create", "vision_qa", "video_generate"] },
+    should_respond: { type: "boolean" },
+    response_to_message_id: { type: ["integer", "null"], minimum: 1 },
     confidence: { type: "number", minimum: 0, maximum: 1 },
     instruction: { type: "string" },
     media_source: { type: "string", enum: ["none", "message", "reply", "active_private_image", "context"] },
@@ -126,7 +154,7 @@ const ROUTER_SCHEMA = {
         },
       ],
     },
-    final_response: { type: ["string", "null"] },
+    reply: { anyOf: [{ type: "null" }, MIA_RESPONSE_JSON_SCHEMA] },
     conversation_mode: { type: "string", enum: ["casual", "task"] },
     onboarding_opportunity: { type: "boolean" },
     profile_updates: {
@@ -147,15 +175,21 @@ const ROUTER_SCHEMA = {
   },
 } as const;
 
-function fallback(reason: NonNullable<RoutedIntent["fallbackReason"]>): RoutedIntent {
+function fallback(
+  reason: NonNullable<RoutedIntent["fallbackReason"]>,
+  shouldRespond = true,
+): RoutedIntent {
   return {
     intent: "chat",
+    should_respond: shouldRespond,
+    response_to_message_id: null,
     confidence: 0,
     instruction: "",
     media_source: "none",
     media_message_ids: [],
     image_options: null,
     video_options: null,
+    reply: null,
     final_response: null,
     conversation_mode: "task",
     onboarding_opportunity: false,
@@ -208,9 +242,15 @@ export class IntentRouter {
       content_type: message.contentType ?? null,
       sent_at: message.sentAt ?? null,
     }));
+    const participationMode = input.participationMode ?? "required";
+    const followUpBatchMessageIds = [...new Set(input.followUpBatchMessageIds ?? [])];
+    const followUpContext = input.followUpContext ?? null;
     const contextPayload = {
       current_request_text: input.text,
       replied_message_text: input.repliedMessageText ?? null,
+      participation_mode: participationMode,
+      follow_up_batch_message_ids: followUpBatchMessageIds,
+      follow_up_context: followUpContext,
       media: { type: input.mediaType, count: input.mediaCount },
       reply_media_count: input.replyMediaCount,
       reply_to_message_id: input.replyToMessageId ?? null,
@@ -245,6 +285,9 @@ export class IntentRouter {
         content: JSON.stringify({ current_request_routing_metadata: {
           current_request_text: input.text,
           replied_message_text: input.repliedMessageText ?? null,
+          participation_mode: participationMode,
+          follow_up_batch_message_ids: followUpBatchMessageIds,
+          follow_up_context: followUpContext,
           media: { type: input.mediaType, count: input.mediaCount },
           reply_media_count: input.replyMediaCount,
           reply_to_message_id: input.replyToMessageId ?? null,
@@ -277,10 +320,10 @@ export class IntentRouter {
       );
       raw = result.data;
       const parsed = mediaIntentSchema.safeParse(raw);
-      if (!parsed.success) return fallback("invalid_output");
+      if (!parsed.success) return fallback("invalid_output", participationMode !== "selective");
       return this.validatedResult(parsed.data, input, result.webSearch);
     } catch {
-      return fallback("router_unavailable");
+      return fallback("router_unavailable", participationMode !== "selective");
     }
   }
 
@@ -289,19 +332,42 @@ export class IntentRouter {
     input: IntentRouterInput,
     webSearch: WebSearchUsage,
   ): RoutedIntent {
-    if (intent.intent === "group_summary" && input.allowGroupSummary !== true) {
+    const selective = input.participationMode === "selective";
+    if (!selective && !intent.should_respond) {
       return fallback("invalid_output");
+    }
+    const allowedResponseIds = new Set(input.followUpBatchMessageIds ?? []);
+    if (selective && intent.should_respond &&
+        (intent.response_to_message_id === null || !allowedResponseIds.has(intent.response_to_message_id))) {
+      return fallback("invalid_output", false);
+    }
+    if ((!selective || !intent.should_respond) && intent.response_to_message_id !== null) {
+      return fallback("invalid_output", !selective);
+    }
+    if (!intent.should_respond) {
+      const validObservation = intent.intent === "chat" && intent.reply === null && intent.final_response === null &&
+        intent.media_source === "none" && (intent.media_message_ids?.length ?? 0) === 0 &&
+        intent.image_options === null && intent.video_options === null;
+      return validObservation ? {
+        ...intent,
+        media_message_ids: [],
+        missingRequired: [],
+        webSearch,
+      } : fallback("invalid_output", false);
+    }
+    if (intent.intent === "group_summary" && input.allowGroupSummary !== true) {
+      return fallback("invalid_output", !selective);
     }
     const allowedMediaIds = new Set((input.mediaCandidates ?? []).map((candidate) => candidate.messageId));
     const selectedMediaIds = [...new Set(intent.media_message_ids ?? [])].filter((messageId) => allowedMediaIds.has(messageId));
     const normalizedIntent = { ...intent, media_message_ids: selectedMediaIds };
-    const requiresFinalResponse = intent.intent === "chat" ||
+    const requiresReply = intent.intent === "chat" ||
       intent.intent === "vision_qa" && (input.mediaPixelsProvided === true || input.mediaCount > 0 || input.replyMediaCount > 0 || input.activePrivateImage);
-    if ((requiresFinalResponse && !intent.final_response?.trim()) || (!requiresFinalResponse && intent.final_response !== null)) {
-      return fallback("invalid_output");
+    if ((requiresReply && intent.reply === null) || (!requiresReply && intent.reply !== null)) {
+      return fallback("invalid_output", !selective);
     }
     if (intent.confidence < (this.options.confidenceThreshold ?? 0.65)) {
-      return { ...fallback("low_confidence"), instruction: input.text };
+      return { ...fallback("low_confidence", !selective), instruction: input.text };
     }
     return {
       ...normalizedIntent,

@@ -10,6 +10,9 @@ import type {
   CompletedTurn,
   CompletedTurnInput,
   ConversationScope,
+  GroupConversationScope,
+  GroupFollowUpEvaluationClaim,
+  GroupFollowUpState,
   MemoryInput,
   MemoryRecord,
   MemoryScope,
@@ -100,6 +103,17 @@ interface CompletedTurnRow {
   assistant_message_id: number;
   completed_at: string;
   compacted_at: string | null;
+}
+
+interface GroupFollowUpRow {
+  chat_id: number;
+  thread_id: number;
+  awakened_by_user_id: number | null;
+  last_handled_at: string;
+  evaluation_window_started_at: string;
+  evaluation_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 interface OnboardingRow {
@@ -251,6 +265,21 @@ function completedTurnFromRow(row: CompletedTurnRow): CompletedTurn {
     assistantMessageId: row.assistant_message_id,
     completedAt: row.completed_at,
     compactedAt: row.compacted_at,
+  };
+}
+
+function groupFollowUpFromRow(row: GroupFollowUpRow): GroupFollowUpState {
+  const scope: GroupConversationScope = row.thread_id === NO_THREAD
+    ? { type: "group", chatId: row.chat_id }
+    : { type: "topic", chatId: row.chat_id, threadId: row.thread_id };
+  return {
+    scope,
+    awakenedByUserId: row.awakened_by_user_id,
+    lastHandledAt: row.last_handled_at,
+    evaluationWindowStartedAt: row.evaluation_window_started_at,
+    evaluationCount: row.evaluation_count,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -423,7 +452,132 @@ export class ContextStore {
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS mia_group_follow_up_sessions (
+        chat_id INTEGER NOT NULL REFERENCES mia_chats(chat_id) ON DELETE CASCADE,
+        thread_id INTEGER NOT NULL DEFAULT 0 CHECK (thread_id >= 0),
+        awakened_by_user_id INTEGER REFERENCES mia_users(telegram_user_id) ON DELETE SET NULL,
+        last_handled_at TEXT NOT NULL,
+        evaluation_window_started_at TEXT NOT NULL,
+        evaluation_count INTEGER NOT NULL DEFAULT 0 CHECK (evaluation_count >= 0),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (chat_id, thread_id)
+      );
     `);
+  }
+
+  private getGroupFollowUpRow(scope: GroupConversationScope): GroupFollowUpRow | null {
+    const { chatId, threadId } = conversationCoordinates(scope);
+    const row = this.database.prepare(`
+      SELECT * FROM mia_group_follow_up_sessions WHERE chat_id = ? AND thread_id = ?
+    `).get(chatId, threadId) as GroupFollowUpRow | undefined;
+    return row ?? null;
+  }
+
+  wakeGroupFollowUp(
+    scope: GroupConversationScope,
+    awakenedByUserId: number,
+    now = new Date(),
+    rateWindowMs = 10 * 60 * 1_000,
+  ): GroupFollowUpState {
+    requireSafeInteger(awakenedByUserId, "awakenedByUserId");
+    const { chatId, threadId } = conversationCoordinates(scope);
+    const timestamp = now.toISOString();
+    return this.database.transaction(() => {
+      const current = this.getGroupFollowUpRow(scope);
+      const windowExpired = !current || now.getTime() - Date.parse(current.evaluation_window_started_at) >= rateWindowMs;
+      this.database.prepare(`
+        INSERT INTO mia_group_follow_up_sessions (
+          chat_id, thread_id, awakened_by_user_id, last_handled_at,
+          evaluation_window_started_at, evaluation_count
+        ) VALUES (?, ?, ?, ?, ?, 0)
+        ON CONFLICT(chat_id, thread_id) DO UPDATE SET
+          awakened_by_user_id = excluded.awakened_by_user_id,
+          last_handled_at = excluded.last_handled_at,
+          evaluation_window_started_at = ?,
+          evaluation_count = ?,
+          updated_at = CURRENT_TIMESTAMP
+      `).run(
+        chatId,
+        threadId,
+        awakenedByUserId,
+        timestamp,
+        timestamp,
+        windowExpired ? timestamp : current?.evaluation_window_started_at ?? timestamp,
+        windowExpired ? 0 : current?.evaluation_count ?? 0,
+      );
+      const state = this.getGroupFollowUpRow(scope);
+      if (!state) throw new Error("Failed to wake group follow-up session");
+      return groupFollowUpFromRow(state);
+    }).immediate();
+  }
+
+  getActiveGroupFollowUp(
+    scope: GroupConversationScope,
+    now = new Date(),
+    idleTimeoutMs = 10 * 60 * 1_000,
+  ): GroupFollowUpState | null {
+    const row = this.getGroupFollowUpRow(scope);
+    if (!row) return null;
+    if (now.getTime() - Date.parse(row.last_handled_at) < idleTimeoutMs) {
+      return groupFollowUpFromRow(row);
+    }
+    this.expireGroupFollowUp(scope);
+    return null;
+  }
+
+  claimGroupFollowUpEvaluation(
+    scope: GroupConversationScope,
+    now = new Date(),
+    idleTimeoutMs = 10 * 60 * 1_000,
+    rateWindowMs = 10 * 60 * 1_000,
+    rateLimit = 30,
+  ): GroupFollowUpEvaluationClaim {
+    if (!Number.isSafeInteger(rateLimit) || rateLimit < 1) throw new TypeError("rateLimit must be positive");
+    const { chatId, threadId } = conversationCoordinates(scope);
+    return this.database.transaction(() => {
+      const row = this.getGroupFollowUpRow(scope);
+      if (!row || now.getTime() - Date.parse(row.last_handled_at) >= idleTimeoutMs) {
+        if (row) this.database.prepare(
+          "DELETE FROM mia_group_follow_up_sessions WHERE chat_id = ? AND thread_id = ?",
+        ).run(chatId, threadId);
+        return { outcome: "inactive", state: null } as const;
+      }
+      const windowExpired = now.getTime() - Date.parse(row.evaluation_window_started_at) >= rateWindowMs;
+      const count = windowExpired ? 0 : row.evaluation_count;
+      const windowStartedAt = windowExpired ? now.toISOString() : row.evaluation_window_started_at;
+      if (count >= rateLimit) {
+        const state = windowExpired ? { ...row, evaluation_window_started_at: windowStartedAt, evaluation_count: count } : row;
+        return { outcome: "rate_limited", state: groupFollowUpFromRow(state) } as const;
+      }
+      this.database.prepare(`
+        UPDATE mia_group_follow_up_sessions SET
+          evaluation_window_started_at = ?, evaluation_count = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE chat_id = ? AND thread_id = ?
+      `).run(windowStartedAt, count + 1, chatId, threadId);
+      const claimed = this.getGroupFollowUpRow(scope);
+      if (!claimed) throw new Error("Failed to claim group follow-up evaluation");
+      return { outcome: "claimed", state: groupFollowUpFromRow(claimed) } as const;
+    }).immediate();
+  }
+
+  markGroupFollowUpHandled(scope: GroupConversationScope, now = new Date()): GroupFollowUpState | null {
+    const { chatId, threadId } = conversationCoordinates(scope);
+    const result = this.database.prepare(`
+      UPDATE mia_group_follow_up_sessions SET last_handled_at = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE chat_id = ? AND thread_id = ?
+    `).run(now.toISOString(), chatId, threadId);
+    if (result.changes === 0) return null;
+    const row = this.getGroupFollowUpRow(scope);
+    return row ? groupFollowUpFromRow(row) : null;
+  }
+
+  expireGroupFollowUp(scope: GroupConversationScope): boolean {
+    const { chatId, threadId } = conversationCoordinates(scope);
+    return this.database.prepare(
+      "DELETE FROM mia_group_follow_up_sessions WHERE chat_id = ? AND thread_id = ?",
+    ).run(chatId, threadId).changes > 0;
   }
 
   upsertUser(input: UserProfileInput): UserProfile {

@@ -13,6 +13,7 @@ import type { GroupSummaryService } from "../context/group-summary.js";
 import { debugContextLayers } from "../debug/context.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { DebugContextLayers, DebugRequestKind } from "../debug/types.js";
+import { FollowUpCoordinator } from "../follow-up/coordinator.js";
 import {
   mediaIntentSchema,
   type IntentRouter,
@@ -33,18 +34,18 @@ import {
 import { onboardingMissingFields, type OnboardingEligibility, type OnboardingService } from "../onboarding/service.js";
 import { sameModelId, type ModelSettingsService, type SettingsSnapshot } from "../settings/service.js";
 import type { ContextStore } from "../storage/store.js";
-import type { ConversationScope } from "../storage/types.js";
+import type { ConversationScope, GroupConversationScope, GroupFollowUpState } from "../storage/types.js";
 import { MIA_SYSTEM_PROMPT, promptReference } from "../prompts.js";
+import { miaResponseFromText, type MiaResponse } from "../presentation/schema.js";
+import { renderTelegramHtml } from "../presentation/telegram-html.js";
 import { stickerPrompt, stickerSetTitle } from "../stickers/service.js";
 import { botText, mediaJobLocale, resolveBotLocale, type BotLocale } from "./localization.js";
-import { renderGroupSummaryHtml } from "./group-summary-html.js";
+import { groupSummaryPresentation } from "./group-summary-html.js";
 import { userFacingError } from "./messages.js";
 import { promptFromMessage, shouldRespond } from "./policy.js";
-import { splitText } from "./split-text.js";
 
 type TextContext = Filter<Context, "message:text">;
-type EditedTextContext = Filter<Context, "edited_message:text">;
-type StorableMessage = Message.TextMessage | Message.PhotoMessage | Message.DocumentMessage | EditedTextContext["editedMessage"];
+type StorableMessage = Message.TextMessage | Message.PhotoMessage | Message.DocumentMessage | Message.StickerMessage;
 
 interface BotDependencies {
   client: APIMasterClient;
@@ -54,7 +55,9 @@ interface BotDependencies {
   contexts: Pick<ContextStore, "upsertUser" | "upsertChat" | "upsertMember" | "saveMessage"> &
     Partial<Pick<ContextStore,
       "listRecentMessages" | "getLatestSummary" | "clearConversation" | "listMemories" |
-      "listMessagesAfter" | "getMessage" | "getReplyChain" | "getUser" | "listPendingCompletedTurns">>;
+      "listMessagesAfter" | "getMessage" | "getReplyChain" | "getUser" | "listPendingCompletedTurns" |
+      "wakeGroupFollowUp" | "getActiveGroupFollowUp" | "claimGroupFollowUpEvaluation" |
+      "markGroupFollowUpHandled" | "expireGroupFollowUp">>;
   compactor?: ContextCompactor;
   groupCompactor?: GroupContextCompactor;
   groupSummary?: GroupSummaryService;
@@ -64,18 +67,36 @@ interface BotDependencies {
   resultMaxBytes?: number;
   debug?: DebugRecorder;
   onboarding?: OnboardingService;
+  followUpCredential?: Pick<ChatCredential, "apiKey" | "model">;
 }
 
-interface IncomingRequest {
+interface IncomingMessage {
   ctx: Context;
   message: Message;
   text: string;
   inputs: MediaInput[];
 }
 
+interface IncomingRequest extends IncomingMessage {
+  triggerMode?: "direct" | "active_follow_up";
+  batch?: readonly IncomingMessage[];
+  followUpState?: GroupFollowUpState;
+  onIntervention?: () => void;
+}
+
 type ContextReader = Pick<ContextStore,
   "getLatestSummary" | "listMemories" | "listMessagesAfter" | "listRecentMessages" |
   "getMessage" | "getReplyChain" | "getUser" | "listPendingCompletedTurns">;
+
+type FollowUpStore = Pick<ContextStore,
+  "wakeGroupFollowUp" | "getActiveGroupFollowUp" | "claimGroupFollowUpEvaluation" |
+  "markGroupFollowUpHandled" | "expireGroupFollowUp">;
+
+function followUpStore(dependencies: BotDependencies): FollowUpStore | null {
+  const store = dependencies.contexts as Partial<FollowUpStore>;
+  return store.wakeGroupFollowUp && store.getActiveGroupFollowUp && store.claimGroupFollowUpEvaluation &&
+    store.markGroupFollowUpHandled && store.expireGroupFollowUp ? store as FollowUpStore : null;
+}
 
 function mediaFromMessage(message: Message, position = 0): MediaInput | null {
   if ("photo" in message && message.photo.length > 0) {
@@ -136,6 +157,7 @@ function captureMessage(message: StorableMessage, contexts: BotDependencies["con
     contexts.upsertMember({ chatId: message.chat.id, telegramUserId: from.id, status: null });
   }
   const media = mediaFromMessage(message);
+  const contentType = media?.type ?? ("sticker" in message ? "sticker" : "document" in message ? "document" : "text");
   contexts.saveMessage({
     chatId: message.chat.id,
     messageId: message.message_id,
@@ -143,7 +165,7 @@ function captureMessage(message: StorableMessage, contexts: BotDependencies["con
     senderUserId: from?.id ?? null,
     senderChatId: message.sender_chat?.id ?? null,
     replyToMessageId: message.reply_to_message?.message_id ?? null,
-    contentType: media ? media.type : "text",
+    contentType,
     text: "text" in message ? message.text : null,
     caption: "caption" in message ? message.caption ?? null : null,
     entitiesJson: "entities" in message && message.entities ? JSON.stringify(message.entities) :
@@ -257,9 +279,10 @@ export function createTextHandler(dependencies: BotDependencies) {
 }
 
 async function handleIncoming(request: IncomingRequest, dependencies: BotDependencies): Promise<void> {
-  const { ctx, message } = request;
+  let { ctx, message } = request;
   if (!message.from || !ctx.me || !dependencies.mediaStore) return;
-  const locale = resolveBotLocale(message.from.language_code);
+  const automaticFollowUp = request.triggerMode === "active_follow_up";
+  let locale = resolveBotLocale(message.from.language_code);
   const entities = "entities" in message ? message.entities : "caption_entities" in message ? message.caption_entities : undefined;
   const policyInput = {
     chatType: message.chat.type,
@@ -274,7 +297,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   const repliedMessageText = messageText(message.reply_to_message);
   const pending = dependencies.mediaStore.getPendingIntent?.(scopeFor(message)) ?? null;
   const suppliesPendingMedia = pending !== null && request.inputs.length > 0;
-  if (!shouldRespond(policyInput, identity) && !explicit && !namedMediaReply && !explicitSummaryPhrase && !suppliesPendingMedia) return;
+  if (!automaticFollowUp && !shouldRespond(policyInput, identity) && !explicit && !namedMediaReply &&
+      !explicitSummaryPhrase && !suppliesPendingMedia) return;
 
   if (explicit?.command === "media_on" || explicit?.command === "media_off") {
     await handleMediaAdmin(ctx, explicit.command === "media_on", dependencies.mediaStore);
@@ -335,12 +359,18 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     pending.sourceMessageIds.at(-1) === message.reply_to_message?.message_id;
   const savedCallbackIntent = callbackReply ? mediaIntentSchema.safeParse(pending.slots) : null;
 
-  if (request.inputs.length > 0 && await rejectUnavailableMediaUser(ctx, message, dependencies)) {
+  if (!automaticFollowUp && request.inputs.length > 0 && await rejectUnavailableMediaUser(ctx, message, dependencies)) {
     return;
   }
 
   if (request.inputs.length > 0 && request.text.trim() === "" && !pending) {
-    await replyTo(ctx, message, botText(locale, "imageActionQuestion"));
+    if (message.chat.type !== "private" && !dependencies.mediaStore.isGroupMediaEnabled(message.chat.id)) {
+      await replyTo(ctx, message, botText(locale, "mediaDisabled"));
+      return;
+    }
+    await replyTo(ctx, message, botText(locale, "imageActionQuestion"), {
+      reply_markup: imageActionKeyboard(message.from.id, message.message_id, locale),
+    });
     return;
   }
 
@@ -383,19 +413,19 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       : null;
     let debugId: string | null = null;
     try {
-      await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
-      routerCredential = await resolveTextCredential(
-        dependencies,
-        message.from.id,
-        dependencies.router.model,
-      );
+      if (!automaticFollowUp) {
+        await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
+      }
+      routerCredential = automaticFollowUp && dependencies.followUpCredential
+        ? { ...dependencies.followUpCredential, source: "guest", fallbackReason: null }
+        : await resolveTextCredential(dependencies, message.from.id, dependencies.router.model);
       const requestContext = await buildRequestContext(
         ctx,
         message,
         dependencies,
         activeInputs[0] ?? null,
         pending?.intent ?? null,
-        routerCredential.source === "user" ? new Set(inputs.map((input) => input.messageId)) : false,
+        !automaticFollowUp && routerCredential.source === "user" ? new Set(inputs.map((input) => input.messageId)) : false,
       );
       const fallbackImages = routerCredential.source === "user" && requestContext === null && inputs.length > 0
         ? await downloadTelegramImages(ctx.api, dependencies.botToken ?? "", inputs)
@@ -424,7 +454,12 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         })),
         details: {
           phase: "intent_and_response",
+          triggerMode: request.triggerMode ?? "direct",
+          followUpBatchMessageIds: request.batch?.map((item) => item.message.message_id) ?? [],
+          followUpScope: request.followUpState?.scope ?? null,
+          rateLimitOutcome: automaticFollowUp ? "claimed" : "not_applicable",
           credentialSource: routerCredential.source,
+          credentialPurpose: automaticFollowUp ? "public_follow_up" : "requester",
           credentialFallbackReason: routerCredential.fallbackReason,
           onboarding: onboardingEligibility ? {
             serverEligible: onboardingEligibility.eligible,
@@ -439,6 +474,15 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       routerDebugId = debugId;
       routed = await dependencies.router.classify({
         text: promptFromMessage(policyInput, identity),
+        participationMode: automaticFollowUp ? "selective" : "required",
+        followUpBatchMessageIds: request.batch?.map((item) => item.message.message_id) ?? [],
+        followUpContext: request.followUpState ? {
+          scopeType: request.followUpState.scope.type,
+          chatId: request.followUpState.scope.chatId,
+          threadId: request.followUpState.scope.type === "topic" ? request.followUpState.scope.threadId : null,
+          awakenedByUserId: request.followUpState.awakenedByUserId,
+          lastHandledAt: request.followUpState.lastHandledAt,
+        } : null,
         mediaType: inputs.length > 0 ? "image" : "none",
         mediaCount: request.inputs.length,
         replyMediaCount: replyInputs.length,
@@ -473,6 +517,9 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         responsePreview: routed,
         details: {
           phase: "intent_and_response",
+          triggerMode: request.triggerMode ?? "direct",
+          shouldRespond: routed.should_respond,
+          responseToMessageId: routed.response_to_message_id,
           routedIntent: routed.intent,
           selectedMediaMessageIds: routed.media_message_ids ?? [],
           fallbackReason: routed.fallbackReason ?? null,
@@ -486,11 +533,14 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         status: "failed",
         errorCode: debugErrorCode(error),
       });
-      await replyTo(ctx, message, error instanceof MediaInputError
-        ? mediaError(error, locale)
-        : userFacingError(error, dependencies.router.model, locale));
+      if (!automaticFollowUp) {
+        await replyTo(ctx, message, error instanceof MediaInputError
+          ? mediaError(error, locale)
+          : userFacingError(error, dependencies.router.model, locale));
+      }
       return;
     }
+    if (routed.should_respond === false) return;
     if (pending && routed.intent === "chat") {
       const saved = mediaIntentSchema.safeParse(pending.slots);
       if (saved.success) {
@@ -506,37 +556,54 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     }
   }
 
+  if (routed.should_respond === false) return;
+  if (automaticFollowUp) {
+    const target = request.batch?.find((item) => item.message.message_id === routed.response_to_message_id);
+    if (!target?.message.from) return;
+    ctx = target.ctx;
+    message = target.message;
+    locale = resolveBotLocale(target.message.from.language_code);
+    await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
+  }
+  const responseSender = message.from;
+  if (!responseSender) return;
+
   if (routed.intent === "group_summary") {
     await handleGroupSummary(ctx, message, dependencies, locale);
+    request.onIntervention?.();
     return;
   }
 
   if (routed.intent === "sticker_create" && message.chat.type !== "private") {
     await replyTo(ctx, message, botText(locale, "stickerPrivateOnly"));
+    request.onIntervention?.();
     return;
   }
   if (routed.intent === "sticker_create" && inputs.length > 1) {
     await replyTo(ctx, message, botText(locale, "stickerSingleImage"));
+    request.onIntervention?.();
     return;
   }
 
-  if (routerCredential?.source === "guest" && isMediaIntent(routed.intent)) {
+  if (!automaticFollowUp && routerCredential?.source === "guest" && isMediaIntent(routed.intent)) {
     await replyMediaAccessError(
       ctx,
       message,
       new ResolverError(routerCredential.fallbackReason ?? "no_usable_api_key"),
       locale,
     );
+    request.onIntervention?.();
     return;
   }
 
   if (routed.intent === "chat") {
-    if (routed.final_response) {
-      const assistantMessageId = await sendConversationResponse(ctx, message, routed.final_response, dependencies);
+    const response = routed.reply ?? routed.final_response;
+    if (response) {
+      const assistantMessageId = await sendConversationResponse(ctx, message, response, dependencies);
       recordCompletedChatTurn(message, assistantMessageId, dependencies);
       if (assistantMessageId !== null) recordSuccessfulGroupTrigger(message, dependencies);
       if (assistantMessageId !== null && message.chat.type === "private" && dependencies.onboarding && routed.profile_updates) {
-        dependencies.onboarding.applyProfileUpdates(message.from.id, message.message_id, {
+        dependencies.onboarding.applyProfileUpdates(responseSender.id, message.message_id, {
           preferredName: routed.profile_updates.preferred_name,
           primaryRole: routed.profile_updates.primary_role,
           primaryGoal: routed.profile_updates.primary_goal,
@@ -555,6 +622,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           onboarding: onboardingDebugDetails(onboardingEligibility, routed, triggered),
         },
       });
+      if (assistantMessageId !== null) request.onIntervention?.();
     } else {
       await runChat(ctx, promptFromMessage(policyInput, identity), dependencies);
     }
@@ -562,11 +630,14 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   }
   if (message.chat.type !== "private" && !dependencies.mediaStore.isGroupMediaEnabled(message.chat.id)) {
     await replyTo(ctx, message, botText(locale, "mediaDisabled"));
+    request.onIntervention?.();
     return;
   }
-  if (routed.intent === "vision_qa" && routed.final_response) {
-    const assistantMessageId = await sendConversationResponse(ctx, message, routed.final_response, dependencies);
+  const visionResponse = routed.reply ?? routed.final_response;
+  if (routed.intent === "vision_qa" && visionResponse) {
+    const assistantMessageId = await sendConversationResponse(ctx, message, visionResponse, dependencies);
     if (assistantMessageId !== null) recordSuccessfulGroupTrigger(message, dependencies);
+    if (assistantMessageId !== null) request.onIntervention?.();
     return;
   }
 
@@ -585,12 +656,15 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       intent: routed.intent,
       slots: {
         intent: routed.intent,
+        should_respond: routed.should_respond,
+        response_to_message_id: routed.response_to_message_id,
         confidence: routed.confidence,
         instruction: routed.instruction,
         media_source: routed.media_source,
         media_message_ids: routed.media_message_ids ?? [],
         image_options: routed.image_options,
         video_options: routed.video_options,
+        reply: routed.reply,
         final_response: routed.final_response,
         conversation_mode: routed.conversation_mode,
         onboarding_opportunity: routed.onboarding_opportunity,
@@ -600,10 +674,12 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       sourceMessageIds: [message.message_id, ...inputs.map((input) => input.messageId)],
     });
     await replyTo(ctx, message, clarification(missing[0] ?? "instruction", locale));
+    request.onIntervention?.();
     return;
   }
   dependencies.mediaStore.clearPendingIntent(scopeFor(message));
-  await executeMediaIntent(ctx, message, routed, inputs, dependencies, stickerContinuation);
+  const handled = await executeMediaIntent(ctx, message, routed, inputs, dependencies, stickerContinuation);
+  if (handled) request.onIntervention?.();
 }
 
 async function executeMediaIntent(
@@ -613,10 +689,11 @@ async function executeMediaIntent(
   inputs: MediaInput[],
   dependencies: BotDependencies,
   legacyStickerContinuation = false,
-): Promise<void> {
-  if (!message.from || !dependencies.mediaStore || !dependencies.botToken) return;
+): Promise<boolean> {
+  if (!message.from || !dependencies.mediaStore || !dependencies.botToken) return false;
   const locale = resolveBotLocale(message.from.language_code);
   let debugId: string | null = null;
+  let handled = false;
   try {
     const snapshot = dependencies.settings.getSnapshot
       ? await dependencies.settings.getSnapshot(message.from.id)
@@ -628,12 +705,13 @@ async function executeMediaIntent(
         capability,
         model: fallbackModel ?? "the recommended model",
       }));
+      handled = true;
     }
     if (routed.intent === "vision_qa") {
       const model = snapshot?.settings.visionModel;
       if (!model) {
         await replyTo(ctx, message, botText(locale, "noVisionModel"));
-        return;
+        return true;
       }
       await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
       const apiKey = await dependencies.client.resolveAPIKey(message.from.id, model);
@@ -673,21 +751,21 @@ async function executeMediaIntent(
       dependencies.debug?.finish(debugId, { status: "succeeded", responsePreview: response });
       const assistantMessageId = await sendConversationResponse(ctx, message, response, dependencies);
       if (assistantMessageId !== null) recordSuccessfulGroupTrigger(message, dependencies);
-      return;
+      return assistantMessageId !== null || handled;
     }
     if (routed.intent === "video_generate") {
       const model = snapshot?.settings.videoModel ??
         dependencies.settings.getPreferences(message.from.id).videoModel ?? DEFAULT_MODELS.video;
       await dependencies.client.resolveAPIKey(message.from.id, model);
-      await createVideoDraft(ctx, message, routed, inputs, snapshot, dependencies);
-      return;
+      return await createVideoDraft(ctx, message, routed, inputs, snapshot, dependencies) || handled;
     }
-    if (routed.intent !== "image_generate" && routed.intent !== "image_edit" && routed.intent !== "sticker_create") return;
+    if (routed.intent !== "image_generate" && routed.intent !== "image_edit" && routed.intent !== "sticker_create") return handled;
     const stickerOutput = routed.intent === "sticker_create" || legacyStickerContinuation;
     const model = snapshot?.settings.imageModel ?? dependencies.settings.getPreferences(message.from.id).imageModel ?? DEFAULT_MODELS.image;
     await dependencies.client.resolveAPIKey(message.from.id, model);
-    if (dependencies.mediaStore.getJobByIdempotencyKey(requestKey(message))) return;
+    if (dependencies.mediaStore.getJobByIdempotencyKey(requestKey(message))) return handled;
     const status = await replyTo(ctx, message, botText(locale, "stillProcessing", { progress: "" }));
+    handled = true;
     const claim = dependencies.mediaStore.claimJob({
       ...scopeFor(message),
       type: routed.intent === "sticker_create" ? "image_edit" : routed.intent,
@@ -712,9 +790,11 @@ async function executeMediaIntent(
         status: claim.job.status,
       }));
     }
+    return handled;
   } catch (error) {
     dependencies.debug?.finish(debugId, { status: "failed", errorCode: debugErrorCode(error) });
     await replyMediaAccessError(ctx, message, error, locale);
+    return true;
   }
 }
 
@@ -725,15 +805,15 @@ async function createVideoDraft(
   inputs: MediaInput[],
   snapshot: SettingsSnapshot | null,
   dependencies: BotDependencies,
-): Promise<void> {
-  if (!message.from || !dependencies.mediaStore) return;
+): Promise<boolean> {
+  if (!message.from || !dependencies.mediaStore) return false;
   const locale = resolveBotLocale(message.from.language_code);
   const model = snapshot?.settings.videoModel ?? dependencies.settings.getPreferences(message.from.id).videoModel ?? DEFAULT_MODELS.video;
   const modelOption = snapshot?.models.find((item) => sameModelId(item.id, model));
   const caps = modelOption?.videoCapabilities;
   if (snapshot && !caps) {
     await replyTo(ctx, message, botText(locale, "videoMetadataMissing"));
-    return;
+    return true;
   }
   const duration = routed.video_options?.duration_seconds ?? caps?.durationSeconds.default ?? 4;
   const ratio = routed.video_options?.aspect_ratio ?? caps?.defaultAspectRatio ?? "16:9";
@@ -742,7 +822,7 @@ async function createVideoDraft(
       !(caps?.aspectRatios ?? ["1:1", "16:9", "9:16"]).includes(ratio) ||
       !(caps?.resolutions ?? ["768P"]).includes(resolution) || inputs.length > (caps?.maxReferenceImages ?? 10)) {
     await replyTo(ctx, message, botText(locale, "unsupportedVideo"));
-    return;
+    return true;
   }
   const draft = dependencies.mediaStore.createDraft({
     ...scopeFor(message),
@@ -759,9 +839,10 @@ async function createVideoDraft(
       locale,
     },
   }, inputs);
-  if (draft.status !== "draft" || draft.statusMessageId !== null) return;
+  if (draft.status !== "draft" || draft.statusMessageId !== null) return false;
   const sent = await replyTo(ctx, message, videoDraftText(draft), { reply_markup: draftKeyboard(draft) });
   dependencies.mediaStore.updateDraft(draft.id, draft.options, sent.message_id);
+  return true;
 }
 
 function onboardingDebugDetails(
@@ -791,6 +872,73 @@ function onboardingRoleKeyboard(language?: string | null): InlineKeyboard {
     if (index % 2 === 1) keyboard.row();
   });
   return keyboard.text(copy.other, "onboard:other").text(copy.later, "onboard:defer");
+}
+
+function imageActionKeyboard(userId: number, messageId: number, locale: BotLocale): InlineKeyboard {
+  const prefix = `image_action:${userId}:${messageId}`;
+  return new InlineKeyboard()
+    .text(botText(locale, "analyzeImageButton"), `${prefix}:analyze`)
+    .text(botText(locale, "editImageButton"), `${prefix}:edit`).row()
+    .text(botText(locale, "animateImageButton"), `${prefix}:video`);
+}
+
+async function handleImageActionCallback(ctx: Context, dependencies: BotDependencies): Promise<boolean> {
+  const query = ctx.callbackQuery;
+  const message = query?.message;
+  if (!query?.data || !query.from || !message || !dependencies.mediaStore) return false;
+  const match = /^image_action:(\d+):(\d+):(analyze|edit|video)$/.exec(query.data);
+  if (!match) return false;
+  const ownerId = Number(match[1]);
+  const sourceMessageId = Number(match[2]);
+  const action = match[3];
+  const locale = resolveBotLocale(query.from.language_code);
+  if (ownerId !== query.from.id || dependencies.mediaStore.getTelegramMedia(message.chat.id, sourceMessageId).length === 0) {
+    await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
+    return true;
+  }
+  const pendingScope = {
+    telegramUserId: query.from.id,
+    chatId: message.chat.id,
+    threadId: "message_thread_id" in message ? message.message_thread_id ?? null : null,
+  };
+  const existing = dependencies.mediaStore.getPendingIntent(pendingScope);
+  if (existing?.sourceMessageIds.includes(sourceMessageId)) {
+    await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
+    return true;
+  }
+  const intent = action === "analyze" ? "vision_qa" : action === "edit" ? "image_edit" : "video_generate";
+  const promptText = botText(locale, action === "analyze" ? "analyzeImagePrompt" : action === "edit" ? "editImagePrompt" : "animateImagePrompt");
+  await ctx.answerCallbackQuery();
+  await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, { reply_markup: { inline_keyboard: [] } });
+  const prompt = await ctx.api.sendMessage(message.chat.id, promptText, {
+    ...threadOptionFromCallbackMessage(message),
+    reply_parameters: { message_id: sourceMessageId, allow_sending_without_reply: true },
+    reply_markup: { force_reply: true, selective: true },
+  });
+  dependencies.mediaStore.savePendingIntent({
+    ...pendingScope,
+    intent,
+    slots: {
+      intent,
+      confidence: 1,
+      instruction: "",
+      media_source: "reply",
+      media_message_ids: [sourceMessageId],
+      image_options: action === "edit" ? { aspect_ratio: null } : null,
+      video_options: action === "video" ? {
+        mode: "image_to_video", duration_seconds: null, aspect_ratio: null, resolution: null, image_roles: ["first_frame"],
+      } : null,
+      reply: null,
+      final_response: null,
+      conversation_mode: "task",
+      onboarding_opportunity: false,
+      profile_updates: null,
+    },
+    missingRequired: [intent === "vision_qa" ? "question" : "instruction", "callback_reply"],
+    sourceMessageIds: [sourceMessageId, prompt.message_id],
+  });
+  persistMessage(prompt, dependencies);
+  return true;
 }
 
 async function maybeSendOnboardingPrompt(
@@ -862,6 +1010,7 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
     await handleOnboardingCallback(ctx, dependencies);
     return;
   }
+  if (await handleImageActionCallback(ctx, dependencies)) return;
   if (!dependencies.mediaStore) return;
   const match = /^media:(\d+):(generate|cancel|dur_up|dur_down|ratio|download|again|edit)$/.exec(query.data);
   if (!match) return;
@@ -1320,8 +1469,8 @@ async function handleGroupSummary(
   const summaryMessageIds: number[] = [];
   let allPersisted = true;
   try {
-    for (const chunk of renderGroupSummaryHtml(prepared.content, prepared.messageCount, locale)) {
-      const sent = await replyTo(ctx, message, chunk, { parse_mode: "HTML" });
+    for (const chunk of renderTelegramHtml(groupSummaryPresentation(prepared.content, locale))) {
+      const sent = await sendTelegramPresentationChunk(ctx, message, chunk);
       allPersisted = persistMessage(sent, dependencies) && allPersisted;
       lastMessageId = sent.message_id;
       summaryMessageIds.push(sent.message_id);
@@ -1340,22 +1489,37 @@ async function handleGroupSummary(
 async function sendConversationResponse(
   ctx: Context,
   message: Message,
-  response: string,
+  response: string | MiaResponse,
   dependencies: BotDependencies,
 ): Promise<number | null> {
   let lastMessageId: number | null = null;
   let allPersisted = true;
-  for (const chunk of splitText(response)) {
-    const sent = await replyTo(ctx, message, chunk);
+  const presentation = typeof response === "string" ? miaResponseFromText(response) : response;
+  for (const chunk of renderTelegramHtml(presentation)) {
+    const sent = await sendTelegramPresentationChunk(ctx, message, chunk);
     allPersisted = persistMessage(sent, dependencies) && allPersisted;
     lastMessageId = sent.message_id;
   }
   return allPersisted ? lastMessageId : null;
 }
 
+export async function sendTelegramPresentationChunk(
+  ctx: Context,
+  message: Message,
+  chunk: { html: string; plainText: string },
+) {
+  try {
+    return await replyTo(ctx, message, chunk.html, { parse_mode: "HTML" });
+  } catch {
+    return replyTo(ctx, message, chunk.plainText);
+  }
+}
+
 function directIntent(intent: PendingMediaIntent, instruction: string, mediaSource: RoutedIntent["media_source"]): RoutedIntent {
   return {
     intent,
+    should_respond: true,
+    response_to_message_id: null,
     confidence: 1,
     instruction,
     media_source: mediaSource,
@@ -1370,6 +1534,7 @@ function directIntent(intent: PendingMediaIntent, instruction: string, mediaSour
       resolution: null,
       image_roles: [],
     } : null,
+    reply: null,
     final_response: null,
     conversation_mode: "task",
     onboarding_opportunity: false,
@@ -1471,12 +1636,44 @@ function conversationScope(message: Message): ConversationScope {
   return message.message_thread_id ? { type: "topic", chatId: message.chat.id, threadId: message.message_thread_id } : { type: "group", chatId: message.chat.id };
 }
 
+function groupConversationScope(message: Message): GroupConversationScope | null {
+  const scope = conversationScope(message);
+  return scope.type === "private" ? null : scope;
+}
+
+function followUpScopeKey(scope: GroupConversationScope): string {
+  return scope.type === "topic" ? `${scope.chatId}:${scope.threadId}` : `${scope.chatId}:0`;
+}
+
+function followUpBatchText(batch: readonly IncomingMessage[]): string {
+  return batch.map((item) => {
+    const sender = item.message.from?.id ?? null;
+    return `[message_id=${item.message.message_id} sender_user_id=${sender}]\n${item.text.trim()}`;
+  }).join("\n\n");
+}
+
+function isDirectWake(message: Message, text: string, ctx: Context): boolean {
+  if (message.chat.type === "private" || !message.from || !ctx.me) return false;
+  const entities = "entities" in message ? message.entities :
+    "caption_entities" in message ? message.caption_entities : undefined;
+  return shouldRespond({
+    chatType: message.chat.type,
+    text,
+    entities,
+    repliedToUserId: message.reply_to_message?.from?.id,
+  }, { id: ctx.me.id, username: ctx.me.username });
+}
+
 function threadOption(message: Message) {
   return message.message_thread_id === undefined ? {} : { message_thread_id: message.message_thread_id };
 }
 
 function threadOptionFromJob(job: MediaJob) {
   return job.threadId === null ? {} : { message_thread_id: job.threadId };
+}
+
+function threadOptionFromCallbackMessage(message: Message) {
+  return message.message_thread_id === undefined ? {} : { message_thread_id: message.message_thread_id };
 }
 
 function replyTo(ctx: Context, message: Message, text: string, extra: Record<string, unknown> = {}) {
@@ -1563,11 +1760,105 @@ async function editCallbackMessage(ctx: Context, text: string): Promise<void> {
 export function createBot(token: string, dependencies: BotDependencies): Bot {
   const bot = new Bot(token);
   const albums = new Map<string, { ctx: Context; messages: Message[]; timer: NodeJS.Timeout }>();
+  const sessions = followUpStore(dependencies);
+  const dispatchIncoming = async (incoming: IncomingMessage): Promise<void> => {
+    const { ctx, message } = incoming;
+    const scope = groupConversationScope(message);
+    if (!scope || !message.from || !ctx.me) {
+      await handleIncoming({ ...incoming, triggerMode: "direct" }, dependencies);
+      return;
+    }
+
+    const key = followUpScopeKey(scope);
+    if (isDirectWake(message, incoming.text, ctx)) {
+      followUps.cancel(key);
+      sessions?.wakeGroupFollowUp(scope, message.from.id);
+      await handleIncoming({ ...incoming, triggerMode: "direct" }, dependencies);
+      return;
+    }
+
+    const policyInput = {
+      chatType: message.chat.type,
+      text: incoming.text,
+      entities: "entities" in message ? message.entities :
+        "caption_entities" in message ? message.caption_entities : undefined,
+      repliedToUserId: message.reply_to_message?.from?.id,
+    };
+    const identity = { id: ctx.me.id, username: ctx.me.username };
+    const immediate = parseExplicitCommand(incoming.text) !== null ||
+      isExplicitGroupSummaryPhrase(promptFromMessage(policyInput, identity)) ||
+      message.reply_to_message !== undefined && /^(?:@?mia)(?:\s|[,，:：])/i.test(incoming.text.trim()) ||
+      Boolean(dependencies.mediaStore?.getPendingIntent?.(scopeFor(message)) && incoming.inputs.length > 0);
+    if (immediate) {
+      await handleIncoming({ ...incoming, triggerMode: "direct" }, dependencies);
+      return;
+    }
+
+    if (incoming.text.trim() && sessions?.getActiveGroupFollowUp(scope) &&
+        dependencies.followUpCredential && dependencies.router && dependencies.mediaStore) {
+      followUps.enqueue(key, incoming);
+      return;
+    }
+    await handleIncoming({ ...incoming, triggerMode: "direct" }, dependencies);
+  };
+  const followUps = new FollowUpCoordinator<IncomingMessage>({
+    onBatch: async (_key, batch) => {
+      const anchor = batch.at(-1);
+      if (!anchor) return;
+      const scope = groupConversationScope(anchor.message);
+      if (!scope) return;
+      const claim = sessions?.claimGroupFollowUpEvaluation(scope);
+      if (claim?.outcome !== "claimed") {
+        if (claim?.outcome === "rate_limited" && anchor.message.from && dependencies.followUpCredential) {
+          const debugId = dependencies.debug?.start({
+            telegramUserId: anchor.message.from.id,
+            chatId: anchor.message.chat.id,
+            chatType: anchor.message.chat.type,
+            messageId: anchor.message.message_id,
+            kind: "intent_router",
+            model: dependencies.followUpCredential.model,
+            promptRefs: [promptReference("mia.intent-router")],
+            requestPreview: { followUpBatchMessageIds: batch.map((item) => item.message.message_id) },
+            details: {
+              triggerMode: "active_follow_up",
+              followUpScope: claim.state.scope,
+              rateLimitOutcome: "rate_limited",
+              evaluationCount: claim.state.evaluationCount,
+            },
+          }) ?? null;
+          dependencies.debug?.finish(debugId, {
+            status: "succeeded",
+            responsePreview: { shouldRespond: false, reason: "rate_limited" },
+          });
+        }
+        return;
+      }
+      const seen = new Set<string>();
+      const inputs = batch.flatMap((item) => item.inputs).filter((input) => {
+        if (seen.has(input.fileId) || seen.size >= 10) return false;
+        seen.add(input.fileId);
+        return true;
+      }).map((input, position) => ({ ...input, position }));
+      let intervened = false;
+      await handleIncoming({
+        ...anchor,
+        text: followUpBatchText(batch),
+        inputs,
+        triggerMode: "active_follow_up",
+        batch,
+        followUpState: claim.state,
+        onIntervention: () => { intervened = true; },
+      }, dependencies);
+      if (intervened && sessions) sessions.markGroupFollowUpHandled(scope);
+    },
+    onError: (error, key) => dependencies.logger.warn({ err: error, scopeKey: key }, "Mia group follow-up failed"),
+  });
   bot.on("message", async (ctx) => {
     const message = ctx.message;
-    if (!("text" in message) && !("photo" in message) && !("document" in message && message.document.mime_type?.startsWith("image/"))) return;
+    if (!("text" in message) && !("photo" in message) && !("document" in message) && !("sticker" in message)) return;
     if (dependencies.mediaStore && !dependencies.mediaStore.claimTelegramUpdate(ctx.update.update_id)) return;
     persistMessage(message as StorableMessage, dependencies);
+    if ("sticker" in message || "document" in message && !message.document.mime_type?.startsWith("image/")) return;
     const media = mediaFromMessage(message);
     if (media?.mediaGroupId) {
       const key = `${message.chat.id}:${media.mediaGroupId}`;
@@ -1575,20 +1866,24 @@ export function createBot(token: string, dependencies: BotDependencies): Bot {
       if (existing) {
         existing.messages.push(message);
         clearTimeout(existing.timer);
-        existing.timer = scheduleAlbum(key, albums, dependencies);
+        existing.timer = scheduleAlbum(key, albums, dispatchIncoming);
       } else {
-        albums.set(key, { ctx, messages: [message], timer: scheduleAlbum(key, albums, dependencies) });
+        albums.set(key, { ctx, messages: [message], timer: scheduleAlbum(key, albums, dispatchIncoming) });
       }
       return;
     }
-    await handleIncoming({
+    await dispatchIncoming({
       ctx,
       message,
-      text: "text" in message ? message.text : "caption" in message ? message.caption ?? "" : "",
+      text: messageText(message) ?? "",
       inputs: media ? [media] : [],
-    }, dependencies);
+    });
   });
-  bot.on("edited_message:text", (ctx) => persistMessage(ctx.editedMessage, dependencies));
+  bot.on("edited_message", (ctx) => {
+    const message = ctx.editedMessage;
+    if (!("text" in message) && !("photo" in message) && !("document" in message) && !("sticker" in message)) return;
+    persistMessage(message as StorableMessage, dependencies);
+  });
   bot.on("callback_query:data", (ctx) => {
     if (dependencies.mediaStore && !dependencies.mediaStore.claimTelegramUpdate(ctx.update.update_id)) return;
     return handleCallback(ctx, dependencies);
@@ -1600,7 +1895,7 @@ export function createBot(token: string, dependencies: BotDependencies): Bot {
 function scheduleAlbum(
   key: string,
   albums: Map<string, { ctx: Context; messages: Message[]; timer: NodeJS.Timeout }>,
-  dependencies: BotDependencies,
+  dispatchIncoming: (incoming: IncomingMessage) => Promise<void>,
 ): NodeJS.Timeout {
   const timer = setTimeout(() => {
     const album = albums.get(key);
@@ -1611,7 +1906,7 @@ function scheduleAlbum(
     if (!anchor) return;
     const inputs = ordered.map((message, position) => mediaFromMessage(message, position)).filter((value): value is MediaInput => value !== null);
     const text = "caption" in anchor ? anchor.caption ?? "" : "";
-    void handleIncoming({ ctx: album.ctx, message: anchor, text, inputs }, dependencies);
+    void dispatchIncoming({ ctx: album.ctx, message: anchor, text, inputs });
   }, 800);
   timer.unref();
   return timer;

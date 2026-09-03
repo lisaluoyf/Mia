@@ -1,89 +1,65 @@
-import { TELEGRAM_MESSAGE_LIMIT } from "../constants.js";
 import type { GroupSummaryContent } from "../context/group-summary.js";
+import type { MiaResponse, MiaResponseBlock } from "../presentation/schema.js";
+import { renderTelegramHtml } from "../presentation/telegram-html.js";
 
-function escapeHtml(value: string): string {
-  return value.replaceAll("**", "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+function isChinese(locale: string): boolean {
+  return locale.toLowerCase().startsWith("zh");
 }
 
-function splitEscapedText(value: string, maxLength: number): string[] {
-  const chunks: string[] = [];
-  let current = "";
-  for (const character of value.replaceAll("**", "")) {
-    const escaped = escapeHtml(character);
-    if (current && current.length + escaped.length > maxLength) {
-      chunks.push(current);
-      current = escaped;
-    } else {
-      current += escaped;
-    }
+export function groupSummaryPresentation(content: GroupSummaryContent, locale: string): MiaResponse {
+  const chinese = isChinese(locale);
+  const blocks: MiaResponseBlock[] = [];
+  if (content.topics.length > 0) {
+    blocks.push({
+      type: "list",
+      heading: null,
+      emoji: null,
+      text: null,
+      items: content.topics.map((topic) => ({ label: topic.title, text: topic.detail })),
+      ordered: false,
+      language: null,
+    });
   }
-  if (current) chunks.push(current);
-  return chunks;
-}
-
-function itemAtoms(text: string): string[] {
-  return splitEscapedText(text, TELEGRAM_MESSAGE_LIMIT - 4).map((part) => `• ${part}`);
-}
-
-function sectionAtoms(label: string, entries: readonly string[]): string[] {
-  if (entries.length === 0) return [];
-  const heading = `<b>${escapeHtml(label)}</b>`;
-  const items = entries.flatMap(itemAtoms);
-  return [heading, ...items];
-}
-
-function pack(atoms: readonly string[]): string[] {
-  const chunks: string[] = [];
-  let current = "";
-  for (const atom of atoms) {
-    const candidate = current ? `${current}\n\n${atom}` : atom;
-    if (current && candidate.length > TELEGRAM_MESSAGE_LIMIT) {
-      chunks.push(current);
-      current = atom;
-    } else {
-      current = candidate;
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks;
-}
-
-export function renderGroupSummaryHtml(content: GroupSummaryContent, messageCount: number, locale: string): string[] {
-  const chinese = locale.toLowerCase().startsWith("zh");
-  const labels = chinese ? {
-    fallbackTitle: "群聊总结",
-    overview: "概览",
-    topics: "主要话题",
-    decisions: "已确认结论",
-    todos: "待办",
-    openQuestions: "未决问题",
-    participants: "参与者",
-    historicalContext: "历史关联",
-    coverage: "覆盖说明",
-    coverageText: `基于 Mia 实际收到的 ${messageCount} 条消息整理。`,
-  } : {
-    fallbackTitle: "Chat summary",
-    overview: "Overview",
-    topics: "Main topics",
-    decisions: "Confirmed decisions",
-    todos: "To-dos",
-    openQuestions: "Open questions",
-    participants: "Participants",
-    historicalContext: "Historical context",
-    coverage: "Coverage",
-    coverageText: `Based on ${messageCount} messages actually received by Mia.`,
+  const addSection = (heading: string, emoji: string, entries: readonly { text: string }[]) => {
+    if (entries.length === 0) return;
+    blocks.push({
+      type: "list", heading, emoji, text: null,
+      items: entries.map((entry) => ({ label: null, text: entry.text })), ordered: false, language: null,
+    });
   };
-  const title = content.title?.text ?? labels.fallbackTitle;
-  const atoms = [
-    `<b>${escapeHtml(title)}</b>`,
-    ...sectionAtoms(labels.overview, content.overview ? [content.overview.text] : []),
-    ...sectionAtoms(labels.topics, content.topics.map((topic) => `${topic.title}：${topic.detail}`)),
-    ...sectionAtoms(labels.decisions, content.decisions.map((item) => item.text)),
-    ...sectionAtoms(labels.todos, content.todos.map((item) => item.text)),
-    ...sectionAtoms(labels.openQuestions, content.openQuestions.map((item) => item.text)),
-    ...sectionAtoms(labels.participants, content.participants.map((item) => `${item.name}：${item.contribution}`)),
-    ...sectionAtoms(labels.historicalContext, content.historicalContext.map((item) => item.text)),
-    ...sectionAtoms(labels.coverage, [labels.coverageText]),
-  ];
-  return pack(atoms);
+  addSection(chinese ? "定下来的" : "Decided", "✅", content.decisions);
+  addSection(chinese ? "接下来" : "Next", "📌", content.todos);
+  addSection(chinese ? "还没定" : "Still open", "💭", content.openQuestions);
+  if (content.participants.length > 1) {
+    blocks.push({
+      type: "list", heading: chinese ? "谁做了什么" : "Who contributed", emoji: null, text: null,
+      items: content.participants.map((item) => ({ label: item.name, text: item.contribution })),
+      ordered: false, language: null,
+    });
+  }
+  addSection(chinese ? "之前还提到" : "Earlier context", "↩️", content.historicalContext);
+  if (content.overview) {
+    blocks.push({
+      type: "paragraph", heading: null, emoji: null, text: content.overview.text,
+      items: [],
+      ordered: false, language: null,
+    });
+  }
+  if (blocks.length === 0) {
+    blocks.push({
+      type: "paragraph", heading: null, emoji: null,
+      text: chinese ? "这段对话里暂时没有足够的信息可以总结。" : "There is not enough context to summarize yet.",
+      items: [], ordered: false, language: null,
+    });
+  }
+  return {
+    version: 1,
+    title: { text: content.title?.text ?? (chinese ? "群聊总结" : "Chat summary"), emoji: "📝" },
+    blocks,
+    actions: [],
+  };
+}
+
+export function renderGroupSummaryHtml(content: GroupSummaryContent, _messageCount: number, locale: string): string[] {
+  return renderTelegramHtml(groupSummaryPresentation(content, locale)).map((chunk) => chunk.html);
 }
