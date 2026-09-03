@@ -89,14 +89,15 @@ describe("media worker transient regeneration status", () => {
     expect(Buffer.from(store.readLocalResult(1, "image/png")?.bytes ?? []).toString("utf8")).toBe("image");
   });
 
-  it("replaces the progress text with an error when submission fails", async () => {
+  it("retries a transient image submission once before replacing the progress text with an error", async () => {
     createJob();
     const editMessageText = vi.fn().mockResolvedValue({});
     const sendMessage = vi.fn().mockResolvedValue({});
+    const submitImage = vi.fn().mockRejectedValue(new Error("upstream unavailable"));
     const worker = new MediaWorker({
       client: {
         resolveAPIKey: vi.fn().mockResolvedValue("user-key"),
-        submitImage: vi.fn().mockRejectedValue(new Error("upstream unavailable")),
+        submitImage,
       } as unknown as APIMasterClient,
       store,
       api: { editMessageText, sendMessage } as unknown as Api,
@@ -110,11 +111,41 @@ describe("media worker transient regeneration status", () => {
 
     await worker.tick();
 
-    expect(editMessageText).toHaveBeenCalledWith(42, 78, "媒体请求提交失败，Mia 没有自动重试，以免重复扣费。", {
+    expect(submitImage).toHaveBeenCalledTimes(2);
+    expect(editMessageText).toHaveBeenCalledWith(42, 78, "媒体请求自动重试一次后仍然提交失败。", {
       reply_markup: { inline_keyboard: [] },
     });
     expect(sendMessage).not.toHaveBeenCalled();
     expect(store.getJobByIdempotencyKey("callback:again-1")?.status).toBe("failed");
+  });
+
+  it("continues normally when the single image submission retry succeeds", async () => {
+    createJob();
+    const submitImage = vi.fn()
+      .mockRejectedValueOnce(new MediaAPIError("service_unavailable"))
+      .mockResolvedValueOnce({ kind: "task", taskId: "task-after-retry" });
+    const worker = new MediaWorker({
+      client: {
+        resolveAPIKey: vi.fn().mockResolvedValue("user-key"),
+        submitImage,
+      } as unknown as APIMasterClient,
+      store,
+      api: { editMessageText: vi.fn(), sendMessage: vi.fn() } as unknown as Api,
+      botToken: "123:test",
+      logger: createLogger("silent"),
+      intervalMs: 1_000,
+      resultMaxBytes: 10_000_000,
+      publicBaseUrl: null,
+      botUsername: "MiaAssistantBot",
+    });
+
+    await worker.tick();
+
+    expect(submitImage).toHaveBeenCalledTimes(2);
+    expect(store.getJobByIdempotencyKey("callback:again-1")).toMatchObject({
+      status: "submitted",
+      upstreamTaskId: "task-after-retry",
+    });
   });
 
   it("shows a wallet button when APIMaster rejects media before charging", async () => {

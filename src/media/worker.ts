@@ -1,7 +1,7 @@
 import { InlineKeyboard, InputFile, type Api } from "grammy";
 import type { Logger } from "pino";
 
-import type { APIMasterClient, NormalizedTaskStatus } from "../clients/apimaster.js";
+import type { APIMasterClient, ImageSubmitResult, NormalizedTaskStatus } from "../clients/apimaster.js";
 import { MediaAPIError, ResolverError } from "../clients/apimaster.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { MediaStore } from "./store.js";
@@ -154,13 +154,24 @@ export class MediaWorker {
         if (aspectRatio !== "1:1" && aspectRatio !== "16:9" && aspectRatio !== "9:16") {
           throw new Error("invalid_image_aspect_ratio");
         }
-        const submission = await this.options.client.submitImage(
+        const submitImage = () => this.options.client.submitImage(
           apiKey,
           job.model,
           job.instruction,
           aspectRatio,
           images,
         );
+        let submission: ImageSubmitResult;
+        try {
+          submission = await submitImage();
+        } catch (error) {
+          if (!shouldRetryImageSubmission(error)) throw error;
+          this.options.logger.warn(
+            { jobId: job.id, telegramUserId: job.telegramUserId, model: job.model, errorCode: errorCode(error) },
+            "Retrying Mia image submission once",
+          );
+          submission = await submitImage();
+        }
         if (submission.kind === "result") {
           await this.deliver(claimed, apiKey, submission.state);
           this.options.debug?.finish(debugId, {
@@ -458,6 +469,14 @@ function submissionAccessFailure(error: unknown, locale: string): { text: string
     };
   }
   return null;
+}
+
+function shouldRetryImageSubmission(error: unknown): boolean {
+  if (!(error instanceof MediaAPIError)) return true;
+  if (error.code === "service_unavailable" || error.code === "invalid_submit_response") return true;
+  return error.code === "upstream_error" &&
+    (error.status === undefined || error.status === 408 || error.status === 409 || error.status === 425 ||
+      error.status === 429 || error.status >= 500);
 }
 
 function hasEphemeralStatus(job: MediaJob): boolean {
