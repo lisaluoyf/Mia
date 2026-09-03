@@ -14,6 +14,14 @@ import { mediaIntentSchema, type IntentRouter, type RoutedIntent } from "../inte
 import { MediaInputError, downloadConversationImages, downloadTelegramImages } from "../media/intake.js";
 import type { MediaStore } from "../media/store.js";
 import type { MediaInput, MediaJob, PendingMediaIntent } from "../media/types.js";
+import {
+  ONBOARDING_ROLES,
+  onboardingCopy,
+  onboardingMissingPrompt,
+  onboardingRoleLabel,
+  type OnboardingRoleId,
+} from "../onboarding/localization.js";
+import { onboardingMissingFields, type OnboardingEligibility, type OnboardingService } from "../onboarding/service.js";
 import { sameModelId, type ModelSettingsService, type SettingsSnapshot } from "../settings/service.js";
 import type { ContextStore } from "../storage/store.js";
 import type { ConversationScope } from "../storage/types.js";
@@ -41,6 +49,7 @@ interface BotDependencies {
   botToken?: string;
   resultMaxBytes?: number;
   debug?: DebugRecorder;
+  onboarding?: OnboardingService;
 }
 
 interface IncomingRequest {
@@ -241,6 +250,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   }
 
   let routed: RoutedIntent;
+  let routerDebugId: string | null = null;
+  let onboardingEligibility: OnboardingEligibility | null = null;
   if (savedCallbackIntent?.success) {
     routed = {
       ...savedCallbackIntent.data,
@@ -270,6 +281,9 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     const scope = conversationScope(message);
     const recent = dependencies.contexts.listRecentMessages?.(scope, 8) ?? [];
     const summary = dependencies.contexts.getLatestSummary?.(scope)?.content ?? null;
+    onboardingEligibility = message.chat.type === "private" && dependencies.onboarding
+      ? dependencies.onboarding.eligibility(message.chat.id, message.from.id)
+      : null;
     let debugId: string | null = null;
     try {
       await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
@@ -291,12 +305,23 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         messageId: message.message_id,
         kind: "intent_router",
         model: dependencies.router.model,
-        promptRefs: [promptReference("mia.system"), promptReference("mia.intent-router")],
+        promptRefs: [promptReference("mia.intent-router")],
         contextLayers: requestContext?.layers ?? null,
         requestPreview: { text: promptFromMessage(policyInput, identity), replyToMessageId: message.reply_to_message?.message_id ?? null },
         media: inputs.map((input) => ({ messageId: input.messageId, type: input.type, mimeType: input.mimeType })),
-        details: { phase: "intent_and_response" },
+        details: {
+          phase: "intent_and_response",
+          onboarding: onboardingEligibility ? {
+            serverEligible: onboardingEligibility.eligible,
+            completedTurns: onboardingEligibility.completedTurns,
+            currentTurn: onboardingEligibility.currentTurn,
+            promptCount: onboardingEligibility.promptCount,
+            missingFields: onboardingEligibility.missingFields,
+            eligibilityReason: onboardingEligibility.reason,
+          } : { serverEligible: false, eligibilityReason: "not_private_or_unavailable" },
+        },
       }) ?? null;
+      routerDebugId = debugId;
       routed = await dependencies.router.classify({
         text: promptFromMessage(policyInput, identity),
         mediaType: inputs.length > 0 ? "image" : "none",
@@ -310,12 +335,21 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           text: item.text ?? item.caption ?? `[${item.contentType}]`,
         })),
         ...(requestContext ? { conversationMessages: requestContext.messages } : {}),
+        onboarding: {
+          active: Boolean(onboardingEligibility?.eligible || onboardingEligibility?.promptCount),
+          missingFields: onboardingEligibility?.missingFields ?? [],
+        },
       }, routerKey, fallbackImages);
       const kind: DebugRequestKind = routed.intent === "chat" ? "chat" : routed.intent === "vision_qa" ? "vision_qa" : "intent_router";
       dependencies.debug?.finish(debugId, {
         status: "succeeded",
         responsePreview: routed,
-        details: { phase: "intent_and_response", routedIntent: routed.intent, fallbackReason: routed.fallbackReason ?? null },
+        details: {
+          phase: "intent_and_response",
+          routedIntent: routed.intent,
+          fallbackReason: routed.fallbackReason ?? null,
+          onboarding: onboardingDebugDetails(onboardingEligibility, routed, false),
+        },
         kind,
       });
     } catch (error) {
@@ -346,6 +380,25 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     if (routed.final_response) {
       const assistantMessageId = await sendConversationResponse(ctx, message, routed.final_response, dependencies);
       recordCompletedChatTurn(message, assistantMessageId, dependencies);
+      if (assistantMessageId !== null && message.chat.type === "private" && dependencies.onboarding && routed.profile_updates) {
+        dependencies.onboarding.applyProfileUpdates(message.from.id, message.message_id, {
+          preferredName: routed.profile_updates.preferred_name,
+          primaryRole: routed.profile_updates.primary_role,
+          primaryGoal: routed.profile_updates.primary_goal,
+        });
+      }
+      const triggered = assistantMessageId !== null && onboardingEligibility?.eligible === true &&
+        routed.conversation_mode === "casual" && routed.onboarding_opportunity &&
+        await maybeSendOnboardingPrompt(ctx, message, onboardingEligibility.currentTurn, dependencies);
+      dependencies.debug?.finish(routerDebugId, {
+        status: "succeeded",
+        details: {
+          phase: "intent_and_response",
+          routedIntent: routed.intent,
+          fallbackReason: routed.fallbackReason ?? null,
+          onboarding: onboardingDebugDetails(onboardingEligibility, routed, triggered),
+        },
+      });
     } else {
       await runChat(ctx, promptFromMessage(policyInput, identity), dependencies);
     }
@@ -380,6 +433,9 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         image_options: routed.image_options,
         video_options: routed.video_options,
         final_response: routed.final_response,
+        conversation_mode: routed.conversation_mode,
+        onboarding_opportunity: routed.onboarding_opportunity,
+        profile_updates: routed.profile_updates,
       },
       missingRequired: [...new Set(missing)],
       sourceMessageIds: [message.message_id, ...inputs.map((input) => input.messageId)],
@@ -528,9 +584,105 @@ async function createVideoDraft(
   dependencies.mediaStore.updateDraft(draft.id, draft.options, sent.message_id);
 }
 
+function onboardingDebugDetails(
+  eligibility: OnboardingEligibility | null,
+  routed: RoutedIntent,
+  finalTriggered: boolean,
+) {
+  return {
+    serverEligible: eligibility?.eligible ?? false,
+    completedTurns: eligibility?.completedTurns ?? null,
+    currentTurn: eligibility?.currentTurn ?? null,
+    promptCount: eligibility?.promptCount ?? 0,
+    missingFields: eligibility?.missingFields ?? [],
+    eligibilityReason: eligibility?.reason ?? "not_private_or_unavailable",
+    conversationMode: routed.conversation_mode,
+    modelOpportunity: routed.onboarding_opportunity,
+    finalTriggered,
+    profileUpdates: routed.profile_updates,
+  };
+}
+
+function onboardingRoleKeyboard(language?: string | null): InlineKeyboard {
+  const copy = onboardingCopy(language);
+  const keyboard = new InlineKeyboard();
+  ONBOARDING_ROLES.forEach((role, index) => {
+    keyboard.text(copy.roles[role], `onboard:role:${role}`);
+    if (index % 2 === 1) keyboard.row();
+  });
+  return keyboard.text(copy.other, "onboard:other").text(copy.later, "onboard:defer");
+}
+
+async function maybeSendOnboardingPrompt(
+  ctx: Context,
+  message: Message,
+  turn: number,
+  dependencies: BotDependencies,
+): Promise<boolean> {
+  if (message.chat.type !== "private" || !message.from || !dependencies.onboarding) return false;
+  const state = dependencies.onboarding.claimPrompt(message.from.id, turn);
+  if (!state) return false;
+  const missing = onboardingMissingFields(state);
+  const copy = onboardingCopy(message.from.language_code);
+  const sent = state.selectedRole === null
+    ? await replyTo(ctx, message, copy.roleQuestion, { reply_markup: onboardingRoleKeyboard(message.from.language_code) })
+    : await replyTo(ctx, message, onboardingMissingPrompt(message.from.language_code, missing));
+  persistMessage(sent, dependencies);
+  return true;
+}
+
+async function handleOnboardingCallback(ctx: Context, dependencies: BotDependencies): Promise<void> {
+  const query = ctx.callbackQuery;
+  const message = query?.message;
+  if (!query?.data || !query.from || !message || message.chat.type !== "private" || !dependencies.onboarding) {
+    if (query) await ctx.answerCallbackQuery({ text: onboardingCopy(query.from.language_code).alreadyHandled, show_alert: true });
+    return;
+  }
+  const copy = onboardingCopy(query.from.language_code);
+  if (query.data === "onboard:defer") {
+    dependencies.onboarding.defer(query.from.id);
+    await ctx.answerCallbackQuery();
+    await editCallbackMessage(ctx, copy.deferred);
+    return;
+  }
+  if (query.data === "onboard:other") {
+    const result = dependencies.onboarding.selectRole(query.from.id, null, true, message.message_id);
+    if (!result.created) {
+      await ctx.answerCallbackQuery({ text: copy.alreadyHandled });
+      return;
+    }
+    await ctx.answerCallbackQuery();
+    await editCallbackMessage(ctx, copy.roleSaved);
+    const sent = await ctx.api.sendMessage(message.chat.id, copy.customPrompt);
+    persistMessage(sent, dependencies);
+    return;
+  }
+  const match = /^onboard:role:([a-z_]+)$/.exec(query.data);
+  const roleId = match?.[1] as OnboardingRoleId | undefined;
+  if (!roleId || !ONBOARDING_ROLES.includes(roleId)) return;
+  const role = onboardingRoleLabel("en", roleId);
+  const result = dependencies.onboarding.selectRole(query.from.id, role, false);
+  if (!result.created) {
+    await ctx.answerCallbackQuery({ text: copy.alreadyHandled });
+    return;
+  }
+  await ctx.answerCallbackQuery();
+  await editCallbackMessage(ctx, `${copy.roleSaved} ${copy.roles[roleId]}`);
+  const missing = onboardingMissingFields(result.state);
+  if (missing.length > 0) {
+    const sent = await ctx.api.sendMessage(message.chat.id, onboardingMissingPrompt(query.from.language_code, missing));
+    persistMessage(sent, dependencies);
+  }
+}
+
 async function handleCallback(ctx: Context, dependencies: BotDependencies): Promise<void> {
   const query = ctx.callbackQuery;
-  if (!query || !query.data || !query.from || !dependencies.mediaStore) return;
+  if (!query || !query.data || !query.from) return;
+  if (query.data.startsWith("onboard:")) {
+    await handleOnboardingCallback(ctx, dependencies);
+    return;
+  }
+  if (!dependencies.mediaStore) return;
   const match = /^media:(\d+):(generate|cancel|dur_up|dur_down|ratio|download|again|edit)$/.exec(query.data);
   if (!match) return;
   const jobId = Number(match[1]);
@@ -892,6 +1044,9 @@ function directIntent(intent: PendingMediaIntent, instruction: string, mediaSour
       image_roles: [],
     } : null,
     final_response: null,
+    conversation_mode: "task",
+    onboarding_opportunity: false,
+    profile_updates: null,
     missingRequired: instruction.trim() ? [] : [intent === "vision_qa" ? "question" : "instruction"],
   };
 }

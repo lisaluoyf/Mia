@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { IntentRouter, validateIntentRequirements } from "../src/intent/router.js";
+import { PROMPT_LIBRARY } from "../src/prompts.js";
 
 const base = {
   text: "生成一张海边日落图片",
@@ -19,6 +20,10 @@ describe("Mia intent router", () => {
       media_source: "none",
       image_options: { aspect_ratio: "16:9" },
       video_options: null,
+      final_response: null,
+      conversation_mode: "task",
+      onboarding_opportunity: false,
+      profile_updates: null,
     });
     const router = new IntentRouter({ structuredChat }, {
       model: "router-model",
@@ -72,6 +77,9 @@ describe("Mia intent router", () => {
       image_options: null,
       video_options: null,
       final_response: "第二行表示服务器连接失败。",
+      conversation_mode: "task",
+      onboarding_opportunity: false,
+      profile_updates: null,
     });
     const router = new IntentRouter({ structuredChat }, { model: "gpt-5.4", timeoutMs: 1000 });
     const result = await router.classify({
@@ -82,5 +90,27 @@ describe("Mia intent router", () => {
     }, "user-key", [{ bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png", filename: "screen.png" }]);
     expect(result).toMatchObject({ intent: "vision_qa", final_response: "第二行表示服务器连接失败。" });
     expect(JSON.stringify(structuredChat.mock.calls[0]?.[2])).toContain("data:image/png;base64,AQID");
+  });
+
+  it("returns casual onboarding signals and explicit profile updates in the same call", async () => {
+    const structuredChat = vi.fn().mockResolvedValue({
+      intent: "chat", confidence: 0.99, instruction: "", media_source: "none",
+      image_options: null, video_options: null, final_response: "Nice to meet you, Roma.",
+      conversation_mode: "casual", onboarding_opportunity: true,
+      profile_updates: { preferred_name: "Roma", primary_role: "developer", primary_goal: null },
+    });
+    const router = new IntentRouter({ structuredChat }, { model: "gpt-5.4", timeoutMs: 1000 });
+    const result = await router.classify({ ...base, text: "Call me Roma. I'm a developer.", onboarding: { active: true, missingFields: ["preferred_name", "primary_role", "primary_goal"] } }, "key");
+    expect(result).toMatchObject({ conversation_mode: "casual", onboarding_opportunity: true, profile_updates: { preferred_name: "Roma", primary_role: "developer", primary_goal: null } });
+    expect(structuredChat).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(structuredChat.mock.calls[0]?.[2])).toContain("missingFields");
+  });
+
+  it("registers mia.system as a base module included once by the actual router prompt", () => {
+    const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
+    const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
+    expect(basePrompt).toMatchObject({ kind: "base" });
+    expect(routerPrompt).toMatchObject({ version: 2, kind: "composed", includes: ["mia.system"] });
+    expect(routerPrompt?.text).toContain(basePrompt?.text ?? "missing");
   });
 });

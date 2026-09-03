@@ -21,7 +21,15 @@ export interface DebugRequest {
   completedAt: string | null;
 }
 
-export interface DebugPrompt { id: string; version: number; name: string; purpose: string; text: string }
+export interface DebugPrompt {
+  id: string;
+  version: number;
+  name: string;
+  purpose: string;
+  text: string;
+  kind?: "base" | "composed";
+  includes?: string[];
+}
 export interface DebugMemory {
   memories: Array<{ id: number; category: string; content: string; updatedAt: string }>;
   summary: { content: string; throughMessageId: number; createdAt: string } | null;
@@ -47,7 +55,7 @@ const previewRequests: DebugRequest[] = [
   {
     id: "81e1ef7f-6ae9-4abc-9d94-905149ab35d1", telegramUserId: 7553714675, chatId: 7553714675,
     chatType: "private", messageId: 184, kind: "chat", model: "grok-4.5", status: "succeeded", durationMs: 1842,
-    promptRefs: [{ id: "mia.system", version: 1 }, { id: "mia.intent-router", version: 1 }],
+    promptRefs: [{ id: "mia.intent-router", version: 2 }],
     contextLayers: {
       systemRules: { id: "mia.system", version: 1 },
       conversation: { chatType: "private", currentUser: "Lisa", language: "zh-CN", trigger: "message", currentTask: null },
@@ -69,8 +77,8 @@ const previewRequests: DebugRequest[] = [
 
 function previewData() {
   const prompts: DebugPrompt[] = [
-    { id: "mia.system", version: 1, name: "Mia 系统规则", purpose: "聊天和视觉理解的基础行为规则", text: promptText },
-    { id: "mia.intent-router", version: 1, name: "意图路由", purpose: "判断聊天、看图、图片和视频意图", text: `${promptText}\n\n你还负责判断用户当前请求属于哪种操作。` },
+    { id: "mia.system", version: 1, name: "Mia 系统规则", purpose: "聊天和视觉理解的基础模块", text: promptText, kind: "base" },
+    { id: "mia.intent-router", version: 2, name: "意图路由", purpose: "实际发送的组合 Prompt", text: `${promptText}\n\n你还负责判断用户当前请求属于哪种操作。`, kind: "composed", includes: ["mia.system"] },
     { id: "mia.context-compaction", version: 1, name: "上下文整理", purpose: "每 10 轮整理长期记忆与滚动摘要", text: "你负责整理 Mia 的长期记忆和当前私聊的历史摘要。" },
   ];
   const memory: DebugMemory = {

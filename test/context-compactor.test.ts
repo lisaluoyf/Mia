@@ -15,6 +15,7 @@ describe("context compactor", () => {
     store.upsertUser({ telegramUserId: 99, firstName: "Mia", lastName: null, username: "mia", languageCode: null, isBot: true });
     store.upsertChat({ chatId: 42, type: "private", title: null, username: "roma", description: null, isForum: false });
     store.addMemory({ scope: { type: "user", userId: 42 }, category: "preference", content: "旧记忆" });
+    store.addMemory({ scope: { type: "user", userId: 42 }, category: "identity", content: "Primary role: Developer" });
     const structuredChat = vi.fn().mockResolvedValue({
       memories: [{ category: "identity", content: "用户希望被称为 Roma" }],
       summary: "用户正在讨论 Mia 的上下文设计。",
@@ -40,9 +41,10 @@ describe("context compactor", () => {
     await vi.waitFor(() => expect(structuredChat).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(store?.listPendingCompletedTurns(42)).toEqual([]));
 
-    expect(store.listMemories({ type: "user", userId: 42 }).map((memory) => memory.content)).toEqual([
+    expect(store.listMemories({ type: "user", userId: 42 }).map((memory) => memory.content).sort()).toEqual([
+      "Primary role: Developer",
       "用户希望被称为 Roma",
-    ]);
+    ].sort());
     expect(store.getLatestSummary({ type: "private", chatId: 42 })).toMatchObject({
       content: "用户正在讨论 Mia 的上下文设计。",
       fromMessageId: 1,

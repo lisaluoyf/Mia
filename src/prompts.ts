@@ -44,7 +44,12 @@ export const INTENT_ROUTER_SYSTEM_PROMPT = `${MIA_SYSTEM_PROMPT}
 - 只有用户明确指定时才提取时长、比例和分辨率，否则返回 null。
 - chat 和 vision_qa 必须使用用户当前语言在 final_response 中给出最终回复。
 - image_generate、image_edit 和 video_generate 的 final_response 必须为 null。
-- 只有真正存在重要歧义时才降低 confidence。`;
+- 只有真正存在重要歧义时才降低 confidence。
+- conversation_mode 只有纯社交寒暄、自我介绍、轻松闲聊时才是 casual；具体知识问题、明确任务、命令、图片/视频请求和看图问答一律是 task。
+- onboarding_opportunity 只有当前是自然、轻松、适合顺便认识用户的 casual 对话时才能为 true；不要为了画像打断任务。
+- profile_updates 只提取当前用户在当前消息中明确自述的资料：preferred_name 是希望 Mia 使用的称呼，primary_role 是用户自己的主要角色，primary_goal 是长期希望 Mia 提供的主要帮助。
+- 不得从群成员、引用内容、历史猜测、Mia 的回复或含糊表达中提取画像。未明确表达的字段必须为 null；三个字段都没有时 profile_updates 必须为 null。
+- onboarding 元数据只说明服务端当前缺少哪些字段。你可以自然回应用户明确提供的资料，但不得自行在 final_response 中发起、重复或追问 onboarding，是否展示引导完全由服务端决定。`;
 
 export const CONTEXT_COMPACTION_SYSTEM_PROMPT = `你负责整理 Mia 的长期记忆和当前私聊的历史摘要。
 
@@ -90,6 +95,8 @@ export interface PromptDefinition {
   name: string;
   purpose: string;
   text: string;
+  kind?: "base" | "composed";
+  includes?: readonly string[];
 }
 
 export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
@@ -99,13 +106,16 @@ export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
     name: "Mia 系统规则",
     purpose: "聊天、视觉理解和所有用户请求的基础行为规则",
     text: MIA_SYSTEM_PROMPT,
+    kind: "base",
   },
   {
     id: "mia.intent-router",
-    version: 1,
+    version: 2,
     name: "意图路由",
-    purpose: "判断聊天、看图、图片生成/编辑和视频生成意图",
+    purpose: "实际发送的组合 Prompt：包含 mia.system，并判断意图、闲聊机会和明确画像更新",
     text: INTENT_ROUTER_SYSTEM_PROMPT,
+    kind: "composed",
+    includes: ["mia.system"],
   },
   {
     id: "mia.context-compaction",

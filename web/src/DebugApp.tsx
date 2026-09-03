@@ -80,7 +80,7 @@ function RequestDetails({ request, onPrompt }: { request: DebugRequest; onPrompt
     <section className="detail-section">
       <h3>使用的 Prompt</h3>
       <div className="prompt-chips">{request.promptRefs.length ? request.promptRefs.map((prompt) =>
-        <button key={`${prompt.id}.${prompt.version}`} onClick={() => onPrompt(prompt.id)}>{prompt.id}<span>v{prompt.version}</span><ChevronRight size={14} /></button>
+        <button key={`${prompt.id}.${prompt.version}`} onClick={() => onPrompt(prompt.id)}>{prompt.id}<span>v{prompt.version} · 实际发送</span><ChevronRight size={14} /></button>
       ) : <span className="muted">本次 API 调用未使用系统 Prompt</span>}</div>
     </section>
     {request.contextLayers && <section className="detail-section"><h3>五层上下文</h3><div className="layer-stack">
@@ -133,7 +133,7 @@ function PromptsView({ prompts, selectedId, requests }: { prompts: DebugPrompt[]
   return <div className="prompt-layout"><aside className="prompt-list">{prompts.map((prompt) => {
     const uses = requests.filter((request) => request.promptRefs.some((ref) => ref.id === prompt.id && ref.version === prompt.version)).length;
     return <button key={prompt.id} className={prompt.id === active?.id ? "active" : ""} onClick={() => setActiveId(prompt.id)}><Braces size={18} /><span><strong>{prompt.name}</strong><small>{prompt.id} · v{prompt.version}</small></span><em>{uses}</em></button>;
-  })}</aside><main className="prompt-content">{active ? <><header><div><span className="detail-kicker">{active.id} · v{active.version}</span><h2>{active.name}</h2><p>{active.purpose}</p></div><span className="readonly-badge">只读</span></header><pre className="prompt-source">{active.text}</pre></> : <Empty>暂无已注册的 Prompt</Empty>}</main></div>;
+  })}</aside><main className="prompt-content">{active ? <><header><div><span className="detail-kicker">{active.id} · v{active.version}</span><h2>{active.name}</h2><p>{active.purpose}</p>{active.includes?.length ? <p>包含基础模块：{active.includes.join("、")}</p> : active.kind === "base" ? <p>基础模块，不会在组合 Prompt 之外重复发送。</p> : null}</div><span className="readonly-badge">只读</span></header><pre className="prompt-source">{active.text}</pre></> : <Empty>暂无已注册的 Prompt</Empty>}</main></div>;
 }
 
 export function DebugApp() {

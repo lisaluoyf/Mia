@@ -15,6 +15,7 @@ import { MediaWorker } from "./media/worker.js";
 import { DebugRecorder } from "./debug/recorder.js";
 import { DebugService } from "./debug/service.js";
 import { DebugStore } from "./debug/store.js";
+import { OnboardingService } from "./onboarding/service.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -48,6 +49,7 @@ async function main(): Promise<void> {
     model: config.miaContextModel,
     debug,
   });
+  const onboarding = new OnboardingService(contexts);
   const mediaStore = new MediaStore(resolve(config.databasePath));
   const settings = new ModelSettingsService(client, store);
   const router = new IntentRouter(client, {
@@ -65,6 +67,7 @@ async function main(): Promise<void> {
     botToken: config.telegramBotToken,
     resultMaxBytes: config.mediaResultMaxBytes,
     debug,
+    onboarding,
   });
   await bot.init();
   const worker = new MediaWorker({

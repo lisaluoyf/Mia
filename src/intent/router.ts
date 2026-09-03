@@ -19,6 +19,13 @@ export const mediaIntentSchema = z.object({
     image_roles: z.array(z.enum(["first_frame", "last_frame", "reference_image"])).max(10),
   }).nullable(),
   final_response: z.string().max(20000).nullable().optional().default(null),
+  conversation_mode: z.enum(["casual", "task"]).optional().default("task"),
+  onboarding_opportunity: z.boolean().optional().default(false),
+  profile_updates: z.object({
+    preferred_name: z.string().trim().min(1).max(200).nullable(),
+    primary_role: z.string().trim().min(1).max(500).nullable(),
+    primary_goal: z.string().trim().min(1).max(1000).nullable(),
+  }).strict().nullable().optional().default(null),
 }).strict();
 
 export type MediaIntent = z.infer<typeof mediaIntentSchema>;
@@ -40,6 +47,10 @@ export interface IntentRouterInput {
   summary?: string | null;
   recentMessages?: readonly RouterContextMessage[];
   conversationMessages?: readonly StructuredMessage[];
+  onboarding?: {
+    active: boolean;
+    missingFields: readonly string[];
+  };
 }
 
 export interface RoutedIntent extends MediaIntent {
@@ -50,7 +61,10 @@ export interface RoutedIntent extends MediaIntent {
 const ROUTER_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["intent", "confidence", "instruction", "media_source", "image_options", "video_options", "final_response"],
+  required: [
+    "intent", "confidence", "instruction", "media_source", "image_options", "video_options", "final_response",
+    "conversation_mode", "onboarding_opportunity", "profile_updates",
+  ],
   properties: {
     intent: { type: "string", enum: ["chat", "image_generate", "image_edit", "vision_qa", "video_generate"] },
     confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -89,6 +103,23 @@ const ROUTER_SCHEMA = {
       ],
     },
     final_response: { type: ["string", "null"] },
+    conversation_mode: { type: "string", enum: ["casual", "task"] },
+    onboarding_opportunity: { type: "boolean" },
+    profile_updates: {
+      anyOf: [
+        { type: "null" },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["preferred_name", "primary_role", "primary_goal"],
+          properties: {
+            preferred_name: { type: ["string", "null"] },
+            primary_role: { type: ["string", "null"] },
+            primary_goal: { type: ["string", "null"] },
+          },
+        },
+      ],
+    },
   },
 } as const;
 
@@ -101,6 +132,9 @@ function fallback(reason: NonNullable<RoutedIntent["fallbackReason"]>): RoutedIn
     image_options: null,
     video_options: null,
     final_response: null,
+    conversation_mode: "task",
+    onboarding_opportunity: false,
+    profile_updates: null,
     missingRequired: [],
     fallbackReason: reason,
   };
@@ -140,6 +174,7 @@ export class IntentRouter {
       active_private_image: input.activePrivateImage,
       summary: input.summary ?? null,
       recent_messages: (input.recentMessages ?? []).slice(-8),
+      onboarding: input.onboarding ?? { active: false, missingFields: [] },
     };
     const userContent: unknown = images.length === 0 ? JSON.stringify(contextPayload) : [
       { type: "text", text: JSON.stringify(contextPayload) },
@@ -160,6 +195,7 @@ export class IntentRouter {
           reply_media_count: input.replyMediaCount,
           reply_to_message_id: input.replyToMessageId ?? null,
           active_private_image: input.activePrivateImage,
+          onboarding: input.onboarding ?? { active: false, missingFields: [] },
         } }),
       },
       ...input.conversationMessages,

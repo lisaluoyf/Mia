@@ -7,6 +7,7 @@ import {
   resolveBotLocale,
   type BotMessageKey,
 } from "../src/telegram/localization.js";
+import { ONBOARDING_ROLES, onboardingCopy } from "../src/onboarding/localization.js";
 
 describe("Telegram bot localization", () => {
   it("maps Telegram language variants to the supported locale set", () => {
@@ -17,6 +18,17 @@ describe("Telegram bot localization", () => {
     expect(resolveBotLocale("pt-BR")).toBe("pt-BR");
     expect(resolveBotLocale("de-DE")).toBe("de");
     expect(resolveBotLocale("unknown")).toBe("en");
+  });
+
+  it("localizes onboarding questions and all role buttons for all 25 locales", () => {
+    for (const locale of BOT_LOCALES) {
+      const copy = onboardingCopy(locale);
+      expect(copy.roleQuestion.length).toBeGreaterThan(10);
+      expect(copy.other.length).toBeGreaterThan(0);
+      expect(copy.later.length).toBeGreaterThan(0);
+      for (const role of ONBOARDING_ROLES) expect(copy.roles[role].length).toBeGreaterThan(0);
+      if (locale !== "en") expect(copy.roleQuestion).not.toBe(onboardingCopy("en").roleQuestion);
+    }
   });
 
   it("localizes the complete Simplified Chinese media lifecycle", () => {
@@ -31,6 +43,12 @@ describe("Telegram bot localization", () => {
     expect(botText("zh-hans", "noUsableKey", { model: "gpt-image-2" }))
       .toContain("gpt-image-2");
     expect(mediaJobLocale({ locale: "zh-hans" })).toBe("zh-CN");
+  });
+
+  it("uses processing language for media work without exposing the internal queue", () => {
+    const text = botText("zh-hans", "stillProcessing", { progress: "" });
+    expect(text).toContain("处理中");
+    expect(text).not.toContain("排队");
   });
 
   it("has localized core asynchronous media copy for every advertised locale", () => {

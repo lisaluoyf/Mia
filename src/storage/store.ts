@@ -14,6 +14,9 @@ import type {
   MemoryRecord,
   MemoryScope,
   MessageInput,
+  OnboardingProfileUpdates,
+  OnboardingStage,
+  OnboardingState,
   StoredMessage,
   SummaryInput,
   SummaryRecord,
@@ -97,6 +100,21 @@ interface CompletedTurnRow {
   assistant_message_id: number;
   completed_at: string;
   compacted_at: string | null;
+}
+
+interface OnboardingRow {
+  telegram_user_id: number;
+  stage: OnboardingStage;
+  selected_role: string | null;
+  has_preferred_name: number;
+  has_primary_goal: number;
+  prompt_count: number;
+  first_prompt_turn: number | null;
+  last_prompt_turn: number | null;
+  expired_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface ScopeQuery {
@@ -236,6 +254,32 @@ function completedTurnFromRow(row: CompletedTurnRow): CompletedTurn {
   };
 }
 
+function onboardingFromRow(row: OnboardingRow): OnboardingState {
+  return {
+    telegramUserId: row.telegram_user_id,
+    stage: row.stage,
+    selectedRole: row.selected_role,
+    hasPreferredName: row.has_preferred_name === 1,
+    hasPrimaryGoal: row.has_primary_goal === 1,
+    promptCount: row.prompt_count,
+    firstPromptTurn: row.first_prompt_turn,
+    lastPromptTurn: row.last_prompt_turn,
+    expiredAt: row.expired_at,
+    completedAt: row.completed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function normalizeMemoryContent(value: string): string {
+  return value.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function isOnboardingProfileMemory(memory: Pick<MemoryRecord, "category" | "content">): boolean {
+  return (memory.category === "identity" && /^(?:preferred name|primary role):/i.test(memory.content)) ||
+    memory.category === "goal" && /^primary goal:/i.test(memory.content);
+}
+
 export class ContextStore {
   private readonly database: Database.Database;
 
@@ -361,6 +405,24 @@ export class ContextStore {
 
       CREATE INDEX IF NOT EXISTS idx_mia_completed_turns_pending
         ON mia_completed_turns(chat_id, compacted_at, id);
+
+      CREATE TABLE IF NOT EXISTS mia_user_onboarding (
+        telegram_user_id INTEGER PRIMARY KEY REFERENCES mia_users(telegram_user_id) ON DELETE CASCADE,
+        stage TEXT NOT NULL DEFAULT 'not_started' CHECK (stage IN (
+          'not_started', 'awaiting_role', 'awaiting_custom_profile', 'awaiting_details',
+          'deferred', 'completed', 'expired'
+        )),
+        selected_role TEXT,
+        has_preferred_name INTEGER NOT NULL DEFAULT 0 CHECK (has_preferred_name IN (0, 1)),
+        has_primary_goal INTEGER NOT NULL DEFAULT 0 CHECK (has_primary_goal IN (0, 1)),
+        prompt_count INTEGER NOT NULL DEFAULT 0 CHECK (prompt_count BETWEEN 0 AND 2),
+        first_prompt_turn INTEGER,
+        last_prompt_turn INTEGER,
+        expired_at TEXT,
+        completed_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
     `);
   }
 
@@ -650,6 +712,177 @@ export class ContextStore {
     return rows.map(memoryFromRow);
   }
 
+  addMemoryIfAbsent(input: MemoryInput): { memory: MemoryRecord; created: boolean } {
+    const existing = this.listMemories(input.scope, 500).find((memory) => (
+      memory.category === input.category &&
+      normalizeMemoryContent(memory.content) === normalizeMemoryContent(input.content)
+    ));
+    return existing ? { memory: existing, created: false } : { memory: this.addMemory(input), created: true };
+  }
+
+  getOnboardingState(telegramUserId: number): OnboardingState | null {
+    requireSafeInteger(telegramUserId, "telegramUserId");
+    const row = this.database.prepare(
+      "SELECT * FROM mia_user_onboarding WHERE telegram_user_id = ?",
+    ).get(telegramUserId) as OnboardingRow | undefined;
+    return row ? onboardingFromRow(row) : null;
+  }
+
+  ensureOnboardingState(telegramUserId: number): OnboardingState {
+    requireSafeInteger(telegramUserId, "telegramUserId");
+    this.database.prepare(`
+      INSERT INTO mia_user_onboarding (telegram_user_id) VALUES (?)
+      ON CONFLICT(telegram_user_id) DO NOTHING
+    `).run(telegramUserId);
+    const state = this.getOnboardingState(telegramUserId);
+    if (!state) throw new Error("Failed to store onboarding state");
+    return state;
+  }
+
+  countSuccessfulPrivateTurns(chatId: number, userId: number): number {
+    requireSafeInteger(chatId, "chatId", true);
+    requireSafeInteger(userId, "userId");
+    const row = this.database.prepare(`
+      SELECT COUNT(*) AS count FROM mia_completed_turns WHERE chat_id = ? AND user_id = ?
+    `).get(chatId, userId) as { count: number };
+    return row.count;
+  }
+
+  expireOnboarding(telegramUserId: number): OnboardingState {
+    this.ensureOnboardingState(telegramUserId);
+    this.database.prepare(`
+      UPDATE mia_user_onboarding SET
+        stage = CASE WHEN completed_at IS NULL THEN 'expired' ELSE stage END,
+        expired_at = CASE WHEN completed_at IS NULL THEN COALESCE(expired_at, CURRENT_TIMESTAMP) ELSE expired_at END,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE telegram_user_id = ?
+    `).run(telegramUserId);
+    return this.getOnboardingState(telegramUserId) as OnboardingState;
+  }
+
+  recordOnboardingPrompt(telegramUserId: number, turn: number): OnboardingState | null {
+    requireSafeInteger(telegramUserId, "telegramUserId");
+    requireSafeInteger(turn, "turn");
+    return this.database.transaction(() => {
+      const state = this.ensureOnboardingState(telegramUserId);
+      const complete = state.selectedRole !== null && state.hasPreferredName && state.hasPrimaryGoal;
+      const intervalSatisfied = state.promptCount === 0 ||
+        state.lastPromptTurn !== null && turn - state.lastPromptTurn >= 20;
+      if (complete || state.completedAt || state.expiredAt || state.promptCount >= 2 || turn > 100 || !intervalSatisfied) {
+        return null;
+      }
+      const stage: OnboardingStage = state.selectedRole === null ? "awaiting_role" : "awaiting_details";
+      this.database.prepare(`
+        UPDATE mia_user_onboarding SET
+          stage = ?, prompt_count = prompt_count + 1,
+          first_prompt_turn = COALESCE(first_prompt_turn, ?), last_prompt_turn = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE telegram_user_id = ?
+      `).run(stage, turn, turn, telegramUserId);
+      return this.getOnboardingState(telegramUserId);
+    }).immediate();
+  }
+
+  deferOnboarding(telegramUserId: number): OnboardingState {
+    this.ensureOnboardingState(telegramUserId);
+    this.database.prepare(`
+      UPDATE mia_user_onboarding SET stage = 'deferred', updated_at = CURRENT_TIMESTAMP
+      WHERE telegram_user_id = ? AND completed_at IS NULL AND expired_at IS NULL
+    `).run(telegramUserId);
+    return this.getOnboardingState(telegramUserId) as OnboardingState;
+  }
+
+  selectOnboardingRole(input: {
+    telegramUserId: number;
+    role: string | null;
+    custom: boolean;
+    sourceMessageId?: number | null;
+  }): { state: OnboardingState; created: boolean } {
+    requireSafeInteger(input.telegramUserId, "telegramUserId");
+    return this.database.transaction(() => {
+      const before = this.ensureOnboardingState(input.telegramUserId);
+      if (before.completedAt || before.expiredAt || before.selectedRole !== null ||
+          input.custom && before.stage === "awaiting_custom_profile") {
+        return { state: before, created: false };
+      }
+      if (input.custom) {
+        this.database.prepare(`
+          UPDATE mia_user_onboarding SET stage = 'awaiting_custom_profile', updated_at = CURRENT_TIMESTAMP
+          WHERE telegram_user_id = ?
+        `).run(input.telegramUserId);
+        return { state: this.getOnboardingState(input.telegramUserId) as OnboardingState, created: true };
+      }
+      const role = input.role?.trim();
+      if (!role) throw new TypeError("role is required");
+      this.addMemoryIfAbsent({
+        scope: { type: "user", userId: input.telegramUserId },
+        category: "identity",
+        content: `Primary role: ${role}`,
+        sourceMessageId: input.sourceMessageId ?? null,
+        createdByUserId: input.telegramUserId,
+      });
+      this.database.prepare(`
+        UPDATE mia_user_onboarding SET selected_role = ?, stage = 'awaiting_details', updated_at = CURRENT_TIMESTAMP
+        WHERE telegram_user_id = ?
+      `).run(role, input.telegramUserId);
+      return { state: this.getOnboardingState(input.telegramUserId) as OnboardingState, created: true };
+    }).immediate();
+  }
+
+  applyOnboardingProfileUpdates(input: {
+    telegramUserId: number;
+    sourceMessageId: number;
+    updates: OnboardingProfileUpdates;
+  }): { state: OnboardingState; added: MemoryRecord[] } {
+    requireSafeInteger(input.telegramUserId, "telegramUserId");
+    requireSafeInteger(input.sourceMessageId, "sourceMessageId");
+    return this.database.transaction(() => {
+      const before = this.ensureOnboardingState(input.telegramUserId);
+      if (before.completedAt || before.expiredAt) return { state: before, added: [] };
+      const added: MemoryRecord[] = [];
+      const values = [
+        ["preferredName", "identity", "Preferred name", input.updates.preferredName],
+        ["primaryRole", "identity", "Primary role", input.updates.primaryRole],
+        ["primaryGoal", "goal", "Primary goal", input.updates.primaryGoal],
+      ] as const;
+      for (const [, category, label, raw] of values) {
+        const value = raw?.trim();
+        if (!value) continue;
+        const result = this.addMemoryIfAbsent({
+          scope: { type: "user", userId: input.telegramUserId },
+          category,
+          content: `${label}: ${value}`,
+          sourceMessageId: input.sourceMessageId,
+          createdByUserId: input.telegramUserId,
+        });
+        if (result.created) added.push(result.memory);
+      }
+      const preferredName = input.updates.preferredName?.trim() || null;
+      const primaryRole = input.updates.primaryRole?.trim() || null;
+      const primaryGoal = input.updates.primaryGoal?.trim() || null;
+      this.database.prepare(`
+        UPDATE mia_user_onboarding SET
+          selected_role = COALESCE(selected_role, ?),
+          has_preferred_name = CASE WHEN ? IS NOT NULL THEN 1 ELSE has_preferred_name END,
+          has_primary_goal = CASE WHEN ? IS NOT NULL THEN 1 ELSE has_primary_goal END,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE telegram_user_id = ?
+      `).run(primaryRole, preferredName, primaryGoal, input.telegramUserId);
+      const current = this.getOnboardingState(input.telegramUserId) as OnboardingState;
+      if (current.selectedRole !== null && current.hasPreferredName && current.hasPrimaryGoal) {
+        this.database.prepare(`
+          UPDATE mia_user_onboarding SET stage = 'completed', completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
+            updated_at = CURRENT_TIMESTAMP WHERE telegram_user_id = ?
+        `).run(input.telegramUserId);
+      } else if (current.promptCount > 0) {
+        this.database.prepare(`
+          UPDATE mia_user_onboarding SET stage = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_user_id = ?
+        `).run(current.selectedRole === null ? "awaiting_role" : "awaiting_details", input.telegramUserId);
+      }
+      return { state: this.getOnboardingState(input.telegramUserId) as OnboardingState, added };
+    }).immediate();
+  }
+
   recordCompletedTurn(input: CompletedTurnInput): CompletedTurn {
     requireSafeInteger(input.chatId, "chatId", true);
     requireSafeInteger(input.userId, "userId");
@@ -712,11 +945,22 @@ export class ContextStore {
         fromMessageId: input.fromMessageId,
         throughMessageId: input.throughMessageId,
       });
+      const protectedProfile = this.listMemories({ type: "user", userId: input.userId }, 500)
+        .filter(isOnboardingProfileMemory);
+      const nextMemories = [...input.memories];
+      const nextKeys = new Set(nextMemories.map((memory) => `${memory.category}:${normalizeMemoryContent(memory.content)}`));
+      for (const memory of protectedProfile) {
+        const key = `${memory.category}:${normalizeMemoryContent(memory.content)}`;
+        if (!nextKeys.has(key)) {
+          nextMemories.push({ category: memory.category, content: memory.content });
+          nextKeys.add(key);
+        }
+      }
       this.database.prepare(`
         DELETE FROM mia_memories
         WHERE scope_type = 'user' AND user_id = ? AND chat_id IS NULL AND thread_id = 0
       `).run(input.userId);
-      for (const memory of input.memories) {
+      for (const memory of nextMemories) {
         this.addMemory({
           scope: { type: "user", userId: input.userId },
           category: memory.category,
@@ -747,9 +991,10 @@ export class ContextStore {
         DELETE FROM mia_memories
         WHERE scope_type = ? AND chat_id = ? AND thread_id = ?
       `).run(normalized.type, normalized.chatId, normalized.threadId);
-      this.database.prepare(
-        "DELETE FROM mia_completed_turns WHERE chat_id = ?",
-      ).run(normalized.chatId);
+      this.database.prepare(`
+        UPDATE mia_completed_turns SET compacted_at = COALESCE(compacted_at, CURRENT_TIMESTAMP)
+        WHERE chat_id = ?
+      `).run(normalized.chatId);
     })();
   }
 

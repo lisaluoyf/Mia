@@ -107,3 +107,33 @@ export interface CompletedTurn extends CompletedTurnInput {
   completedAt: string;
   compactedAt: string | null;
 }
+
+export type OnboardingStage =
+  | "not_started"
+  | "awaiting_role"
+  | "awaiting_custom_profile"
+  | "awaiting_details"
+  | "deferred"
+  | "completed"
+  | "expired";
+
+export interface OnboardingState {
+  telegramUserId: number;
+  stage: OnboardingStage;
+  selectedRole: string | null;
+  hasPreferredName: boolean;
+  hasPrimaryGoal: boolean;
+  promptCount: number;
+  firstPromptTurn: number | null;
+  lastPromptTurn: number | null;
+  expiredAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OnboardingProfileUpdates {
+  preferredName: string | null;
+  primaryRole: string | null;
+  primaryGoal: string | null;
+}
