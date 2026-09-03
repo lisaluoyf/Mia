@@ -137,10 +137,14 @@ mv -Tf "$deploy_root/current.next" "$current_link"
 ln -sfn "$release" "$runtime_link.next"
 mv -Tf "$runtime_link.next" "$runtime_link"
 
-reload_release() {
+activate_release() {
   local target="$1"
   sudo -u "$runtime_user" -H bash -lc \
-    "cd '$target' && pm2 startOrReload '$target/ecosystem.config.cjs' --update-env && pm2 save"
+    "pm2 delete mia >/dev/null 2>&1 || true; cd '$target' && pm2 start '$target/ecosystem.config.cjs' --update-env"
+}
+
+save_process_list() {
+  sudo -u "$runtime_user" -H bash -lc "pm2 save"
 }
 
 rollback() {
@@ -150,7 +154,8 @@ rollback() {
     mv -Tf "$deploy_root/current.rollback" "$current_link"
     ln -sfn "$previous_release" "$runtime_link.rollback"
     mv -Tf "$runtime_link.rollback" "$runtime_link"
-    reload_release "$previous_release"
+    activate_release "$previous_release"
+    save_process_list
   fi
   if [[ -d "$release" ]]; then
     find -P "$release" -depth -delete
@@ -158,7 +163,7 @@ rollback() {
   exit 1
 }
 
-reload_release "$release" || rollback
+activate_release "$release" || rollback
 
 healthy=0
 for _attempt in {1..15}; do
@@ -171,6 +176,7 @@ for _attempt in {1..15}; do
   sleep 1
 done
 [[ "$healthy" -eq 1 ]] || rollback
+save_process_list || rollback
 
 declare -A keep=(["$release"]=1)
 if [[ -n "$previous_release" && -d "$previous_release" && "$previous_release" != "$release" ]]; then
