@@ -7,6 +7,8 @@ export type BotLocale = typeof BOT_LOCALES[number];
 
 const ENGLISH = {
   contextCleared: "Context cleared.",
+  groupSummaryGroupOnly: "Chat summaries are available in groups and Topics only.",
+  groupSummaryEmpty: "There are no new messages to summarize in this chat yet.",
   maxImages: "Use at most 10 images. Please split the request; Mia did not discard any silently.",
   imageActionQuestion: "What would you like me to do with the image: analyze it or modify it?",
   mediaDisabled: "Media features are disabled in this group by an administrator.",
@@ -90,6 +92,8 @@ type MessageOverrides = Partial<Record<BotMessageKey, string>>;
 
 const CHINESE_SIMPLIFIED: MessageOverrides = {
   contextCleared: "上下文已清除。",
+  groupSummaryGroupOnly: "群聊总结仅支持群和 Topic。",
+  groupSummaryEmpty: "这个聊天目前还没有可总结的新消息。",
   maxImages: "一次最多使用 10 张图片，请拆分后重试；Mia 不会静默丢弃图片。",
   imageActionQuestion: "你想让我分析这张图片，还是修改它？",
   mediaDisabled: "管理员已关闭本群的媒体功能。",

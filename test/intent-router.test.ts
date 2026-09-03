@@ -123,11 +123,26 @@ describe("Mia intent router", () => {
     expect(JSON.stringify(structuredResponse.mock.calls[0]?.[2])).toContain("missingFields");
   });
 
+  it("returns group_summary only when the server marks the request as a group scope", async () => {
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      intent: "group_summary", confidence: 0.99, instruction: "", media_source: "none",
+      image_options: null, video_options: null, final_response: null,
+      conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 1000 });
+
+    await expect(router.classify({ ...base, text: "梳理一下大家刚才聊的重点", allowGroupSummary: true }, "key"))
+      .resolves.toMatchObject({ intent: "group_summary", missingRequired: [] });
+    await expect(router.classify({ ...base, text: "梳理一下", allowGroupSummary: false }, "key"))
+      .resolves.toMatchObject({ intent: "chat", fallbackReason: "invalid_output" });
+    expect(JSON.stringify(structuredResponse.mock.calls[0]?.[2])).toContain("allow_group_summary");
+  });
+
   it("registers mia.system as a base module included once by the actual router prompt", () => {
     const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
     expect(basePrompt).toMatchObject({ kind: "base" });
-    expect(routerPrompt).toMatchObject({ version: 3, kind: "composed", includes: ["mia.system"] });
+    expect(routerPrompt).toMatchObject({ version: 4, kind: "composed", includes: ["mia.system"] });
     expect(routerPrompt?.text).toContain(basePrompt?.text ?? "missing");
   });
 });

@@ -31,7 +31,7 @@ Mia 当前复用 APIMaster 的账号、API Key、模型目录、计费和模型�
 
 1. 所有 Telegram 用户都可以使用文字聊天；已绑定用户使用自己的 APIMaster Key，未绑定或无可用 Token 的用户使用 Mia 的受限免费文字凭证。
 2. 用户可以从 Telegram 打开 Mini App，查看实际可用模型并保存聊天、图片和视频偏好。
-3. Bot 在群里只在被点名时发言，但能够安静采集它实际收到的群消息，为后续上下文和总结能力建立数据基础。
+3. Bot 在群里除明确的总结命令/短语外只在被点名时发言，同时安静采集它实际收到的群消息，为上下文和总结能力建立数据基础。
 4. 所有能力可以独立测试、部署和回滚，不在代码或进度文档中保存用户密钥。
 
 ## 当前架构
@@ -80,7 +80,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] `new-api -> Mia` 使用独立内部密钥鉴权。
 - [x] Mia 使用 Grammy 处理 Telegram Update。
 - [x] 私聊文字消息可以调用 APIMaster 聊天模型。
-- [x] 群聊当前仅在 `@Mia` 或回复 Mia 时响应。
+- [x] 群聊普通请求仅在 `@Mia` 或回复 Mia 时响应；`/summary` 和明确总结短语可直接触发群聊总结。
 - [x] 通过 Telegram 用户 ID 查找已绑定的 APIMaster 账号和可用 Key。
 - [x] 未绑定或无可用 Token 的用户可在私聊和群聊使用免费 `gpt-5.4` 文字聊天；禁用账号和服务故障不兜底。
 - [x] 免费凭证只用于文字回复、意图路由和上下文整理，图片理解、生图、改图和视频始终使用触发者自己的 Key。
@@ -171,7 +171,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 ### 已确认的产品原则
 
 - [x] Bot 应采用“全量监听、选择性存储、克制回复”的模式。
-- [x] 默认只在 `@Mia`、回复 Mia 或执行命令时调用模型并发言。
+- [x] 默认只在 `@Mia`、回复 Mia 或执行命令时调用模型并发言；明确的中英文群聊总结短语是受控例外。
 - [x] Telegram 不提供 Bot 可任意读取的历史消息接口；上下文必须由 Mia 从收到 Update 后自行保存。
 - [x] 关闭 Privacy Mode 或让 Bot 成为管理员，是接收普通群消息并建立上下文的前提。
 - [x] 群组 Topic 应通过 `chat_id + message_thread_id` 隔离短期上下文。
@@ -189,7 +189,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] 媒体结果回复原消息并保留 `message_thread_id`；回复相册任意图片可恢复完整相册。
 - [x] 群媒体默认开启，管理员可用 `/media_on`、`/media_off` 切换。
 - [x] 群媒体费用使用触发者 APIMaster Key 和触发者模型偏好。
-- [ ] `/summary`：总结最近讨论。
+- [x] `/summary`、明确中文总结短语和英文 `summarize/recap` 使用独立群聊总结链路；模糊表达可由意图路由进入同一服务。
 - [x] 后台滚动摘要同步提取讨论主题、结论、待办事项、负责人、未决问题和重要链接。
 - [ ] 群级设置：模型、上下文长度、语言、安静时间和数据保留策略。
 - [ ] `/forget` 或管理页面清除群记忆。
@@ -217,6 +217,17 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] 摘要、完整记忆替换和处理水位在同一个 SQLite immediate transaction 中提交；模型或事务失败时不推进水位。
 - [x] 后台整理优先使用本次呼叫 Mia 的触发者 APIMaster Key；未绑定或无可用 Token 时使用仅限 `gpt-5.4` 的免费文字凭证。
 - [x] Debug 请求新增“群聊整理”类型，并展示作用域、旧摘要、公开记忆、新增消息区间和整理结果。
+
+### 专用群聊总结（本地已实现，待提交部署）
+
+- [x] 用户可见总结使用独立 `mia.group-summary` / `mia.group-summary-input` Prompt 和严格 JSON Schema，不复用普通聊天 Prompt 或后台群压缩 Prompt。
+- [x] 普通群和 Topic 严格隔离原始消息与滚动摘要；Topic 只读继承群级公开记忆，任何用户私聊记忆都不会进入总结。
+- [x] 默认读取摘要水位后的最近最多 300 条、约 24,000 tokens 原始消息，排除当前总结请求，并明确显示 Mia 实际收到的消息数量。
+- [x] 每个用户可见条目必须引用真实消息；服务端丢弃伪造或跨作用域来源，并校验参与者 ID 与引用消息发送者一致。
+- [x] 一次 `gpt-5.4` 调用同时生成用户可见总结、完整滚动摘要和当前作用域完整公开长期记忆；回复全部成功发送并落库后才原子推进水位。
+- [x] 消息或 token 窗口截断、发送失败、模型失败、水位竞争或模型运行期间出现并发新消息时不推进旧水位，也不立即追加后台压缩调用。
+- [x] Telegram 展示由服务端渲染转义后的 HTML，按固定栏目输出，空栏目隐藏，所有分段独立闭合且不超过 4096 字符，并保留原群、原 Topic 和回复关系。
+- [x] Debug 新增“群聊总结”类型，记录 Prompt、作用域、选中范围、截断、证据过滤、凭证来源和持久化结果，不记录 Key。
 
 ### 后续能力
 
@@ -308,6 +319,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - Mia 群共享上下文：提交 `70c6774` 已独立提交、推送并部署；100/100 全量测试、ESLint、服务端与前端 TypeScript、生产构建和 `git diff --check` 通过；覆盖 50 条消息/12,000 tokens 双阈值、摘要与记忆单次模型调用、原子水位、跨 Topic 来源拦截、群记忆继承、触发者公开发言优先、个人记忆隔离和群清除管理员权限（2026-09-03）。
 - Mia 免费文字聊天：提交 `74dca62` 已从 GitHub 精确 SHA 由生产服务器构建并发布，耗时 8 秒；未绑定或无可用 Token 的用户使用仅限 `gpt-5.4` 的部署凭证完成私聊、群聊、意图路由和上下文整理，媒体任务保持用户 Key 严格门控并提供三类激活入口。118/118 全量测试、Lint、前后端 TypeScript、生产构建和 `git diff --check` 通过；生产 `/health` 正常，PM2 `online` 且 0 次重启，访客 `gpt-5.4` 实际调用 HTTP 200，错误日志为空，服务器保留 3 个 release（2026-09-03）。
 - Mia Responses 与 Web Search：提交 `2a684df` 已从 GitHub 精确 SHA 由生产服务器构建并发布；核心意图判断和最终文字回复改用 `/v1/responses`，由 `gpt-5.4` 通过 `tool_choice: auto` 自主决定是否调用 `web_search`。119/119 全量测试、ESLint、前后端 TypeScript、生产构建和 `git diff --check` 通过；真实 APIMaster strict JSON Schema 请求 HTTP 200 并执行 1 次搜索，完整生产 `IntentRouter` 实测返回北京次日天气。Telegram 回复默认不展示引用来源，查询词、调用次数和隐藏来源保留在 Debug；生产 `/health` 正常，PM2 `online` 且 0 次重启，错误日志为空，APIMaster 只读生产冒烟 19/19 通过，未修改或重启 APIMaster Web 与 new-api（2026-09-03）。
+- Mia 专用群聊总结：本地组合工作树已实现，136/136 全量测试、ESLint、服务端与前端 TypeScript、生产构建和 `git diff --check` 通过；覆盖明确短语直达、模糊路由、私聊拒绝、普通群/Topic 隔离、17 条消息 fixture、来源与参与者校验、敏感信息脱敏、一次调用原子写回、截断/并发/模型失败不推进水位、安全 HTML 分段和 Topic 回复参数。尚未提交或部署，等待精确 SHA 发布及 `Bot玩家` 群真实对比验收（2026-09-03）。
 - Mia `70c6774` 生产验收：服务器从 GitHub 精确 SHA 构建，内部 `/health` 返回 200，PM2 在线且 0 次重启，运行目录与 release 元数据均指向 `70c67745c9ff19d8fe6ea81ce4db3c3a1dbd8e22`；SQLite 完整性为 `ok`，`mia_user_onboarding`、`mia_summaries` 和 `mia_memories` 均存在，新进程错误日志为空。APIMaster Web、new-api、Flask 和静态资源只读冒烟为 19/19 通过，未修改或重启 APIMaster 主服务（2026-09-03）。
 
 ## 下一阶段优先级
@@ -319,7 +331,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 3. P1：增加普通聊天的用户级速率限制，并完善媒体失败重试观测。
 4. P2：完善新会话和历史会话管理。
 5. P2：提交部署群共享上下文并完成真实群聊验收，随后确定原始消息保留期与群级预算方案。
-6. P2：实现 `/summary` 和管理员查看、编辑、清除群记忆。
+6. P2：部署并真实验收专用群聊总结；继续实现管理员查看、编辑、清除群记忆。
 7. P3：在群聊基础能力稳定后增加投票、小游戏、破冰、欢迎和主动气氛调节。
 
 ## 下一次交接检查清单

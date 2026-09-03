@@ -28,6 +28,7 @@ const requestKindNames: Record<DebugRequest["kind"], string> = {
   video_generate: "视频生成",
   memory_compaction: "记忆整理",
   group_compaction: "群聊整理",
+  group_summary: "群聊总结",
 };
 
 const chatTypeNames: Record<string, string> = {

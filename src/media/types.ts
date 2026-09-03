@@ -1,11 +1,16 @@
 export type RoutedIntent =
   | "chat"
+  | "group_summary"
   | "image_generate"
   | "image_edit"
   | "vision_qa"
   | "video_generate";
 
-export type PendingMediaIntent = Exclude<RoutedIntent, "chat">;
+export type PendingMediaIntent =
+  | "image_generate"
+  | "image_edit"
+  | "vision_qa"
+  | "video_generate";
 
 export type MediaJobType = "image_generate" | "image_edit" | "video_generate";
 

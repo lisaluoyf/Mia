@@ -9,6 +9,7 @@ import type { ChatCredential, ChatCredentialProvider } from "../credentials/chat
 import { buildConversationMessages, loadConversationContext } from "../context/conversation.js";
 import type { ContextCompactor } from "../context/compactor.js";
 import type { GroupContextCompactor } from "../context/group-compactor.js";
+import type { GroupSummaryService } from "../context/group-summary.js";
 import { debugContextLayers } from "../debug/context.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { DebugContextLayers, DebugRequestKind } from "../debug/types.js";
@@ -29,6 +30,7 @@ import type { ContextStore } from "../storage/store.js";
 import type { ConversationScope } from "../storage/types.js";
 import { MIA_SYSTEM_PROMPT, promptReference } from "../prompts.js";
 import { botText, mediaJobLocale, resolveBotLocale, type BotLocale } from "./localization.js";
+import { renderGroupSummaryHtml } from "./group-summary-html.js";
 import { userFacingError } from "./messages.js";
 import { promptFromMessage, shouldRespond } from "./policy.js";
 import { splitText } from "./split-text.js";
@@ -48,6 +50,7 @@ interface BotDependencies {
       "listMessagesAfter" | "getMessage" | "getReplyChain" | "getUser" | "listPendingCompletedTurns">>;
   compactor?: ContextCompactor;
   groupCompactor?: GroupContextCompactor;
+  groupSummary?: GroupSummaryService;
   router?: IntentRouter;
   mediaStore?: MediaStore;
   botToken?: string;
@@ -199,8 +202,9 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   };
   const identity = { id: ctx.me.id, username: ctx.me.username };
   const explicit = parseExplicitCommand(request.text);
+  const explicitSummaryPhrase = isExplicitGroupSummaryPhrase(promptFromMessage(policyInput, identity));
   const namedMediaReply = message.reply_to_message !== undefined && /^(?:@?mia)(?:\s|[,，:：])/i.test(request.text.trim());
-  if (!shouldRespond(policyInput, identity) && !explicit && !namedMediaReply) return;
+  if (!shouldRespond(policyInput, identity) && !explicit && !namedMediaReply && !explicitSummaryPhrase) return;
 
   if (explicit?.command === "media_on" || explicit?.command === "media_off") {
     await handleMediaAdmin(ctx, explicit.command === "media_on", dependencies.mediaStore);
@@ -218,6 +222,11 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     if (message.chat.type === "private") dependencies.mediaStore.clearActivePrivateImage(message.from.id, message.chat.id);
     dependencies.contexts.clearConversation?.(conversationScope(message));
     await replyTo(ctx, message, botText(locale, "contextCleared"));
+    return;
+  }
+  const directSummary = explicit?.command === "summary" || explicitSummaryPhrase;
+  if (directSummary) {
+    await handleGroupSummary(ctx, message, dependencies, locale);
     return;
   }
 
@@ -352,6 +361,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         replyMediaCount: replyInputs.length,
         replyToMessageId: message.reply_to_message?.message_id ?? null,
         activePrivateImage: active !== null,
+        allowGroupSummary: message.chat.type !== "private",
         summary,
         recentMessages: recent.map((item) => ({
           role: item.senderUserId === ctx.me.id ? "assistant" as const : "user" as const,
@@ -400,7 +410,12 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     }
   }
 
-  if (routerCredential?.source === "guest" && routed.intent !== "chat") {
+  if (routed.intent === "group_summary") {
+    await handleGroupSummary(ctx, message, dependencies, locale);
+    return;
+  }
+
+  if (routerCredential?.source === "guest" && isMediaIntent(routed.intent)) {
     await replyMediaAccessError(
       ctx,
       message,
@@ -1124,6 +1139,62 @@ function recordSuccessfulGroupTrigger(message: Message, dependencies: BotDepende
   dependencies.groupCompactor.recordSuccessfulGroupTrigger(scope, message.from.id);
 }
 
+async function handleGroupSummary(
+  ctx: Context,
+  message: Message,
+  dependencies: BotDependencies,
+  locale: BotLocale,
+): Promise<void> {
+  if (!message.from) return;
+  if (message.chat.type === "private") {
+    await replyTo(ctx, message, botText(locale, "groupSummaryGroupOnly"));
+    return;
+  }
+  const scope = conversationScope(message);
+  if (scope.type === "private") return;
+  if (!dependencies.groupSummary) {
+    await replyTo(ctx, message, botText(locale, "serviceUnavailable"));
+    return;
+  }
+  await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
+  let prepared;
+  try {
+    prepared = await dependencies.groupSummary.summarize({
+      scope,
+      requesterUserId: message.from.id,
+      currentMessageId: message.message_id,
+      locale,
+    });
+  } catch (error) {
+    dependencies.logger.warn({ err: error, scope }, "Mia group summary failed");
+    await replyTo(ctx, message, userFacingError(error, dependencies.groupSummary.model, locale));
+    return;
+  }
+  if (!prepared) {
+    await replyTo(ctx, message, botText(locale, "groupSummaryEmpty"));
+    return;
+  }
+  let lastMessageId: number | null = null;
+  const summaryMessageIds: number[] = [];
+  let allPersisted = true;
+  try {
+    for (const chunk of renderGroupSummaryHtml(prepared.content, prepared.messageCount, locale)) {
+      const sent = await replyTo(ctx, message, chunk, { parse_mode: "HTML" });
+      allPersisted = persistMessage(sent, dependencies) && allPersisted;
+      lastMessageId = sent.message_id;
+      summaryMessageIds.push(sent.message_id);
+    }
+  } catch (error) {
+    dependencies.groupSummary.failDelivery(prepared);
+    throw error;
+  }
+  if (!allPersisted || lastMessageId === null) {
+    dependencies.groupSummary.failDelivery(prepared);
+    return;
+  }
+  dependencies.groupSummary.complete(prepared, lastMessageId, summaryMessageIds);
+}
+
 async function sendConversationResponse(
   ctx: Context,
   message: Message,
@@ -1163,8 +1234,20 @@ function directIntent(intent: PendingMediaIntent, instruction: string, mediaSour
 }
 
 function parseExplicitCommand(text: string): { command: string; instruction: string } | null {
-  const match = /^\/(image|vision|video|new|forget|media_on|media_off)(?:@\w+)?(?:\s+([\s\S]*))?$/i.exec(text.trim());
+  const match = /^\/(image|vision|video|summary|new|forget|media_on|media_off)(?:@\w+)?(?:\s+([\s\S]*))?$/i.exec(text.trim());
   return match ? { command: match[1]?.toLowerCase() ?? "", instruction: match[2]?.trim() ?? "" } : null;
+}
+
+export function isExplicitGroupSummaryPhrase(text: string): boolean {
+  const normalized = text.normalize("NFKC").trim();
+  const chinese = /^(?:请|帮我|麻烦)?(?:总结|概括|回顾)(?:一下|下)?(?:刚才|刚刚|最近|上面|前面|这段|本群|群里|这个群|当前(?:话题|topic))?(?:的)?(?:聊天记录|聊天|讨论|对话|内容)?[吧。！？!?.]*$/i;
+  const english = /^(?:please\s+)?(?:summarize|recap)(?:\s+(?:the|this|our))?\s+(?:chat|conversation|discussion|messages?|thread)(?:\s+(?:so far|above|just now|recently))?[.!?]*$/i;
+  return chinese.test(normalized) || english.test(normalized);
+}
+
+function isMediaIntent(intent: RoutedIntent["intent"]): intent is PendingMediaIntent {
+  return intent === "image_generate" || intent === "image_edit" ||
+    intent === "vision_qa" || intent === "video_generate";
 }
 
 function parseVideoOptions(text: string, hasImages: boolean) {

@@ -9,6 +9,7 @@ import { SettingsStore } from "./settings/store.js";
 import { ContextStore } from "./storage/store.js";
 import { ContextCompactor } from "./context/compactor.js";
 import { GroupContextCompactor } from "./context/group-compactor.js";
+import { GroupSummaryService } from "./context/group-summary.js";
 import { createBot } from "./telegram/bot.js";
 import { IntentRouter } from "./intent/router.js";
 import { MediaStore } from "./media/store.js";
@@ -64,6 +65,14 @@ async function main(): Promise<void> {
     model: config.miaContextModel,
     debug,
   });
+  const groupSummary = new GroupSummaryService({
+    client,
+    credentials: chatCredentials,
+    store: contexts,
+    logger,
+    model: config.miaContextModel,
+    debug,
+  });
   const onboarding = new OnboardingService(contexts);
   const mediaStore = new MediaStore(resolve(config.databasePath));
   const settings = new ModelSettingsService(client, store);
@@ -79,6 +88,7 @@ async function main(): Promise<void> {
     contexts,
     compactor,
     groupCompactor,
+    groupSummary,
     router,
     mediaStore,
     botToken: config.telegramBotToken,

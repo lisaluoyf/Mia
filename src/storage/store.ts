@@ -593,6 +593,44 @@ export class ContextStore {
     return rows.map(messageFromRow);
   }
 
+  countMessagesAfterBefore(
+    scope: ConversationScope,
+    afterMessageId: number | null,
+    beforeMessageId: number,
+  ): number {
+    if (afterMessageId !== null) requireSafeInteger(afterMessageId, "afterMessageId");
+    requireSafeInteger(beforeMessageId, "beforeMessageId");
+    const { chatId, threadId } = conversationCoordinates(scope);
+    const row = this.database.prepare(`
+      SELECT COUNT(*) AS count FROM mia_messages
+      WHERE chat_id = ? AND thread_id = ? AND message_id > ? AND message_id < ?
+    `).get(chatId, threadId, afterMessageId ?? 0, beforeMessageId) as { count: number };
+    return row.count;
+  }
+
+  listRecentMessagesAfterBefore(
+    scope: ConversationScope,
+    afterMessageId: number | null,
+    beforeMessageId: number,
+    limit = 300,
+  ): StoredMessage[] {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+      throw new RangeError("limit must be between 1 and 500");
+    }
+    if (afterMessageId !== null) requireSafeInteger(afterMessageId, "afterMessageId");
+    requireSafeInteger(beforeMessageId, "beforeMessageId");
+    const { chatId, threadId } = conversationCoordinates(scope);
+    const rows = this.database.prepare(`
+      SELECT * FROM (
+        SELECT * FROM mia_messages
+        WHERE chat_id = ? AND thread_id = ? AND message_id > ? AND message_id < ?
+        ORDER BY message_id DESC
+        LIMIT ?
+      ) ORDER BY message_id ASC
+    `).all(chatId, threadId, afterMessageId ?? 0, beforeMessageId, limit) as MessageRow[];
+    return rows.map(messageFromRow);
+  }
+
   listMessagesBetween(scope: ConversationScope, fromMessageId: number, throughMessageId: number): StoredMessage[] {
     requireSafeInteger(fromMessageId, "fromMessageId");
     requireSafeInteger(throughMessageId, "throughMessageId");

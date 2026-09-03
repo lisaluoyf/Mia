@@ -4,7 +4,7 @@ import type { APIMasterClient, MediaBinary, StructuredMessage, WebSearchUsage } 
 import { INTENT_ROUTER_SYSTEM_PROMPT } from "../prompts.js";
 
 export const mediaIntentSchema = z.object({
-  intent: z.enum(["chat", "image_generate", "image_edit", "vision_qa", "video_generate"]),
+  intent: z.enum(["chat", "group_summary", "image_generate", "image_edit", "vision_qa", "video_generate"]),
   confidence: z.number().min(0).max(1),
   instruction: z.string().max(8000),
   media_source: z.enum(["none", "message", "reply", "active_private_image"]),
@@ -44,6 +44,7 @@ export interface IntentRouterInput {
   replyMediaCount: number;
   replyToMessageId?: number | null;
   activePrivateImage: boolean;
+  allowGroupSummary?: boolean;
   summary?: string | null;
   recentMessages?: readonly RouterContextMessage[];
   conversationMessages?: readonly StructuredMessage[];
@@ -67,7 +68,7 @@ const ROUTER_SCHEMA = {
     "conversation_mode", "onboarding_opportunity", "profile_updates",
   ],
   properties: {
-    intent: { type: "string", enum: ["chat", "image_generate", "image_edit", "vision_qa", "video_generate"] },
+    intent: { type: "string", enum: ["chat", "group_summary", "image_generate", "image_edit", "vision_qa", "video_generate"] },
     confidence: { type: "number", minimum: 0, maximum: 1 },
     instruction: { type: "string" },
     media_source: { type: "string", enum: ["none", "message", "reply", "active_private_image"] },
@@ -144,7 +145,7 @@ function fallback(reason: NonNullable<RoutedIntent["fallbackReason"]>): RoutedIn
 export function validateIntentRequirements(intent: MediaIntent, input: IntentRouterInput): string[] {
   const missing: string[] = [];
   const hasImages = input.mediaCount > 0 || input.replyMediaCount > 0 || input.activePrivateImage;
-  if (intent.intent !== "chat" && intent.instruction.trim() === "") {
+  if (intent.intent !== "chat" && intent.intent !== "group_summary" && intent.instruction.trim() === "") {
     missing.push(intent.intent === "vision_qa" ? "question" : "instruction");
   }
   if ((intent.intent === "image_edit" || intent.intent === "vision_qa") && !hasImages) {
@@ -178,6 +179,7 @@ export class IntentRouter {
       reply_media_count: input.replyMediaCount,
       reply_to_message_id: input.replyToMessageId ?? null,
       active_private_image: input.activePrivateImage,
+      allow_group_summary: input.allowGroupSummary === true,
       summary: input.summary ?? null,
       recent_messages: (input.recentMessages ?? []).slice(-8),
       onboarding: input.onboarding ?? { active: false, missingFields: [] },
@@ -201,6 +203,7 @@ export class IntentRouter {
           reply_media_count: input.replyMediaCount,
           reply_to_message_id: input.replyToMessageId ?? null,
           active_private_image: input.activePrivateImage,
+          allow_group_summary: input.allowGroupSummary === true,
           onboarding: input.onboarding ?? { active: false, missingFields: [] },
         } }),
       },
@@ -231,6 +234,9 @@ export class IntentRouter {
     input: IntentRouterInput,
     webSearch: WebSearchUsage,
   ): RoutedIntent {
+    if (intent.intent === "group_summary" && input.allowGroupSummary !== true) {
+      return fallback("invalid_output");
+    }
     const returnsText = intent.intent === "chat" || intent.intent === "vision_qa";
     if ((returnsText && !intent.final_response?.trim()) || (!returnsText && intent.final_response !== null)) {
       return fallback("invalid_output");
