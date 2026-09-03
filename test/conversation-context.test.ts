@@ -192,4 +192,53 @@ describe("conversation context", () => {
     expect(serialized).toContain('sender=\\"Roma\\"');
     expect(serialized).not.toContain("PRIVATE SECRET");
   });
+
+  it("uses 20 Topic messages plus 8 speaker messages and prioritizes valid nearby media", () => {
+    store = new ContextStore(":memory:");
+    store.upsertUser({ telegramUserId: 42, firstName: "Roma", lastName: null, username: "roma", languageCode: "zh-CN", isBot: false });
+    store.upsertUser({ telegramUserId: 43, firstName: "Lee", lastName: null, username: "lee", languageCode: "zh-CN", isBot: false });
+    store.upsertUser({ telegramUserId: 99, firstName: "Mia", lastName: null, username: "mia", languageCode: null, isBot: true });
+    store.upsertChat({ chatId: -1001, type: "supergroup", title: "Builders", username: null, description: null, isForum: true });
+    for (let messageId = 1; messageId <= 39; messageId += 1) {
+      const own = messageId <= 8;
+      const photo = [2, 10, 21].includes(messageId);
+      const minute = messageId === 2 ? 41 : messageId === 21 ? 55 : 0;
+      store.saveMessage({
+        chatId: -1001, messageId, threadId: 12, senderUserId: own ? 42 : 43, senderChatId: null,
+        replyToMessageId: null, contentType: photo ? "photo" : "text", text: photo ? null : `Message ${messageId}`,
+        caption: photo ? `Photo ${messageId}` : null, entitiesJson: null,
+        mediaFileId: photo ? `file-${messageId}` : null, mediaUniqueId: photo ? `unique-${messageId}` : null,
+        sentAt: `2026-09-03T${messageId === 10 ? "10:00" : `11:${String(minute || messageId % 60).padStart(2, "0")}`}:00.000Z`, editedAt: null,
+      });
+    }
+    store.saveMessage({
+      chatId: -1001, messageId: 40, threadId: 12, senderUserId: 42, senderChatId: null,
+      replyToMessageId: 10, contentType: "text", text: "@Mia use that image", caption: null,
+      entitiesJson: null, mediaFileId: null, mediaUniqueId: null,
+      sentAt: "2026-09-03T12:10:00.000Z", editedAt: null,
+    });
+
+    const context = loadConversationContext({
+      store,
+      scope: { type: "topic", chatId: -1001, threadId: 12 },
+      userId: 42,
+      currentMessageId: 40,
+      replyToMessageId: 10,
+      metadata: {
+        chatType: "supergroup", chatTitle: "Builders", currentUser: "roma", language: "zh-CN",
+        currentTime: "2026-09-03T12:10:00.000Z", timezone: null, trigger: "reply", currentTask: null,
+      },
+    }, 99);
+
+    const ids = context.messages.map((message) => message.messageId);
+    expect(ids).toContain(2);
+    expect(ids).not.toContain(1);
+    expect(ids).not.toContain(20);
+    expect(ids).toContain(21);
+    expect(ids).toContain(40);
+    expect(context.mediaInputs.map((media) => media.messageId)).toEqual([10, 2, 21]);
+    const serialized = JSON.stringify(buildConversationMessages(context, [], 99));
+    expect(serialized).toContain("message_id=10");
+    expect(serialized).toContain("pixels=not_provided");
+  });
 });

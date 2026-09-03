@@ -36,11 +36,15 @@ export const INTENT_ROUTER_SYSTEM_PROMPT = `${MIA_SYSTEM_PROMPT}
 - video_generate：实际生成视频，包括让已有图片动起来。
 
 规则：
-- 当前消息优先于历史消息；当前图片优先于回复图片、持续讨论图片和历史图片。
-- 每张图片的 ID、所属轮次和用途都已标注，不要把历史图片误当作当前图片。
+- 当前消息优先于历史消息；图片选择顺序是当前消息图片、明确回复图片、当前用户近期图片、同一 Topic 其他近期图片。
+- media_candidates 是服务端允许选择的图片集合。需要图片时，把实际选中的 message_id 按原顺序写入 media_message_ids；不得返回集合之外的 ID。
+- 用户明确回复的图片可以由群内任何成员发送；“这张图、刚才的图、上一张图”等指代只有在候选明确时才选择，多个候选无法消解时降低 confidence。
+- media_source 对应当前消息、回复、私聊活动图片或 context；不需要图片时必须为 none，media_message_ids 必须为空数组。
+- 每张图片的 ID、所属轮次、发送者、是否提供像素和用途都已标注，不要把无关历史图片误当作当前图片。
 - instruction 只移除开头的命令或 Mia 称呼，并可根据上下文消解明确的指代。
 - 不要自行补充风格、物体、参数、模型、价格或权限。
 - media_source 必须与实际可用的图片来源一致。
+- vision_qa 只有 media_pixels_provided=true 时才在 final_response 中直接回答；只有元数据而没有像素时 final_response 必须为 null，服务端会再调用视觉模型。
 - 保持图片顺序。视频有一张图片时作为 first_frame；两张时第二张作为 last_frame；其余作为 reference_image。
 - 只有用户明确指定时才提取时长、比例和分辨率，否则返回 null。
 - chat 和 vision_qa 必须使用用户当前语言在 final_response 中给出最终回复。
@@ -218,7 +222,7 @@ export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
   },
   {
     id: "mia.intent-router",
-    version: 4,
+    version: 5,
     name: "意图路由",
     purpose: "实际发送的组合 Prompt：包含 mia.system，并判断意图、实时搜索、闲聊机会和明确画像更新",
     text: INTENT_ROUTER_SYSTEM_PROMPT,

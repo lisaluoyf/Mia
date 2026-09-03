@@ -7,7 +7,8 @@ export const mediaIntentSchema = z.object({
   intent: z.enum(["chat", "group_summary", "image_generate", "image_edit", "vision_qa", "video_generate"]),
   confidence: z.number().min(0).max(1),
   instruction: z.string().max(8000),
-  media_source: z.enum(["none", "message", "reply", "active_private_image"]),
+  media_source: z.enum(["none", "message", "reply", "active_private_image", "context"]),
+  media_message_ids: z.array(z.number().int().positive()).max(10).optional().default([]),
   image_options: z.object({
     aspect_ratio: z.enum(["1:1", "16:9", "9:16"]).nullable(),
   }).nullable(),
@@ -35,6 +36,19 @@ export type MediaSource = MediaIntent["media_source"];
 export interface RouterContextMessage {
   role: "user" | "assistant";
   text: string;
+  messageId?: number;
+  senderUserId?: number | null;
+  replyToMessageId?: number | null;
+  contentType?: string;
+  sentAt?: string;
+}
+
+export interface RouterMediaCandidate {
+  messageId: number;
+  senderUserId: number | null;
+  type: "photo" | "document";
+  sentAt: string;
+  source: "current" | "reply" | "active_private_image" | "current_user_recent" | "topic_recent";
 }
 
 export interface IntentRouterInput {
@@ -47,6 +61,8 @@ export interface IntentRouterInput {
   allowGroupSummary?: boolean;
   summary?: string | null;
   recentMessages?: readonly RouterContextMessage[];
+  mediaCandidates?: readonly RouterMediaCandidate[];
+  mediaPixelsProvided?: boolean;
   conversationMessages?: readonly StructuredMessage[];
   onboarding?: {
     active: boolean;
@@ -64,14 +80,19 @@ const ROUTER_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: [
-    "intent", "confidence", "instruction", "media_source", "image_options", "video_options", "final_response",
+    "intent", "confidence", "instruction", "media_source", "media_message_ids", "image_options", "video_options", "final_response",
     "conversation_mode", "onboarding_opportunity", "profile_updates",
   ],
   properties: {
     intent: { type: "string", enum: ["chat", "group_summary", "image_generate", "image_edit", "vision_qa", "video_generate"] },
     confidence: { type: "number", minimum: 0, maximum: 1 },
     instruction: { type: "string" },
-    media_source: { type: "string", enum: ["none", "message", "reply", "active_private_image"] },
+    media_source: { type: "string", enum: ["none", "message", "reply", "active_private_image", "context"] },
+    media_message_ids: {
+      type: "array",
+      maxItems: 10,
+      items: { type: "integer", minimum: 1 },
+    },
     image_options: {
       anyOf: [
         { type: "null" },
@@ -131,6 +152,7 @@ function fallback(reason: NonNullable<RoutedIntent["fallbackReason"]>): RoutedIn
     confidence: 0,
     instruction: "",
     media_source: "none",
+    media_message_ids: [],
     image_options: null,
     video_options: null,
     final_response: null,
@@ -144,7 +166,8 @@ function fallback(reason: NonNullable<RoutedIntent["fallbackReason"]>): RoutedIn
 
 export function validateIntentRequirements(intent: MediaIntent, input: IntentRouterInput): string[] {
   const missing: string[] = [];
-  const hasImages = input.mediaCount > 0 || input.replyMediaCount > 0 || input.activePrivateImage;
+  const hasImages = input.mediaCount > 0 || input.replyMediaCount > 0 || input.activePrivateImage ||
+    (intent.media_message_ids?.length ?? 0) > 0;
   if (intent.intent !== "chat" && intent.intent !== "group_summary" && intent.instruction.trim() === "") {
     missing.push(intent.intent === "vision_qa" ? "question" : "instruction");
   }
@@ -173,15 +196,33 @@ export class IntentRouter {
     images: readonly MediaBinary[] = [],
     model = this.options.model,
   ): Promise<RoutedIntent> {
+    const mediaPixelsProvided = input.mediaPixelsProvided === true || images.length > 0;
+    const recentMessages = (input.recentMessages ?? []).map((message) => ({
+      role: message.role,
+      text: message.text,
+      message_id: message.messageId ?? null,
+      sender_user_id: message.senderUserId ?? null,
+      reply_to_message_id: message.replyToMessageId ?? null,
+      content_type: message.contentType ?? null,
+      sent_at: message.sentAt ?? null,
+    }));
     const contextPayload = {
       text: input.text,
       media: { type: input.mediaType, count: input.mediaCount },
       reply_media_count: input.replyMediaCount,
       reply_to_message_id: input.replyToMessageId ?? null,
       active_private_image: input.activePrivateImage,
+      media_pixels_provided: mediaPixelsProvided,
+      media_candidates: (input.mediaCandidates ?? []).map((candidate) => ({
+        message_id: candidate.messageId,
+        sender_user_id: candidate.senderUserId,
+        type: candidate.type,
+        sent_at: candidate.sentAt,
+        source: candidate.source,
+      })),
       allow_group_summary: input.allowGroupSummary === true,
       summary: input.summary ?? null,
-      recent_messages: (input.recentMessages ?? []).slice(-8),
+      recent_messages: recentMessages,
       onboarding: input.onboarding ?? { active: false, missingFields: [] },
     };
     const userContent: unknown = images.length === 0 ? JSON.stringify(contextPayload) : [
@@ -203,6 +244,15 @@ export class IntentRouter {
           reply_media_count: input.replyMediaCount,
           reply_to_message_id: input.replyToMessageId ?? null,
           active_private_image: input.activePrivateImage,
+          media_pixels_provided: mediaPixelsProvided,
+          media_candidates: (input.mediaCandidates ?? []).map((candidate) => ({
+            message_id: candidate.messageId,
+            sender_user_id: candidate.senderUserId,
+            type: candidate.type,
+            sent_at: candidate.sentAt,
+            source: candidate.source,
+          })),
+          recent_messages: recentMessages,
           allow_group_summary: input.allowGroupSummary === true,
           onboarding: input.onboarding ?? { active: false, missingFields: [] },
         } }),
@@ -237,16 +287,20 @@ export class IntentRouter {
     if (intent.intent === "group_summary" && input.allowGroupSummary !== true) {
       return fallback("invalid_output");
     }
-    const returnsText = intent.intent === "chat" || intent.intent === "vision_qa";
-    if ((returnsText && !intent.final_response?.trim()) || (!returnsText && intent.final_response !== null)) {
+    const allowedMediaIds = new Set((input.mediaCandidates ?? []).map((candidate) => candidate.messageId));
+    const selectedMediaIds = [...new Set(intent.media_message_ids ?? [])].filter((messageId) => allowedMediaIds.has(messageId));
+    const normalizedIntent = { ...intent, media_message_ids: selectedMediaIds };
+    const requiresFinalResponse = intent.intent === "chat" ||
+      intent.intent === "vision_qa" && (input.mediaPixelsProvided === true || input.mediaCount > 0 || input.replyMediaCount > 0 || input.activePrivateImage);
+    if ((requiresFinalResponse && !intent.final_response?.trim()) || (!requiresFinalResponse && intent.final_response !== null)) {
       return fallback("invalid_output");
     }
     if (intent.confidence < (this.options.confidenceThreshold ?? 0.65)) {
       return { ...fallback("low_confidence"), instruction: input.text };
     }
     return {
-      ...intent,
-      missingRequired: validateIntentRequirements(intent, input),
+      ...normalizedIntent,
+      missingRequired: validateIntentRequirements(normalizedIntent, input),
       webSearch,
     };
   }

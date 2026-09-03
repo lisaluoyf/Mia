@@ -6,12 +6,11 @@ import type { ConversationScope, MemoryRecord, StoredMessage, UserProfile } from
 export const CONTEXT_TURN_BATCH_SIZE = 10;
 const MAX_CONTEXT_MESSAGES = 100;
 export const GROUP_CONTEXT_CANDIDATE_MESSAGES = 200;
-export const GROUP_CONTEXT_TAIL_MESSAGES = 30;
-export const GROUP_CONTEXT_SPEAKER_MESSAGES = 12;
+export const GROUP_CONTEXT_TAIL_MESSAGES = 20;
+export const GROUP_CONTEXT_SPEAKER_MESSAGES = 8;
 export const GROUP_CONTEXT_TOKEN_BUDGET = 16_000;
 const MAX_CONTEXT_IMAGES = 10;
-const GROUP_CONTEXT_WINDOW_MS = 60 * 60 * 1_000;
-const GROUP_SPEAKER_WINDOW_MS = 24 * 60 * 60 * 1_000;
+const GROUP_MEDIA_WINDOW_MS = 30 * 60 * 1_000;
 
 export interface ConversationMetadata {
   chatType: string;
@@ -84,7 +83,6 @@ function takeGroupContext(
 ): StoredMessage[] {
   const ordered = [...messages].sort((left, right) => left.messageId - right.messageId);
   const current = ordered.find((message) => message.messageId === currentMessageId);
-  const currentTime = Date.parse(current?.sentAt ?? "") || Date.now();
   const selected = new Map<number, StoredMessage>();
   let tokenCount = 0;
 
@@ -99,13 +97,10 @@ function takeGroupContext(
   if (current) add(current, true);
   for (const message of replyChain) add(message, true);
 
-  const newestFirst = [...ordered].reverse();
+  const newestFirst = [...speakerCandidates].sort((left, right) => right.messageId - left.messageId);
   [...speakerCandidates].sort((left, right) => right.messageId - left.messageId)
-    .filter((message) => message.senderUserId === userId && currentTime - Date.parse(message.sentAt) <= GROUP_SPEAKER_WINDOW_MS)
+    .filter((message) => message.senderUserId === userId)
     .slice(0, GROUP_CONTEXT_SPEAKER_MESSAGES)
-    .forEach((message) => add(message));
-  newestFirst
-    .filter((message) => currentTime - Date.parse(message.sentAt) <= GROUP_CONTEXT_WINDOW_MS)
     .forEach((message) => add(message));
   newestFirst.slice(0, GROUP_CONTEXT_TAIL_MESSAGES).forEach((message) => add(message));
 
@@ -171,8 +166,14 @@ export function loadConversationContext(input: LoadContextInput, botUserId: numb
 
   const mediaInputs: MediaInput[] = [];
   const mediaIds = new Set<string>();
+  const currentTime = Date.parse(input.metadata.currentTime) ||
+    Date.parse(messages.find((message) => message.messageId === input.currentMessageId)?.sentAt ?? "") || Date.now();
   for (const message of messages) {
     if (!message.mediaFileId || (message.contentType !== "photo" && message.contentType !== "document")) continue;
+    const isExplicitMedia = message.messageId === input.currentMessageId || message.messageId === input.replyToMessageId;
+    const ageMs = currentTime - Date.parse(message.sentAt);
+    if (input.scope.type !== "private" && !isExplicitMedia &&
+        (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > GROUP_MEDIA_WINDOW_MS)) continue;
     if (mediaIds.has(message.mediaFileId)) continue;
     mediaIds.add(message.mediaFileId);
     mediaInputs.push({
@@ -192,7 +193,8 @@ export function loadConversationContext(input: LoadContextInput, botUserId: numb
   const prioritized = mediaInputs.sort((left, right) => {
     const rank = (messageId: number): number => messageId === input.currentMessageId ? 0
       : messageId === input.replyToMessageId ? 1
-        : messageId === input.activeMedia?.messageId ? 2 : 3;
+        : messageId === input.activeMedia?.messageId ? 2
+          : messages.find((message) => message.messageId === messageId)?.senderUserId === input.userId ? 3 : 4;
     const difference = rank(left.messageId) - rank(right.messageId);
     return difference === 0 ? right.messageId - left.messageId : difference;
   }).slice(0, MAX_CONTEXT_IMAGES).map((media, position) => ({ ...media, position }));
@@ -229,6 +231,7 @@ export function buildConversationMessages(
   botUserId: number,
 ): StructuredMessage[] {
   const imageByMessage = new Map<number, MediaBinary>();
+  const mediaByMessage = new Map(context.mediaInputs.map((input) => [input.messageId, input]));
   context.mediaInputs.forEach((input, index) => {
     const image = images[index];
     if (image) imageByMessage.set(input.messageId, image);
@@ -264,17 +267,22 @@ export function buildConversationMessages(
       `${senderName ? ` | sender=${JSON.stringify(senderName)}` : ""}` +
       `${message.replyToMessageId === null ? "" : ` | reply_to=${message.replyToMessageId}`}]`;
     const text = `${label}\n${message.text ?? message.caption ?? `[${message.contentType}]`}`;
+    const media = mediaByMessage.get(message.messageId);
     const image = imageByMessage.get(message.messageId);
+    const imageId = `image_turn_${Math.max(turn, 1)}_1`;
+    const mediaLabel = media
+      ? `[image id=${imageId} message_id=${message.messageId} turn=${Math.max(turn, 1)} ` +
+        `status=${mediaStatus(context, message.messageId)} pixels=${image ? "provided" : "not_provided"}]`
+      : null;
     if (!image || role === "assistant") {
-      result.push({ role, content: text });
+      result.push({ role, content: mediaLabel ? `${text}\n${mediaLabel}` : text });
       continue;
     }
-    const imageId = `image_turn_${Math.max(turn, 1)}_1`;
     result.push({
       role,
       content: [
         { type: "text", text },
-        { type: "text", text: `[image id=${imageId} turn=${Math.max(turn, 1)} status=${mediaStatus(context, message.messageId)}]` },
+        { type: "text", text: mediaLabel ?? `[image id=${imageId}]` },
         { type: "image_url", image_url: { url: `data:${image.mimeType};base64,${Buffer.from(image.bytes).toString("base64")}` } },
       ],
     });

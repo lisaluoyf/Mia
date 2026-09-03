@@ -138,11 +138,61 @@ describe("Mia intent router", () => {
     expect(JSON.stringify(structuredResponse.mock.calls[0]?.[2])).toContain("allow_group_summary");
   });
 
+  it("keeps only server-approved contextual media message IDs", async () => {
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      intent: "video_generate", confidence: 0.99, instruction: "让这张图动起来", media_source: "context",
+      media_message_ids: [31, 999, 31], image_options: null,
+      video_options: {
+        mode: "image_to_video", duration_seconds: 6, aspect_ratio: "16:9", resolution: "768P",
+        image_roles: ["first_frame"],
+      },
+      final_response: null, conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 1000 });
+
+    const result = await router.classify({
+      ...base,
+      text: "根据刚才那张图做一个 6 秒视频",
+      mediaCandidates: [{
+        messageId: 31, senderUserId: 42, type: "photo", sentAt: "2026-09-03T10:00:00.000Z",
+        source: "current_user_recent",
+      }],
+    }, "key");
+
+    expect(result).toMatchObject({ intent: "video_generate", media_source: "context", media_message_ids: [31] });
+    expect(result.missingRequired).toEqual([]);
+    const requestMessages = structuredResponse.mock.calls[0]?.[2] as Array<{ content: unknown }>;
+    const metadata = JSON.parse(String(requestMessages[1]?.content)) as { media_candidates: Array<{ message_id: number }> };
+    expect(metadata.media_candidates).toEqual([expect.objectContaining({ message_id: 31 })]);
+    expect(metadata.media_candidates).not.toContainEqual(expect.objectContaining({ message_id: 999 }));
+  });
+
+  it("requires a second vision call when only contextual image metadata was provided", async () => {
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      intent: "vision_qa", confidence: 0.99, instruction: "图片里是什么？", media_source: "context",
+      media_message_ids: [20], image_options: null, video_options: null, final_response: null,
+      conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 1000 });
+
+    await expect(router.classify({
+      ...base,
+      text: "刚才那张图片里是什么？",
+      mediaCandidates: [{
+        messageId: 20, senderUserId: 42, type: "photo", sentAt: "2026-09-03T10:00:00.000Z",
+        source: "current_user_recent",
+      }],
+      mediaPixelsProvided: false,
+    }, "key")).resolves.toMatchObject({
+      intent: "vision_qa", media_message_ids: [20], final_response: null, missingRequired: [],
+    });
+  });
+
   it("registers mia.system as a base module included once by the actual router prompt", () => {
     const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
     expect(basePrompt).toMatchObject({ kind: "base" });
-    expect(routerPrompt).toMatchObject({ version: 4, kind: "composed", includes: ["mia.system"] });
+    expect(routerPrompt).toMatchObject({ version: 5, kind: "composed", includes: ["mia.system"] });
     expect(routerPrompt?.text).toContain(basePrompt?.text ?? "missing");
   });
 });

@@ -6,14 +6,20 @@ import type { APIMasterClient } from "../clients/apimaster.js";
 import { ChatCompletionError, ResolverError } from "../clients/apimaster.js";
 import { DEFAULT_MODELS } from "../constants.js";
 import type { ChatCredential, ChatCredentialProvider } from "../credentials/chat.js";
-import { buildConversationMessages, loadConversationContext } from "../context/conversation.js";
+import { buildConversationMessages, loadConversationContext, type ConversationContext } from "../context/conversation.js";
 import type { ContextCompactor } from "../context/compactor.js";
 import type { GroupContextCompactor } from "../context/group-compactor.js";
 import type { GroupSummaryService } from "../context/group-summary.js";
 import { debugContextLayers } from "../debug/context.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { DebugContextLayers, DebugRequestKind } from "../debug/types.js";
-import { mediaIntentSchema, type IntentRouter, type RoutedIntent } from "../intent/router.js";
+import {
+  mediaIntentSchema,
+  type IntentRouter,
+  type RoutedIntent,
+  type RouterContextMessage,
+  type RouterMediaCandidate,
+} from "../intent/router.js";
 import { MediaInputError, downloadConversationImages, downloadTelegramImages } from "../media/intake.js";
 import type { MediaStore } from "../media/store.js";
 import type { MediaInput, MediaJob, PendingMediaIntent } from "../media/types.js";
@@ -171,6 +177,59 @@ function persistMessage(message: StorableMessage, dependencies: BotDependencies)
   }
 }
 
+function routerContextMessages(context: ConversationContext, botUserId: number): RouterContextMessage[] {
+  return context.messages.map((message) => ({
+    role: message.senderUserId === botUserId ? "assistant" : "user",
+    text: message.text ?? message.caption ?? `[${message.contentType}]`,
+    messageId: message.messageId,
+    senderUserId: message.senderUserId,
+    replyToMessageId: message.replyToMessageId,
+    contentType: message.contentType,
+    sentAt: message.sentAt,
+  }));
+}
+
+function routerMediaCandidates(context: ConversationContext, userId: number): RouterMediaCandidate[] {
+  const messages = new Map(context.messages.map((message) => [message.messageId, message]));
+  return context.mediaInputs.flatMap((input) => {
+    const message = messages.get(input.messageId);
+    if (!message) return [];
+    const source: RouterMediaCandidate["source"] = input.messageId === context.currentMessageId ? "current"
+      : input.messageId === context.replyToMessageId ? "reply"
+        : input.messageId === context.activeMediaMessageId ? "active_private_image"
+          : message.senderUserId === userId ? "current_user_recent" : "topic_recent";
+    return [{
+      messageId: input.messageId,
+      senderUserId: message.senderUserId,
+      type: input.type,
+      sentAt: message.sentAt,
+      source,
+    }];
+  });
+}
+
+function resolveSelectedMedia(
+  message: Message,
+  selectedMessageIds: readonly number[],
+  candidates: readonly RouterMediaCandidate[],
+  mediaStore: MediaStore,
+): MediaInput[] {
+  const allowed = new Set(candidates.map((candidate) => candidate.messageId));
+  const threadId = message.message_thread_id ?? null;
+  const selected: MediaInput[] = [];
+  const seen = new Set<string>();
+  for (const messageId of selectedMessageIds) {
+    if (!allowed.has(messageId)) continue;
+    for (const input of mediaStore.getTelegramMedia(message.chat.id, messageId)) {
+      if (input.threadId !== threadId || seen.has(input.fileId)) continue;
+      seen.add(input.fileId);
+      selected.push(input);
+      if (selected.length === 10) return normalizePositions(selected);
+    }
+  }
+  return normalizePositions(selected);
+}
+
 export function createTextHandler(dependencies: BotDependencies) {
   return async (ctx: TextContext): Promise<void> => {
     persistMessage(ctx.message, dependencies);
@@ -205,7 +264,9 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   const explicit = parseExplicitCommand(request.text);
   const explicitSummaryPhrase = isExplicitGroupSummaryPhrase(promptFromMessage(policyInput, identity));
   const namedMediaReply = message.reply_to_message !== undefined && /^(?:@?mia)(?:\s|[,，:：])/i.test(request.text.trim());
-  if (!shouldRespond(policyInput, identity) && !explicit && !namedMediaReply && !explicitSummaryPhrase) return;
+  const pending = dependencies.mediaStore.getPendingIntent?.(scopeFor(message)) ?? null;
+  const suppliesPendingMedia = pending !== null && request.inputs.length > 0;
+  if (!shouldRespond(policyInput, identity) && !explicit && !namedMediaReply && !explicitSummaryPhrase && !suppliesPendingMedia) return;
 
   const stickerIntent = request.inputs.length > 0 && isStickerRequest(request.text);
   if (stickerIntent && message.chat.type !== "private") {
@@ -256,7 +317,6 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     mimeType: active.mimeType,
     mediaGroupId: active.mediaGroupId,
   }] : [];
-  const pending = dependencies.mediaStore.getPendingIntent(scopeFor(message));
   const pendingInputs: MediaInput[] = [];
   if (pending) {
     for (const sourceMessageId of pending.sourceMessageIds) {
@@ -270,7 +330,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     await replyTo(ctx, message, botText(locale, "maxImages"));
     return;
   }
-  const inputs = normalizePositions(chosenInputs);
+  let inputs = normalizePositions(chosenInputs);
   const callbackReply = pending?.missingRequired.includes("callback_reply") === true &&
     pending.sourceMessageIds.at(-1) === message.reply_to_message?.message_id;
   const savedCallbackIntent = callbackReply ? mediaIntentSchema.safeParse(pending.slots) : null;
@@ -317,7 +377,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       return;
     }
     const scope = conversationScope(message);
-    const recent = dependencies.contexts.listRecentMessages?.(scope, 8) ?? [];
+    const recent = dependencies.contexts.listRecentMessages?.(scope, 20) ?? [];
     const summary = dependencies.contexts.getLatestSummary?.(scope)?.content ?? null;
     onboardingEligibility = message.chat.type === "private" && dependencies.onboarding
       ? dependencies.onboarding.eligibility(message.chat.id, message.from.id)
@@ -336,11 +396,12 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         dependencies,
         activeInputs[0] ?? null,
         pending?.intent ?? null,
-        routerCredential.source === "user",
+        routerCredential.source === "user" ? new Set(inputs.map((input) => input.messageId)) : false,
       );
       const fallbackImages = routerCredential.source === "user" && requestContext === null && inputs.length > 0
         ? await downloadTelegramImages(ctx.api, dependencies.botToken ?? "", inputs)
         : [];
+      const mediaCandidates = requestContext ? routerMediaCandidates(requestContext.context, message.from.id) : [];
       debugId = dependencies.debug?.start({
         telegramUserId: message.from.id,
         chatId: message.chat.id,
@@ -351,7 +412,13 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         promptRefs: [promptReference("mia.intent-router")],
         contextLayers: requestContext?.layers ?? null,
         requestPreview: { text: promptFromMessage(policyInput, identity), replyToMessageId: message.reply_to_message?.message_id ?? null },
-        media: inputs.map((input) => ({ messageId: input.messageId, type: input.type, mimeType: input.mimeType })),
+        media: mediaCandidates.map((candidate) => ({
+          messageId: candidate.messageId,
+          senderUserId: candidate.senderUserId,
+          type: candidate.type,
+          source: candidate.source,
+          pixelsProvided: requestContext?.includedMediaMessageIds.includes(candidate.messageId) ?? false,
+        })),
         details: {
           phase: "intent_and_response",
           credentialSource: routerCredential.source,
@@ -376,16 +443,26 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         activePrivateImage: active !== null,
         allowGroupSummary: message.chat.type !== "private",
         summary,
-        recentMessages: recent.map((item) => ({
+        recentMessages: requestContext ? routerContextMessages(requestContext.context, ctx.me.id) : recent.map((item) => ({
           role: item.senderUserId === ctx.me.id ? "assistant" as const : "user" as const,
           text: item.text ?? item.caption ?? `[${item.contentType}]`,
+          messageId: item.messageId,
+          senderUserId: item.senderUserId,
+          replyToMessageId: item.replyToMessageId,
+          contentType: item.contentType,
+          sentAt: item.sentAt,
         })),
+        mediaCandidates,
+        mediaPixelsProvided: Boolean(requestContext?.includedMediaMessageIds.length || fallbackImages.length),
         ...(requestContext ? { conversationMessages: requestContext.messages } : {}),
         onboarding: {
           active: Boolean(onboardingEligibility?.eligible || onboardingEligibility?.promptCount),
           missingFields: onboardingEligibility?.missingFields ?? [],
         },
       }, routerCredential.apiKey, fallbackImages, routerCredential.model);
+      if (inputs.length === 0 && (routed.media_message_ids?.length ?? 0) > 0) {
+        inputs = resolveSelectedMedia(message, routed.media_message_ids ?? [], mediaCandidates, dependencies.mediaStore);
+      }
       const kind: DebugRequestKind = routed.intent === "chat" ? "chat" : routed.intent === "vision_qa" ? "vision_qa" : "intent_router";
       dependencies.debug?.finish(debugId, {
         status: "succeeded",
@@ -393,6 +470,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         details: {
           phase: "intent_and_response",
           routedIntent: routed.intent,
+          selectedMediaMessageIds: routed.media_message_ids ?? [],
           fallbackReason: routed.fallbackReason ?? null,
           webSearch: routed.webSearch ?? { callCount: 0, queries: [], sources: [] },
           onboarding: onboardingDebugDetails(onboardingEligibility, routed, false),
@@ -495,6 +573,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         confidence: routed.confidence,
         instruction: routed.instruction,
         media_source: routed.media_source,
+        media_message_ids: routed.media_message_ids ?? [],
         image_options: routed.image_options,
         video_options: routed.video_options,
         final_response: routed.final_response,
@@ -545,7 +624,14 @@ async function executeMediaIntent(
       const apiKey = await dependencies.client.resolveAPIKey(message.from.id, model);
       const activeMedia = inputs.find((input) => input.messageId !== message.message_id &&
         input.messageId !== message.reply_to_message?.message_id) ?? null;
-      const requestContext = await buildRequestContext(ctx, message, dependencies, activeMedia, "vision_qa");
+      const requestContext = await buildRequestContext(
+        ctx,
+        message,
+        dependencies,
+        activeMedia,
+        "vision_qa",
+        new Set(inputs.map((input) => input.messageId)),
+      );
       debugId = dependencies.debug?.start({
         telegramUserId: message.from.id,
         chatId: message.chat.id,
@@ -1064,8 +1150,13 @@ async function buildRequestContext(
   dependencies: BotDependencies,
   activeMedia: MediaInput | null,
   currentTask: string | null,
-  includeMedia = true,
-): Promise<{ messages: ReturnType<typeof buildConversationMessages>; layers: DebugContextLayers } | null> {
+  includeMedia: boolean | ReadonlySet<number> = true,
+): Promise<{
+  messages: ReturnType<typeof buildConversationMessages>;
+  layers: DebugContextLayers;
+  context: ReturnType<typeof loadConversationContext>;
+  includedMediaMessageIds: number[];
+} | null> {
   if (!message.from || !ctx.me || !dependencies.botToken || !hasContextReader(dependencies.contexts)) return null;
   const context = loadConversationContext({
     store: dependencies.contexts,
@@ -1090,17 +1181,23 @@ async function buildRequestContext(
     context.replyToMessageId,
     context.activeMediaMessageId,
   ].filter((messageId): messageId is number => messageId !== null));
-  const images = !includeMedia || context.mediaInputs.length === 0
-    ? []
-    : await downloadConversationImages(
-      ctx.api,
-      dependencies.botToken,
-      context.mediaInputs,
-      requiredMediaMessageIds,
-    );
+  const downloadableInputs = includeMedia === true ? context.mediaInputs
+    : includeMedia === false ? []
+      : context.mediaInputs.filter((input) => includeMedia.has(input.messageId));
+  const downloaded = downloadableInputs.length === 0 ? [] : await downloadConversationImages(
+    ctx.api,
+    dependencies.botToken,
+    downloadableInputs,
+    requiredMediaMessageIds,
+  );
+  const downloadedByMessageId = new Map(downloadableInputs.map((input, index) => [input.messageId, downloaded[index]]));
+  const images = context.mediaInputs.map((input) => downloadedByMessageId.get(input.messageId));
+  const includedMediaMessageIds = downloadableInputs.flatMap((input, index) => downloaded[index] ? [input.messageId] : []);
   return {
     messages: buildConversationMessages(context, images, ctx.me.id),
     layers: debugContextLayers(context),
+    context,
+    includedMediaMessageIds,
   };
 }
 
@@ -1238,6 +1335,7 @@ function directIntent(intent: PendingMediaIntent, instruction: string, mediaSour
     confidence: 1,
     instruction,
     media_source: mediaSource,
+    media_message_ids: [],
     image_options: intent === "image_generate" || intent === "image_edit" ? { aspect_ratio: null } : null,
     video_options: intent === "video_generate" ? {
       mode: mediaSource === "none" ? "text_to_video" : "image_to_video",
