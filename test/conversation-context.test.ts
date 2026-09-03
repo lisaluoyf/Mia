@@ -141,4 +141,55 @@ describe("conversation context", () => {
 
     expect(context.mediaInputs.map((media) => media.messageId)).toEqual([12, 11, 10, 9, 8, 7, 6, 5, 4, 3]);
   });
+
+  it("prioritizes the triggering member's public topic messages and never injects private memory", () => {
+    store = new ContextStore(":memory:");
+    store.upsertUser({ telegramUserId: 42, firstName: "Roma", lastName: null, username: "roma", languageCode: "zh-CN", isBot: false });
+    store.upsertUser({ telegramUserId: 43, firstName: "Lee", lastName: null, username: "lee", languageCode: "zh-CN", isBot: false });
+    store.upsertUser({ telegramUserId: 99, firstName: "Mia", lastName: null, username: "mia", languageCode: null, isBot: true });
+    store.upsertChat({ chatId: -1001, type: "supergroup", title: "Builders", username: null, description: null, isForum: true });
+    store.addMemory({ scope: { type: "user", userId: 42 }, category: "preference", content: "PRIVATE SECRET" });
+    store.addMemory({ scope: { type: "group", chatId: -1001 }, category: "rule", content: "No ads" });
+    store.addMemory({ scope: { type: "topic", chatId: -1001, threadId: 12 }, category: "project", content: "Launch project" });
+    for (let messageId = 1; messageId <= 60; messageId += 1) {
+      const senderUserId = messageId <= 2 ? 42 : 43;
+      store.saveMessage({
+        chatId: -1001, messageId, threadId: 12, senderUserId, senderChatId: null,
+        replyToMessageId: null, contentType: "text",
+        text: messageId === 1 ? "Use the red design" : `Topic message ${messageId}`,
+        caption: null, entitiesJson: null, mediaFileId: null, mediaUniqueId: null,
+        sentAt: `2026-09-03T10:${String(messageId % 60).padStart(2, "0")}:00.000Z`, editedAt: null,
+      });
+    }
+    store.addSummary({
+      scope: { type: "topic", chatId: -1001, threadId: 12 },
+      content: "Earlier topic discussion", fromMessageId: 1, throughMessageId: 40,
+    });
+    store.saveMessage({
+      chatId: -1001, messageId: 61, threadId: 12, senderUserId: 42, senderChatId: null,
+      replyToMessageId: null, contentType: "text", text: "@Mia follow what I said",
+      caption: null, entitiesJson: null, mediaFileId: null, mediaUniqueId: null,
+      sentAt: "2026-09-03T11:01:00.000Z", editedAt: null,
+    });
+
+    const context = loadConversationContext({
+      store,
+      scope: { type: "topic", chatId: -1001, threadId: 12 },
+      userId: 42,
+      currentMessageId: 61,
+      replyToMessageId: null,
+      metadata: {
+        chatType: "supergroup", chatTitle: "Builders", currentUser: "roma", language: "zh-CN",
+        currentTime: "2026-09-03T11:01:00.000Z", timezone: null, trigger: "message", currentTask: null,
+      },
+    }, 99);
+    const serialized = JSON.stringify(buildConversationMessages(context, [], 99));
+
+    expect(context.messages.map((item) => item.messageId)).toContain(1);
+    expect(context.messages.at(-1)?.messageId).toBe(61);
+    expect(context.memories.map((item) => item.content)).toEqual(["No ads", "Launch project"]);
+    expect(serialized).toContain("Use the red design");
+    expect(serialized).toContain('sender=\\"Roma\\"');
+    expect(serialized).not.toContain("PRIVATE SECRET");
+  });
 });

@@ -976,6 +976,60 @@ export class ContextStore {
     transaction.immediate();
   }
 
+  applyGroupCompaction(input: {
+    scope: Extract<ConversationScope, { type: "group" | "topic" }>;
+    expectedThroughMessageId: number | null;
+    summary: string;
+    fromMessageId: number;
+    throughMessageId: number;
+    memories: readonly {
+      category: string;
+      content: string;
+      sourceMessageId: number;
+      createdByUserId: number | null;
+    }[];
+  }): void {
+    const normalized = normalizeScope(input.scope);
+    if (normalized.chatId === null) throw new TypeError("Group compaction requires a chatId");
+    requireSafeInteger(input.fromMessageId, "fromMessageId");
+    requireSafeInteger(input.throughMessageId, "throughMessageId");
+    if (input.throughMessageId < input.fromMessageId) throw new RangeError("throughMessageId must not precede fromMessageId");
+    if (input.expectedThroughMessageId !== null) {
+      requireSafeInteger(input.expectedThroughMessageId, "expectedThroughMessageId");
+    }
+    for (const memory of input.memories) {
+      requireSafeInteger(memory.sourceMessageId, "sourceMessageId");
+      if (memory.createdByUserId !== null) requireSafeInteger(memory.createdByUserId, "createdByUserId");
+    }
+
+    const transaction = this.database.transaction(() => {
+      const latest = this.getLatestSummary(input.scope);
+      if ((latest?.throughMessageId ?? null) !== input.expectedThroughMessageId) {
+        throw new Error("Group compaction watermark changed");
+      }
+      this.addSummary({
+        scope: input.scope,
+        content: input.summary,
+        fromMessageId: input.fromMessageId,
+        throughMessageId: input.throughMessageId,
+      });
+      this.database.prepare(`
+        DELETE FROM mia_memories
+        WHERE scope_type = ? AND user_id IS NULL AND chat_id = ? AND thread_id = ?
+      `).run(normalized.type, normalized.chatId, normalized.threadId);
+      for (const memory of input.memories) {
+        this.addMemory({
+          scope: input.scope,
+          category: memory.category,
+          content: memory.content,
+          sourceMessageId: memory.sourceMessageId,
+          createdByUserId: memory.createdByUserId,
+        });
+      }
+    });
+    transaction.immediate();
+  }
+
   clearConversation(scope: ConversationScope): void {
     const normalized = normalizeScope(scope);
     if (normalized.chatId === null) throw new TypeError("Conversation scope requires a chatId");

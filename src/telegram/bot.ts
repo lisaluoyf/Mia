@@ -7,6 +7,7 @@ import { ResolverError } from "../clients/apimaster.js";
 import { DEFAULT_MODELS } from "../constants.js";
 import { buildConversationMessages, loadConversationContext } from "../context/conversation.js";
 import type { ContextCompactor } from "../context/compactor.js";
+import type { GroupContextCompactor } from "../context/group-compactor.js";
 import { debugContextLayers } from "../debug/context.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { DebugContextLayers, DebugRequestKind } from "../debug/types.js";
@@ -42,8 +43,9 @@ interface BotDependencies {
   contexts: Pick<ContextStore, "upsertUser" | "upsertChat" | "upsertMember" | "saveMessage"> &
     Partial<Pick<ContextStore,
       "listRecentMessages" | "getLatestSummary" | "clearConversation" | "listMemories" |
-      "listMessagesAfter" | "getMessage" | "listPendingCompletedTurns">>;
+      "listMessagesAfter" | "getMessage" | "getReplyChain" | "getUser" | "listPendingCompletedTurns">>;
   compactor?: ContextCompactor;
+  groupCompactor?: GroupContextCompactor;
   router?: IntentRouter;
   mediaStore?: MediaStore;
   botToken?: string;
@@ -61,7 +63,7 @@ interface IncomingRequest {
 
 type ContextReader = Pick<ContextStore,
   "getLatestSummary" | "listMemories" | "listMessagesAfter" | "listRecentMessages" |
-  "getMessage" | "listPendingCompletedTurns">;
+  "getMessage" | "getReplyChain" | "getUser" | "listPendingCompletedTurns">;
 
 function mediaFromMessage(message: Message, position = 0): MediaInput | null {
   if ("photo" in message && message.photo.length > 0) {
@@ -203,6 +205,13 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     return;
   }
   if (explicit?.command === "new" || explicit?.command === "forget") {
+    if (message.chat.type !== "private") {
+      const member = await ctx.api.getChatMember(message.chat.id, message.from.id);
+      if (member.status !== "creator" && member.status !== "administrator") {
+        await replyTo(ctx, message, botText(locale, "adminOnly"));
+        return;
+      }
+    }
     dependencies.mediaStore.clearPendingIntent(scopeFor(message));
     if (message.chat.type === "private") dependencies.mediaStore.clearActivePrivateImage(message.from.id, message.chat.id);
     dependencies.contexts.clearConversation?.(conversationScope(message));
@@ -380,6 +389,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     if (routed.final_response) {
       const assistantMessageId = await sendConversationResponse(ctx, message, routed.final_response, dependencies);
       recordCompletedChatTurn(message, assistantMessageId, dependencies);
+      if (assistantMessageId !== null) recordSuccessfulGroupTrigger(message, dependencies);
       if (assistantMessageId !== null && message.chat.type === "private" && dependencies.onboarding && routed.profile_updates) {
         dependencies.onboarding.applyProfileUpdates(message.from.id, message.message_id, {
           preferredName: routed.profile_updates.preferred_name,
@@ -409,7 +419,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     return;
   }
   if (routed.intent === "vision_qa" && routed.final_response) {
-    await sendConversationResponse(ctx, message, routed.final_response, dependencies);
+    const assistantMessageId = await sendConversationResponse(ctx, message, routed.final_response, dependencies);
+    if (assistantMessageId !== null) recordSuccessfulGroupTrigger(message, dependencies);
     return;
   }
 
@@ -504,7 +515,8 @@ async function executeMediaIntent(
           await downloadTelegramImages(ctx.api, dependencies.botToken, inputs),
         );
       dependencies.debug?.finish(debugId, { status: "succeeded", responsePreview: response });
-      await sendConversationResponse(ctx, message, response, dependencies);
+      const assistantMessageId = await sendConversationResponse(ctx, message, response, dependencies);
+      if (assistantMessageId !== null) recordSuccessfulGroupTrigger(message, dependencies);
       return;
     }
     if (routed.intent === "video_generate") {
@@ -930,6 +942,7 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
     dependencies.debug?.finish(debugId, { status: "succeeded", responsePreview: response });
     const assistantMessageId = await sendConversationResponse(ctx, ctx.message, response, dependencies);
     recordCompletedChatTurn(ctx.message, assistantMessageId, dependencies);
+    recordSuccessfulGroupTrigger(ctx.message, dependencies);
   } catch (error) {
     dependencies.debug?.finish(debugId, { status: "failed", errorCode: debugErrorCode(error) });
     dependencies.logger.warn({ err: error, telegramUserId: ctx.from.id, updateId: ctx.update.update_id }, "Telegram chat request failed");
@@ -944,6 +957,8 @@ function hasContextReader(contexts: BotDependencies["contexts"]): contexts is Bo
     typeof contexts.listMessagesAfter === "function" &&
     typeof contexts.listRecentMessages === "function" &&
     typeof contexts.getMessage === "function" &&
+    typeof contexts.getReplyChain === "function" &&
+    typeof contexts.getUser === "function" &&
     typeof contexts.listPendingCompletedTurns === "function";
 }
 
@@ -1011,6 +1026,13 @@ function recordCompletedChatTurn(
     userMessageId: message.message_id,
     assistantMessageId,
   });
+}
+
+function recordSuccessfulGroupTrigger(message: Message, dependencies: BotDependencies): void {
+  if (!message.from || message.chat.type === "private" || !dependencies.groupCompactor) return;
+  const scope = conversationScope(message);
+  if (scope.type === "private") return;
+  dependencies.groupCompactor.recordSuccessfulGroupTrigger(scope, message.from.id);
 }
 
 async function sendConversationResponse(

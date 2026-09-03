@@ -12,8 +12,21 @@ function mediaRole(context: ConversationContext, messageId: number): "current" |
 export function debugContextLayers(context: ConversationContext): DebugContextLayers {
   return {
     systemRules: promptReference("mia.system"),
-    conversation: context.metadata,
-    longTermMemory: context.memories.map(({ category, content, updatedAt }) => ({ category, content, updatedAt })),
+    conversation: {
+      ...context.metadata,
+      participants: context.participants.map((participant) => ({
+        telegramUserId: participant.telegramUserId,
+        displayName: [participant.firstName, participant.lastName].filter(Boolean).join(" "),
+        username: participant.username,
+      })),
+    },
+    longTermMemory: context.memories.map(({ scope, category, content, sourceMessageId, updatedAt }) => ({
+      scope,
+      category,
+      content,
+      sourceMessageId,
+      updatedAt,
+    })),
     rollingSummary: context.summary,
     recentMessages: {
       order: "oldest_to_newest",
@@ -39,4 +52,3 @@ export function debugContextLayers(context: ConversationContext): DebugContextLa
     },
   };
 }
-

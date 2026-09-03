@@ -1,11 +1,17 @@
 import type { MediaBinary, StructuredMessage } from "../clients/apimaster.js";
 import type { MediaInput } from "../media/types.js";
 import type { ContextStore } from "../storage/store.js";
-import type { ConversationScope, MemoryRecord, StoredMessage } from "../storage/types.js";
+import type { ConversationScope, MemoryRecord, StoredMessage, UserProfile } from "../storage/types.js";
 
 export const CONTEXT_TURN_BATCH_SIZE = 10;
 const MAX_CONTEXT_MESSAGES = 100;
+export const GROUP_CONTEXT_CANDIDATE_MESSAGES = 200;
+export const GROUP_CONTEXT_TAIL_MESSAGES = 30;
+export const GROUP_CONTEXT_SPEAKER_MESSAGES = 12;
+export const GROUP_CONTEXT_TOKEN_BUDGET = 16_000;
 const MAX_CONTEXT_IMAGES = 10;
+const GROUP_CONTEXT_WINDOW_MS = 60 * 60 * 1_000;
+const GROUP_SPEAKER_WINDOW_MS = 24 * 60 * 60 * 1_000;
 
 export interface ConversationMetadata {
   chatType: string;
@@ -20,6 +26,7 @@ export interface ConversationMetadata {
 
 export interface ConversationContext {
   metadata: ConversationMetadata;
+  participants: UserProfile[];
   memories: MemoryRecord[];
   summary: string | null;
   messages: StoredMessage[];
@@ -32,7 +39,7 @@ export interface ConversationContext {
 interface LoadContextInput {
   store: Pick<ContextStore,
     "getLatestSummary" | "listMemories" | "listMessagesAfter" | "listRecentMessages" |
-    "getMessage" | "listPendingCompletedTurns">;
+    "getMessage" | "getReplyChain" | "getUser" | "listPendingCompletedTurns">;
   scope: ConversationScope;
   userId: number;
   currentMessageId: number;
@@ -56,27 +63,106 @@ function takeLastTurns(messages: readonly StoredMessage[], botUserId: number, li
   return messages.slice(start);
 }
 
+export function estimateStoredMessageTokens(message: StoredMessage): number {
+  const content = message.text ?? message.caption ?? `[${message.contentType}]`;
+  const cjk = content.match(/[\u3400-\u9fff\uf900-\ufaff]/g)?.length ?? 0;
+  const other = Math.max(0, Array.from(content).length - cjk);
+  return 16 + cjk + Math.ceil(other / 4);
+}
+
+function belongsToScope(message: StoredMessage, scope: ConversationScope): boolean {
+  if (message.chatId !== scope.chatId) return false;
+  return scope.type === "topic" ? message.threadId === scope.threadId : message.threadId === null;
+}
+
+function takeGroupContext(
+  messages: readonly StoredMessage[],
+  speakerCandidates: readonly StoredMessage[],
+  replyChain: readonly StoredMessage[],
+  userId: number,
+  currentMessageId: number,
+): StoredMessage[] {
+  const ordered = [...messages].sort((left, right) => left.messageId - right.messageId);
+  const current = ordered.find((message) => message.messageId === currentMessageId);
+  const currentTime = Date.parse(current?.sentAt ?? "") || Date.now();
+  const selected = new Map<number, StoredMessage>();
+  let tokenCount = 0;
+
+  const add = (message: StoredMessage, required = false): void => {
+    if (selected.has(message.messageId)) return;
+    const tokens = estimateStoredMessageTokens(message);
+    if (!required && tokenCount + tokens > GROUP_CONTEXT_TOKEN_BUDGET) return;
+    selected.set(message.messageId, message);
+    tokenCount += tokens;
+  };
+
+  if (current) add(current, true);
+  for (const message of replyChain) add(message, true);
+
+  const newestFirst = [...ordered].reverse();
+  [...speakerCandidates].sort((left, right) => right.messageId - left.messageId)
+    .filter((message) => message.senderUserId === userId && currentTime - Date.parse(message.sentAt) <= GROUP_SPEAKER_WINDOW_MS)
+    .slice(0, GROUP_CONTEXT_SPEAKER_MESSAGES)
+    .forEach((message) => add(message));
+  newestFirst
+    .filter((message) => currentTime - Date.parse(message.sentAt) <= GROUP_CONTEXT_WINDOW_MS)
+    .forEach((message) => add(message));
+  newestFirst.slice(0, GROUP_CONTEXT_TAIL_MESSAGES).forEach((message) => add(message));
+
+  return [...selected.values()].sort((left, right) => left.messageId - right.messageId);
+}
+
+function memoriesForScope(input: LoadContextInput): MemoryRecord[] {
+  if (input.scope.type === "private") {
+    return input.store.listMemories({ type: "user", userId: input.userId }, 100);
+  }
+  if (input.scope.type === "group") {
+    return input.store.listMemories(input.scope, 100);
+  }
+  return [
+    ...input.store.listMemories({ type: "group", chatId: input.scope.chatId }, 100),
+    ...input.store.listMemories(input.scope, 100),
+  ];
+}
+
 export function loadConversationContext(input: LoadContextInput, botUserId: number): ConversationContext {
   const latestSummary = input.store.getLatestSummary(input.scope);
   const pendingTurns = input.scope.type === "private"
     ? input.store.listPendingCompletedTurns(input.scope.chatId, 100)
     : [];
-  const available = latestSummary
-    ? input.store.listMessagesAfter(input.scope, latestSummary.throughMessageId, MAX_CONTEXT_MESSAGES)
-    : pendingTurns[0]
-      ? input.store.listMessagesAfter(
-        input.scope,
-        pendingTurns[0].userMessageId > 1 ? pendingTurns[0].userMessageId - 1 : null,
-        MAX_CONTEXT_MESSAGES,
-      )
-      : input.store.listRecentMessages(input.scope, MAX_CONTEXT_MESSAGES);
-  const messages = latestSummary || pendingTurns.length > 0 ? available : takeLastTurns(available, botUserId);
+  let messages: StoredMessage[];
+  if (input.scope.type === "private") {
+    const available = latestSummary
+      ? input.store.listMessagesAfter(input.scope, latestSummary.throughMessageId, MAX_CONTEXT_MESSAGES)
+      : pendingTurns[0]
+        ? input.store.listMessagesAfter(
+          input.scope,
+          pendingTurns[0].userMessageId > 1 ? pendingTurns[0].userMessageId - 1 : null,
+          MAX_CONTEXT_MESSAGES,
+        )
+        : input.store.listRecentMessages(input.scope, MAX_CONTEXT_MESSAGES);
+    messages = latestSummary || pendingTurns.length > 0 ? available : takeLastTurns(available, botUserId);
+  } else {
+    const recent = input.store.listRecentMessages(input.scope, GROUP_CONTEXT_CANDIDATE_MESSAGES);
+    const available = latestSummary
+      ? recent.filter((message) => message.messageId > latestSummary.throughMessageId)
+      : recent;
+    const current = input.store.getMessage(input.scope.chatId, input.currentMessageId);
+    if (current && belongsToScope(current, input.scope) && !available.some((message) => message.messageId === current.messageId)) {
+      available.push(current);
+    }
+    const replyChain = input.replyToMessageId === null
+      ? []
+      : input.store.getReplyChain(input.scope.chatId, input.replyToMessageId)
+        .filter((message) => belongsToScope(message, input.scope));
+    messages = takeGroupContext(available, recent, replyChain, input.userId, input.currentMessageId);
+  }
   const includedIds = new Set(messages.map((message) => message.messageId));
 
   for (const referencedId of [input.replyToMessageId, input.activeMedia?.messageId ?? null]) {
     if (referencedId === null || includedIds.has(referencedId)) continue;
     const referenced = input.store.getMessage(input.scope.chatId, referencedId);
-    if (referenced) {
+    if (referenced && belongsToScope(referenced, input.scope)) {
       messages.unshift(referenced);
       includedIds.add(referencedId);
     }
@@ -111,11 +197,16 @@ export function loadConversationContext(input: LoadContextInput, botUserId: numb
     return difference === 0 ? right.messageId - left.messageId : difference;
   }).slice(0, MAX_CONTEXT_IMAGES).map((media, position) => ({ ...media, position }));
 
+  const participantIds = [...new Set(messages.flatMap((message) => message.senderUserId === null ? [] : [message.senderUserId]))];
+  const participants = participantIds.flatMap((userId) => {
+    const user = input.store.getUser(userId);
+    return user ? [user] : [];
+  });
+
   return {
     metadata: input.metadata,
-    memories: input.scope.type === "private"
-      ? input.store.listMemories({ type: "user", userId: input.userId }, 100)
-      : [],
+    participants,
+    memories: memoriesForScope(input),
     summary: latestSummary?.content ?? null,
     messages,
     mediaInputs: prioritized,
@@ -144,7 +235,17 @@ export function buildConversationMessages(
   });
   const layerData = {
     current_conversation: context.metadata,
-    long_term_memory: context.memories.map((memory) => ({ category: memory.category, content: memory.content })),
+    participants: context.participants.map((participant) => ({
+      telegram_user_id: participant.telegramUserId,
+      display_name: [participant.firstName, participant.lastName].filter(Boolean).join(" "),
+      username: participant.username,
+    })),
+    long_term_memory: context.memories.map((memory) => ({
+      scope: memory.scope.type,
+      category: memory.category,
+      content: memory.content,
+      source_message_id: memory.sourceMessageId,
+    })),
     earlier_conversation_summary: context.summary,
     message_order: "oldest_to_newest",
     current_message_priority: "highest",
@@ -154,10 +255,13 @@ export function buildConversationMessages(
   let turn = 0;
   for (const message of context.messages) {
     const role = message.senderUserId === botUserId ? "assistant" : "user";
+    const participant = context.participants.find((item) => item.telegramUserId === message.senderUserId);
+    const senderName = participant ? [participant.firstName, participant.lastName].filter(Boolean).join(" ") : null;
     if (role === "user") turn += 1;
     const isCurrent = message.messageId === context.currentMessageId;
     const label = `[第 ${Math.max(turn, 1)} 轮${isCurrent ? "，当前消息" : ""} | message_id=${message.messageId}` +
       `${message.senderUserId === null ? "" : ` | sender_user_id=${message.senderUserId}`}` +
+      `${senderName ? ` | sender=${JSON.stringify(senderName)}` : ""}` +
       `${message.replyToMessageId === null ? "" : ` | reply_to=${message.replyToMessageId}`}]`;
     const text = `${label}\n${message.text ?? message.caption ?? `[${message.contentType}]`}`;
     const image = imageByMessage.get(message.messageId);

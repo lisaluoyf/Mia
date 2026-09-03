@@ -189,4 +189,49 @@ describe("context store", () => {
       "The user prefers to be called Roma",
     ]);
   });
+
+  it("atomically replaces only the selected group or topic summary and memories", () => {
+    const current = createStore();
+    current.upsertUser({ ...user, telegramUserId: 43, firstName: "Lee" });
+    current.saveMessage(message({ chatId: groupChat.chatId, messageId: 10, text: "No ads", senderUserId: 42 }));
+    current.saveMessage(message({ chatId: groupChat.chatId, messageId: 11, threadId: 12, text: "Ship Friday", senderUserId: 43 }));
+    current.addMemory({ scope: { type: "group", chatId: -1001 }, category: "rule", content: "Old rule" });
+    current.addMemory({ scope: { type: "topic", chatId: -1001, threadId: 12 }, category: "project", content: "Keep topic" });
+
+    current.applyGroupCompaction({
+      scope: { type: "group", chatId: -1001 },
+      expectedThroughMessageId: null,
+      summary: "The group confirmed a no-ad rule.",
+      fromMessageId: 10,
+      throughMessageId: 10,
+      memories: [{
+        category: "rule",
+        content: "Advertising is not allowed",
+        sourceMessageId: 10,
+        createdByUserId: 42,
+      }],
+    });
+
+    expect(current.getLatestSummary({ type: "group", chatId: -1001 })).toMatchObject({
+      content: "The group confirmed a no-ad rule.",
+      throughMessageId: 10,
+    });
+    expect(current.listMemories({ type: "group", chatId: -1001 })).toMatchObject([{
+      category: "rule",
+      content: "Advertising is not allowed",
+      sourceMessageId: 10,
+      createdByUserId: 42,
+    }]);
+    expect(current.listMemories({ type: "topic", chatId: -1001, threadId: 12 }).map((item) => item.content)).toEqual([
+      "Keep topic",
+    ]);
+    expect(() => current.applyGroupCompaction({
+      scope: { type: "group", chatId: -1001 },
+      expectedThroughMessageId: null,
+      summary: "Stale write",
+      fromMessageId: 10,
+      throughMessageId: 10,
+      memories: [],
+    })).toThrow("Group compaction watermark changed");
+  });
 });

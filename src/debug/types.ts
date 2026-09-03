@@ -5,7 +5,8 @@ export type DebugRequestKind =
   | "image_generate"
   | "image_edit"
   | "video_generate"
-  | "memory_compaction";
+  | "memory_compaction"
+  | "group_compaction";
 
 export type DebugRequestStatus = "running" | "succeeded" | "failed" | "submitted";
 
@@ -68,4 +69,3 @@ export interface FinishDebugRequest {
   errorCode?: string | null;
   kind?: DebugRequestKind;
 }
-
