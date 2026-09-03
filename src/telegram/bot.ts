@@ -378,6 +378,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   let routerDebugId: string | null = null;
   let routerCredential: ChatCredential | null = null;
   let onboardingEligibility: OnboardingEligibility | null = null;
+  let followUpTypingSent = false;
   if (savedCallbackIntent?.success) {
     routed = {
       ...savedCallbackIntent.data,
@@ -438,7 +439,9 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         messageId: message.message_id,
         kind: "intent_router",
         model: routerCredential.model,
-        promptRefs: [promptReference("mia.intent-router")],
+        promptRefs: automaticFollowUp
+          ? [promptReference("mia.follow-up-participation"), promptReference("mia.follow-up-chat")]
+          : [promptReference("mia.intent-router")],
         contextLayers: requestContext?.layers ?? null,
         requestPreview: {
           currentRequestText: promptFromMessage(policyInput, identity),
@@ -507,13 +510,27 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           active: Boolean(onboardingEligibility?.eligible || onboardingEligibility?.promptCount),
           missingFields: onboardingEligibility?.missingFields ?? [],
         },
+        ...(automaticFollowUp ? {
+          onParticipationDecision: async (responseToMessageId: number) => {
+            const target = request.batch?.find((item) => item.message.message_id === responseToMessageId);
+            if (!target) return;
+            await target.ctx.api.sendChatAction(
+              target.message.chat.id,
+              "typing",
+              threadOption(target.message),
+            );
+            followUpTypingSent = true;
+          },
+        } : {}),
       }, routerCredential.apiKey, fallbackImages, routerCredential.model);
       if (inputs.length === 0 && (routed.media_message_ids?.length ?? 0) > 0) {
         inputs = resolveSelectedMedia(message, routed.media_message_ids ?? [], mediaCandidates, dependencies.mediaStore);
       }
       const kind: DebugRequestKind = routed.intent === "chat" ? "chat" : routed.intent === "vision_qa" ? "vision_qa" : "intent_router";
+      const routingFailed = routed.fallbackReason === "router_unavailable" || routed.fallbackReason === "invalid_output";
       dependencies.debug?.finish(debugId, {
-        status: "succeeded",
+        status: routingFailed ? "failed" : "succeeded",
+        errorCode: routingFailed ? (routed.fallbackReason ?? "routing_failed") : null,
         responsePreview: routed,
         details: {
           phase: "intent_and_response",
@@ -523,6 +540,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           routedIntent: routed.intent,
           selectedMediaMessageIds: routed.media_message_ids ?? [],
           fallbackReason: routed.fallbackReason ?? null,
+          participationSource: routed.participationSource ?? null,
           webSearch: routed.webSearch ?? { callCount: 0, queries: [], sources: [] },
           onboarding: onboardingDebugDetails(onboardingEligibility, routed, false),
         },
@@ -563,7 +581,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     ctx = target.ctx;
     message = target.message;
     locale = resolveBotLocale(target.message.from.language_code);
-    await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
+    if (!followUpTypingSent) await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
   }
   const responseSender = message.from;
   if (!responseSender) return;

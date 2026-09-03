@@ -242,10 +242,12 @@ describe("Mia intent router", () => {
 
   it("silently observes unrelated messages in selective follow-up mode", async () => {
     const structuredResponse = vi.fn().mockResolvedValue(response({
-      intent: "chat", should_respond: false, response_to_message_id: null,
-      confidence: 0.98, instruction: "", media_source: "none", media_message_ids: [],
-      image_options: null, video_options: null, reply: null,
-      conversation_mode: "casual", onboarding_opportunity: false, profile_updates: null,
+      should_respond: false,
+      response_to_message_id: null,
+      intent_hint: "chat",
+      needs_web_search: false,
+      confidence: 0.98,
+      reason: "群成员之间的对话",
     }));
     const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 1000 });
 
@@ -264,6 +266,130 @@ describe("Mia intent router", () => {
     expect(payload.follow_up_batch_message_ids).toEqual([21]);
   });
 
+  it("answers an obvious short follow-up without spending a separate model call on participation", async () => {
+    const followUpReply = {
+      version: 1 as const,
+      title: null,
+      blocks: [{
+        type: "paragraph" as const,
+        heading: null,
+        emoji: null,
+        text: "后天北京预计多云。",
+        items: [],
+        ordered: false,
+        language: null,
+      }],
+      actions: [],
+    };
+    const structuredResponse = vi.fn().mockResolvedValue(response(followUpReply, {
+      callCount: 1,
+      queries: ["北京后天天气"],
+      sources: [],
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 30_000 });
+
+    const result = await router.classify({
+      ...base,
+      text: "[message_id=172 sender_user_id=5701793686]\n后天呢？",
+      participationMode: "selective",
+      followUpBatchMessageIds: [172],
+      followUpContext: {
+        scopeType: "group",
+        chatId: -1001964722014,
+        threadId: null,
+        awakenedByUserId: 5701793686,
+        lastHandledAt: "2026-09-03T14:48:41.795Z",
+      },
+      recentMessages: [
+        { role: "user", messageId: 170, senderUserId: 5701793686, text: "北京明天天气查一下。" },
+        { role: "assistant", messageId: 171, senderUserId: 100, text: "明天北京有雨。" },
+        { role: "user", messageId: 172, senderUserId: 5701793686, text: "后天呢？" },
+      ],
+    }, "public-follow-up-key");
+
+    expect(result).toMatchObject({
+      should_respond: true,
+      response_to_message_id: 172,
+      reply: followUpReply,
+      webSearch: { callCount: 1, queries: ["北京后天天气"] },
+    });
+    expect(structuredResponse).toHaveBeenCalledTimes(1);
+    expect(structuredResponse.mock.calls[0]?.[0]).toBe("public-follow-up-key");
+    expect(structuredResponse.mock.calls[0]?.[3]).toBe("mia_follow_up_chat_response");
+    expect(structuredResponse.mock.calls[0]?.[5]).toBe(45_000);
+  });
+
+  it("keeps unrelated chat silent after the lightweight public decision", async () => {
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      should_respond: false,
+      response_to_message_id: null,
+      intent_hint: "chat",
+      needs_web_search: false,
+      confidence: 0.97,
+      reason: "群成员之间的安排",
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 30_000 });
+
+    await expect(router.classify({
+      ...base,
+      text: "[message_id=173 sender_user_id=7]\n小王，我们明早十点开会",
+      participationMode: "selective",
+      followUpBatchMessageIds: [173],
+    }, "public-follow-up-key")).resolves.toMatchObject({
+      should_respond: false,
+      response_to_message_id: null,
+      confidence: 0.97,
+    });
+    expect(structuredResponse).toHaveBeenCalledOnce();
+    expect(structuredResponse.mock.calls[0]?.[3]).toBe("mia_follow_up_participation");
+    expect(structuredResponse.mock.calls[0]?.[6]).toEqual({ webSearch: false });
+  });
+
+  it("returns a visible safe reply when a confirmed follow-up answer times out", async () => {
+    const structuredResponse = vi.fn().mockRejectedValue(new Error("timeout"));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 30_000 });
+
+    const result = await router.classify({
+      ...base,
+      text: "后天呢？",
+      participationMode: "selective",
+      followUpBatchMessageIds: [172],
+      followUpContext: {
+        scopeType: "group",
+        chatId: -1001,
+        threadId: null,
+        awakenedByUserId: 42,
+        lastHandledAt: "2026-09-03T10:00:00.000Z",
+      },
+      recentMessages: [
+        { role: "assistant", messageId: 171, senderUserId: 100, text: "北京明天天气有雨。" },
+        { role: "user", messageId: 172, senderUserId: 42, text: "后天呢？" },
+      ],
+    }, "public-follow-up-key");
+    expect(result).toMatchObject({
+      should_respond: true,
+      response_to_message_id: 172,
+      fallbackReason: "response_fallback",
+    });
+    expect(result.reply?.blocks[0]?.text).toContain("公共模型");
+    expect(structuredResponse).toHaveBeenCalledOnce();
+  });
+
+  it("stays silent when the lightweight public participation decision fails", async () => {
+    const structuredResponse = vi.fn().mockRejectedValue(new Error("timeout"));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 30_000 });
+
+    await expect(router.classify({
+      ...base,
+      text: "请评估这份方案",
+      participationMode: "selective",
+      followUpBatchMessageIds: [172],
+    }, "public-follow-up-key")).resolves.toMatchObject({
+      should_respond: false,
+      fallbackReason: "router_unavailable",
+    });
+  });
+
   it("requires selective replies to target a real message in the current batch", async () => {
     const validReply = {
       version: 1 as const,
@@ -273,16 +399,18 @@ describe("Mia intent router", () => {
     };
     const structuredResponse = vi.fn()
       .mockResolvedValueOnce(response({
+        should_respond: true, response_to_message_id: 22, intent_hint: "media_or_summary",
+        needs_web_search: false, confidence: 0.99, reason: "明确请求 Mia 继续媒体任务",
+      }))
+      .mockResolvedValueOnce(response({
         intent: "chat", should_respond: true, response_to_message_id: 22,
         confidence: 0.99, instruction: "继续处理", media_source: "none", media_message_ids: [],
         image_options: null, video_options: null, reply: validReply,
         conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
       }))
       .mockResolvedValueOnce(response({
-        intent: "chat", should_respond: true, response_to_message_id: 999,
-        confidence: 0.99, instruction: "继续处理", media_source: "none", media_message_ids: [],
-        image_options: null, video_options: null, reply: validReply,
-        conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+        should_respond: true, response_to_message_id: 999, intent_hint: "chat",
+        needs_web_search: false, confidence: 0.99, reason: "无效目标",
       }));
     const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 1000 });
     const input = {

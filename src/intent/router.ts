@@ -2,7 +2,69 @@ import { z } from "zod";
 
 import type { APIMasterClient, MediaBinary, StructuredMessage, WebSearchUsage } from "../clients/apimaster.js";
 import { MIA_RESPONSE_JSON_SCHEMA, miaResponseFromText, miaResponseSchema } from "../presentation/schema.js";
-import { INTENT_ROUTER_SYSTEM_PROMPT } from "../prompts.js";
+import {
+  FOLLOW_UP_CHAT_SYSTEM_PROMPT,
+  FOLLOW_UP_PARTICIPATION_SYSTEM_PROMPT,
+  INTENT_ROUTER_SYSTEM_PROMPT,
+} from "../prompts.js";
+
+const followUpDecisionSchema = z.object({
+  should_respond: z.boolean(),
+  response_to_message_id: z.number().int().positive().nullable(),
+  intent_hint: z.enum(["chat", "media_or_summary"]),
+  needs_web_search: z.boolean(),
+  confidence: z.number().min(0).max(1),
+  reason: z.string().max(500),
+}).strict();
+
+const FOLLOW_UP_DECISION_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "should_respond", "response_to_message_id", "intent_hint", "needs_web_search", "confidence", "reason",
+  ],
+  properties: {
+    should_respond: { type: "boolean" },
+    response_to_message_id: { type: ["integer", "null"], minimum: 1 },
+    intent_hint: { type: "string", enum: ["chat", "media_or_summary"] },
+    needs_web_search: { type: "boolean" },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+    reason: { type: "string", maxLength: 500 },
+  },
+} as const;
+
+type FollowUpDecision = z.infer<typeof followUpDecisionSchema>;
+
+function obviousFollowUpDecision(input: IntentRouterInput): FollowUpDecision | null {
+  const batchIds = new Set(input.followUpBatchMessageIds ?? []);
+  const recent = input.recentMessages ?? [];
+  const batchMessages = recent.filter((message) => message.messageId !== undefined && batchIds.has(message.messageId));
+  const target = batchMessages.at(-1);
+  if (!target?.messageId || target.role !== "user") return null;
+  const targetIndex = recent.lastIndexOf(target);
+  const previous = targetIndex > 0 ? recent[targetIndex - 1] : undefined;
+  if (previous?.role !== "assistant") return null;
+  const awakenedBy = input.followUpContext?.awakenedByUserId ?? null;
+  if (awakenedBy !== null && target.senderUserId !== awakenedBy) return null;
+
+  const text = target.text.trim();
+  if (!text || Array.from(text).length > 80 || /^(?:好|好的|行|可以|收到|谢谢|感谢|嗯|哦|ok|okay)[!！。.~～]*$/iu.test(text)) {
+    return null;
+  }
+  const explicitContinuation = /^(?:那|那么|然后|接着|继续|再|还|也|改成|换成|补充|上面|刚才|前面|这个|那个|它)/u.test(text);
+  const ellipticalQuestion = Array.from(text).length <= 40 &&
+    /(?:呢|吗|么|如何|怎样|怎么样|怎么办|多少|几(?:点|天|个|次)|哪(?:里|个|天)|什么)(?:[?？!！。.]*)$/u.test(text);
+  if (!explicitContinuation && !ellipticalQuestion) return null;
+
+  return {
+    should_respond: true,
+    response_to_message_id: target.messageId,
+    intent_hint: "chat",
+    needs_web_search: /天气|气温|下雨|新闻|价格|比分|比赛|政策|今天|明天|后天|最新|现在|目前/u.test(`${previous.text}\n${text}`),
+    confidence: 0.99,
+    reason: "obvious_continuation_of_immediately_previous_mia_reply",
+  };
+}
 
 function withLegacyReply(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
@@ -94,11 +156,13 @@ export interface IntentRouterInput {
     active: boolean;
     missingFields: readonly string[];
   };
+  onParticipationDecision?: (responseToMessageId: number) => void | Promise<void>;
 }
 
 export interface RoutedIntent extends MediaIntent {
   missingRequired: string[];
-  fallbackReason?: "low_confidence" | "router_unavailable" | "invalid_output";
+  fallbackReason?: "low_confidence" | "router_unavailable" | "invalid_output" | "response_fallback";
+  participationSource?: "heuristic" | "model";
   webSearch?: WebSearchUsage;
 }
 
@@ -196,6 +260,58 @@ function fallback(
     profile_updates: null,
     missingRequired: [],
     fallbackReason: reason,
+  };
+}
+
+function observation(confidence: number, participationSource?: RoutedIntent["participationSource"]): RoutedIntent {
+  return {
+    intent: "chat",
+    should_respond: false,
+    response_to_message_id: null,
+    confidence,
+    instruction: "",
+    media_source: "none",
+    media_message_ids: [],
+    image_options: null,
+    video_options: null,
+    reply: null,
+    final_response: null,
+    conversation_mode: "task",
+    onboarding_opportunity: false,
+    profile_updates: null,
+    missingRequired: [],
+    ...(participationSource ? { participationSource } : {}),
+  };
+}
+
+function followUpChatResult(input: {
+  targetMessageId: number;
+  confidence: number;
+  instruction: string;
+  reply: z.infer<typeof miaResponseSchema>;
+  webSearch?: WebSearchUsage;
+  responseFallback?: boolean;
+  participationSource: NonNullable<RoutedIntent["participationSource"]>;
+}): RoutedIntent {
+  return {
+    intent: "chat",
+    should_respond: true,
+    response_to_message_id: input.targetMessageId,
+    confidence: input.confidence,
+    instruction: input.instruction,
+    media_source: "none",
+    media_message_ids: [],
+    image_options: null,
+    video_options: null,
+    reply: input.reply,
+    final_response: null,
+    conversation_mode: "task",
+    onboarding_opportunity: false,
+    profile_updates: null,
+    missingRequired: [],
+    participationSource: input.participationSource,
+    ...(input.webSearch ? { webSearch: input.webSearch } : {}),
+    ...(input.responseFallback ? { fallbackReason: "response_fallback" as const } : {}),
   };
 }
 
@@ -308,6 +424,10 @@ export class IntentRouter {
       ...input.conversationMessages,
     ];
 
+    if (participationMode === "selective") {
+      return this.classifySelective(input, apiKey, model, contextPayload, messages);
+    }
+
     let raw: unknown;
     try {
       const result = await this.client.structuredResponse(
@@ -320,10 +440,136 @@ export class IntentRouter {
       );
       raw = result.data;
       const parsed = mediaIntentSchema.safeParse(raw);
-      if (!parsed.success) return fallback("invalid_output", participationMode !== "selective");
+      if (!parsed.success) return fallback("invalid_output");
       return this.validatedResult(parsed.data, input, result.webSearch);
     } catch {
-      return fallback("router_unavailable", participationMode !== "selective");
+      return fallback("router_unavailable");
+    }
+  }
+
+  private async classifySelective(
+    input: IntentRouterInput,
+    apiKey: string,
+    model: string,
+    contextPayload: Record<string, unknown>,
+    fullMessages: readonly StructuredMessage[],
+  ): Promise<RoutedIntent> {
+    const batchIds = [...new Set(input.followUpBatchMessageIds ?? [])];
+    let decision = obviousFollowUpDecision(input);
+    let participationSource: NonNullable<RoutedIntent["participationSource"]> = decision ? "heuristic" : "model";
+    if (!decision) {
+      try {
+        const decisionMessages: StructuredMessage[] = [
+          { role: "system", content: FOLLOW_UP_PARTICIPATION_SYSTEM_PROMPT },
+          ...fullMessages.filter((message, index) => !(index === 0 && message.role === "system")),
+          { role: "user", content: JSON.stringify({
+            follow_up_batch_message_ids: batchIds,
+            follow_up_context: input.followUpContext ?? null,
+            current_request_text: input.text,
+            recent_messages: contextPayload.recent_messages,
+          }) },
+        ];
+        const result = await this.client.structuredResponse(
+          apiKey,
+          model,
+          decisionMessages,
+          "mia_follow_up_participation",
+          FOLLOW_UP_DECISION_JSON_SCHEMA,
+          Math.min(this.options.timeoutMs, 30_000),
+          { webSearch: false },
+        );
+        const parsed = followUpDecisionSchema.safeParse(result.data);
+        if (!parsed.success) return fallback("invalid_output", false);
+        decision = parsed.data;
+        participationSource = "model";
+      } catch {
+        return fallback("router_unavailable", false);
+      }
+    }
+
+    const targetMessageId = decision.response_to_message_id;
+    const validTarget = targetMessageId !== null && batchIds.includes(targetMessageId);
+    if (!decision.should_respond) {
+      return decision.response_to_message_id === null
+        ? observation(decision.confidence, participationSource)
+        : fallback("invalid_output", false);
+    }
+    if (!validTarget) return fallback("invalid_output", false);
+    if (targetMessageId === null) return fallback("invalid_output", false);
+    if (decision.confidence < (this.options.confidenceThreshold ?? 0.65)) return fallback("low_confidence", false);
+    try {
+      await input.onParticipationDecision?.(targetMessageId);
+    } catch {
+      // Telegram typing indicators are best-effort and must not block a confirmed response.
+    }
+
+    if (decision.intent_hint === "media_or_summary") {
+      return { ...await this.classifyFull(input, apiKey, model, fullMessages), participationSource };
+    }
+
+    const answerMessages: StructuredMessage[] = [
+      { role: "system", content: FOLLOW_UP_CHAT_SYSTEM_PROMPT },
+      ...fullMessages.filter((message, index) => !(index === 0 && message.role === "system")),
+      { role: "system", content: JSON.stringify({
+        confirmed_follow_up: true,
+        response_to_message_id: targetMessageId,
+        needs_web_search: decision.needs_web_search,
+      }) },
+    ];
+    try {
+      const result = await this.client.structuredResponse(
+        apiKey,
+        model,
+        answerMessages,
+        "mia_follow_up_chat_response",
+        MIA_RESPONSE_JSON_SCHEMA,
+        Math.max(this.options.timeoutMs, 45_000),
+      );
+      const reply = miaResponseSchema.safeParse(result.data);
+      if (!reply.success) return fallback("invalid_output", false);
+      return followUpChatResult({
+        targetMessageId,
+        confidence: decision.confidence,
+        instruction: input.text,
+        reply: reply.data,
+        participationSource,
+        webSearch: result.webSearch,
+      });
+    } catch {
+      const usesCjk = /[\u3400-\u9fff\uf900-\ufaff]/u.test(input.text);
+      return followUpChatResult({
+        targetMessageId,
+        confidence: decision.confidence,
+        instruction: input.text,
+        reply: miaResponseFromText(usesCjk
+          ? "我看到了，这是在继续问我。不过公共模型这次响应失败了，请稍后再试一下。"
+          : "I saw that this follows up on my answer, but the public model failed to respond this time. Please try again shortly."),
+        participationSource,
+        responseFallback: true,
+      });
+    }
+  }
+
+  private async classifyFull(
+    input: IntentRouterInput,
+    apiKey: string,
+    model: string,
+    messages: readonly StructuredMessage[],
+  ): Promise<RoutedIntent> {
+    try {
+      const result = await this.client.structuredResponse(
+        apiKey,
+        model,
+        messages,
+        "mia_media_intent",
+        ROUTER_SCHEMA,
+        this.options.timeoutMs,
+      );
+      const parsed = mediaIntentSchema.safeParse(result.data);
+      if (!parsed.success) return fallback("invalid_output", false);
+      return this.validatedResult(parsed.data, input, result.webSearch);
+    } catch {
+      return fallback("router_unavailable", false);
     }
   }
 

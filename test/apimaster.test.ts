@@ -214,6 +214,33 @@ describe("APIMaster client", () => {
     expect(JSON.stringify(requestBody)).not.toContain('"type":"image_url"');
   });
 
+  it("can disable Web Search for lightweight structured participation decisions", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      output: [{
+        type: "message",
+        content: [{ type: "output_text", text: JSON.stringify({ should_respond: false }) }],
+      }],
+    }));
+    const client = createClient(fetcher);
+
+    await client.structuredResponse(
+      "public-key",
+      "gpt-5.4",
+      [{ role: "user", content: "群成员之间的闲聊" }],
+      "mia_follow_up_participation",
+      { type: "object" },
+      30_000,
+      { webSearch: false },
+    );
+
+    const init = fetcher.mock.calls[0]?.[1];
+    const requestBody = typeof init?.body === "string"
+      ? JSON.parse(init.body) as Record<string, unknown>
+      : {};
+    expect(requestBody).not.toHaveProperty("tools");
+    expect(requestBody).not.toHaveProperty("tool_choice");
+  });
+
   it("loads the user's model catalog without exposing a key", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       success: true,

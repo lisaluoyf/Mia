@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { APIMasterClient } from "../src/clients/apimaster.js";
 import type { ChatCredentialProvider } from "../src/credentials/chat.js";
-import type { IntentRouter, RoutedIntent } from "../src/intent/router.js";
+import { IntentRouter, type RoutedIntent } from "../src/intent/router.js";
 import { createLogger } from "../src/logger.js";
 import { MediaStore } from "../src/media/store.js";
 import { ContextStore } from "../src/storage/store.js";
@@ -118,20 +118,24 @@ describe("Mia group follow-up", () => {
     vi.useRealTimers();
   });
 
-  function setup(classify: ReturnType<typeof vi.fn>) {
+  function setup(
+    classify: ReturnType<typeof vi.fn>,
+    options: { router?: IntentRouter; client?: APIMasterClient } = {},
+  ) {
     let failMessages = false;
+    const resolveCredential = vi.fn().mockResolvedValue({
+      apiKey: "requester-key", model: "gpt-5.4", source: "user", fallbackReason: null,
+    });
     const credentials: ChatCredentialProvider = {
-      resolve: vi.fn().mockResolvedValue({
-        apiKey: "requester-key", model: "gpt-5.4", source: "user", fallbackReason: null,
-      }),
+      resolve: resolveCredential,
     };
     const bot = createBot("123:test", {
-      client: {} as APIMasterClient,
+      client: options.client ?? {} as APIMasterClient,
       chatCredentials: credentials,
       logger: createLogger("silent"),
       settings: { getPreferences: vi.fn().mockReturnValue({ chatModel: "gpt-5.4" }) },
       contexts,
-      router: { model: "gpt-5.4", classify } as unknown as IntentRouter,
+      router: options.router ?? { model: "gpt-5.4", classify } as unknown as IntentRouter,
       mediaStore,
       botToken: "123:test",
       followUpCredential: { apiKey: "public-follow-up-key", model: "gpt-5.4" },
@@ -156,7 +160,7 @@ describe("Mia group follow-up", () => {
       }
       return Promise.resolve({ ok: true, result: true } as never);
     });
-    return { bot, calls, credentials, failMessages: () => { failMessages = true; } };
+    return { bot, calls, credentials, resolveCredential, failMessages: () => { failMessages = true; } };
   }
 
   it("wakes on mention, batches every member, and silently observes unrelated discussion", async () => {
@@ -214,6 +218,54 @@ describe("Mia group follow-up", () => {
     vi.setSystemTime(new Date("2026-09-03T10:19:02.000Z"));
     await bot.handleUpdate(update({ updateId: 3, messageId: 4, text: "还在吗", threadId: 12 }));
     expect(classify).toHaveBeenCalledTimes(2);
+  });
+
+  it("automatically answers 后天呢 after a weather wake-up using only the public follow-up credential", async () => {
+    const directReply = reply("北京明天有雨。");
+    const followUpReply = reply("北京后天转多云。");
+    const structuredResponse = vi.fn()
+      .mockResolvedValueOnce({
+        data: {
+          intent: "chat",
+          should_respond: true,
+          response_to_message_id: null,
+          confidence: 0.99,
+          instruction: "北京明天天气查一下",
+          media_source: "none",
+          media_message_ids: [],
+          image_options: null,
+          video_options: null,
+          reply: directReply,
+          conversation_mode: "task",
+          onboarding_opportunity: false,
+          profile_updates: null,
+        },
+        webSearch: { callCount: 1, queries: ["北京明天天气"], sources: [] },
+      })
+      .mockResolvedValueOnce({
+        data: followUpReply,
+        webSearch: { callCount: 1, queries: ["北京后天天气"], sources: [] },
+      });
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 30_000 });
+    const { bot, calls, resolveCredential } = setup(vi.fn(), { router });
+
+    await bot.handleUpdate(update({
+      updateId: 1,
+      messageId: 170,
+      text: "@MiaAssistantBot 北京明天天气查一下。",
+      mention: true,
+    }));
+    await bot.handleUpdate(update({ updateId: 2, messageId: 703, text: "后天呢？" }));
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const replies = calls.filter((call) => call.method === "sendMessage");
+    expect(replies).toHaveLength(2);
+    expect(replies[1]?.payload.reply_parameters).toMatchObject({ message_id: 703 });
+    expect(structuredResponse).toHaveBeenCalledTimes(2);
+    expect(structuredResponse.mock.calls[1]?.[0]).toBe("public-follow-up-key");
+    expect(structuredResponse.mock.calls[1]?.[3]).toBe("mia_follow_up_chat_response");
+    expect(resolveCredential).toHaveBeenCalledTimes(1);
+    expect(calls.filter((call) => call.method === "sendChatAction")).toHaveLength(2);
   });
 
   it("isolates topics, wakes on direct reply, and ignores pure images while evaluating captions", async () => {

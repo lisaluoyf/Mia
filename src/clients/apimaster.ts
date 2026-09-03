@@ -435,6 +435,7 @@ export class APIMasterClient {
     schemaName: string,
     schema: object,
     timeoutMs = this.options.timeoutMs,
+    options: { webSearch?: boolean } = {},
   ): Promise<StructuredResponseResult> {
     const instructions = messages
       .filter((message) => message.role === "system")
@@ -455,8 +456,10 @@ export class APIMasterClient {
           model,
           instructions,
           input,
-          tools: [{ type: "web_search" }],
-          tool_choice: "auto",
+          ...(options.webSearch === false ? {} : {
+            tools: [{ type: "web_search" }],
+            tool_choice: "auto",
+          }),
           text: {
             format: { type: "json_schema", name: schemaName, strict: true, schema },
           },
