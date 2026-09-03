@@ -60,6 +60,12 @@ const ENGLISH = {
   accountDisabled: "This APIMaster account is currently unavailable. Check the account status first.",
   noUsableKey: "Your APIMaster account has no API Key available for {model}.",
   quotaUnavailable: "This request could not be completed. Check your APIMaster quota and try again.",
+  mediaBindRequired: "Images and videos require an APIMaster account. Sign up or sign in, then connect this Telegram account.",
+  mediaTokenRequired: "Images and videos require your own APIMaster API Token. Create a Token first.",
+  mediaTopUpRequired: "Your APIMaster balance is insufficient for this media request. Add funds and try again.",
+  registerAndBindButton: "Sign up and connect",
+  createTokenButton: "Create API Token",
+  topUpButton: "Add funds",
   serviceUnavailable: "The service is temporarily unavailable. Please try again later.",
   temporaryError: "A temporary error occurred. Mia is still processing and will check again.",
   videoDraftExpired: "This video draft expired.",
@@ -137,6 +143,12 @@ const CHINESE_SIMPLIFIED: MessageOverrides = {
   accountDisabled: "这个 APIMaster 账号目前不可用，请先检查账号状态。",
   noUsableKey: "你的 APIMaster 账号目前没有可用于 {model} 的 API Key。",
   quotaUnavailable: "本次请求暂时无法完成，请检查 APIMaster 额度后再试。",
+  mediaBindRequired: "图片和视频需要 APIMaster 账号，请先注册或登录并绑定这个 Telegram 账号。",
+  mediaTokenRequired: "图片和视频需要使用你自己的 APIMaster API Token，请先创建 Token。",
+  mediaTopUpRequired: "你的 APIMaster 余额不足以完成本次媒体请求，请充值后重试。",
+  registerAndBindButton: "注册并绑定",
+  createTokenButton: "创建 API Token",
+  topUpButton: "去充值",
   serviceUnavailable: "服务暂时不可用，请稍后再试。",
   temporaryError: "发生了临时错误，Mia 仍在处理，稍后会再次检查。",
   videoDraftExpired: "这个视频草稿已过期。",
@@ -173,6 +185,12 @@ const CHINESE_TRADITIONAL: MessageOverrides = {
   ratioButton: "切換畫幅",
   generateVideoButton: "生成影片",
   cancelButton: "取消",
+  mediaBindRequired: "圖片和影片需要 APIMaster 帳號，請先註冊或登入並綁定這個 Telegram 帳號。",
+  mediaTokenRequired: "圖片和影片需要使用你自己的 APIMaster API Token，請先建立 Token。",
+  mediaTopUpRequired: "你的 APIMaster 餘額不足以完成這次媒體請求，請儲值後再試。",
+  registerAndBindButton: "註冊並綁定",
+  createTokenButton: "建立 API Token",
+  topUpButton: "去儲值",
 };
 
 // Core asynchronous media copy is localized for every language offered by the Mini App.
@@ -202,6 +220,34 @@ const CORE_TRANSLATIONS: Record<Exclude<BotLocale, "en" | "zh-CN" | "zh-TW">, Me
   vi: { queuedImage: "Đã đưa tác vụ tạo ảnh vào hàng đợi…", submitted: "Đã gửi. Mia sẽ gửi kết quả tại đây khi hoàn tất.", imageReady: "Ảnh đã sẵn sàng", videoReady: "Video đã sẵn sàng", generateAgain: "Tạo lại", generateAnother: "Tạo thêm ảnh", continueEditing: "Tiếp tục chỉnh sửa", downloadOriginal: "Tải bản gốc", share: "Chia sẻ", stillProcessing: "Vẫn đang xử lý{progress}…", generationFailed: "Tạo nội dung đa phương tiện thất bại.", temporaryError: "Đã xảy ra lỗi tạm thời. Mia vẫn đang xử lý và sẽ kiểm tra lại.", activeLimit: "Bạn đã có 3 tác vụ đa phương tiện đang chạy." },
 };
 
+type AccessMessageKey = "mediaBindRequired" | "mediaTokenRequired" | "mediaTopUpRequired" |
+  "registerAndBindButton" | "createTokenButton" | "topUpButton";
+
+const ACCESS_TRANSLATIONS: Record<Exclude<BotLocale, "en" | "zh-CN" | "zh-TW">, Record<AccessMessageKey, string>> = {
+  ar: { mediaBindRequired: "تتطلب الصور ومقاطع الفيديو حساب APIMaster. سجّل أو ادخل ثم اربط حساب Telegram.", mediaTokenRequired: "تتطلب الصور ومقاطع الفيديو رمز APIMaster API خاصًا بك. أنشئ رمزًا أولًا.", mediaTopUpRequired: "رصيد APIMaster غير كافٍ لهذا الطلب. أضف رصيدًا وحاول مجددًا.", registerAndBindButton: "التسجيل والربط", createTokenButton: "إنشاء رمز API", topUpButton: "إضافة رصيد" },
+  cs: { mediaBindRequired: "Obrázky a videa vyžadují účet APIMaster. Přihlaste se a propojte Telegram.", mediaTokenRequired: "Obrázky a videa vyžadují vlastní APIMaster API Token. Nejprve jej vytvořte.", mediaTopUpRequired: "Zůstatek APIMaster nestačí. Doplňte prostředky a zkuste to znovu.", registerAndBindButton: "Registrovat a propojit", createTokenButton: "Vytvořit API Token", topUpButton: "Dobít kredit" },
+  de: { mediaBindRequired: "Für Bilder und Videos ist ein APIMaster-Konto erforderlich. Melde dich an und verbinde Telegram.", mediaTokenRequired: "Für Bilder und Videos brauchst du einen eigenen APIMaster API-Token. Erstelle zuerst einen Token.", mediaTopUpRequired: "Dein APIMaster-Guthaben reicht nicht aus. Lade Guthaben auf und versuche es erneut.", registerAndBindButton: "Registrieren und verbinden", createTokenButton: "API-Token erstellen", topUpButton: "Guthaben aufladen" },
+  es: { mediaBindRequired: "Las imágenes y los vídeos requieren una cuenta de APIMaster. Regístrate o inicia sesión y vincula Telegram.", mediaTokenRequired: "Las imágenes y los vídeos requieren tu propio Token de API de APIMaster. Crea uno primero.", mediaTopUpRequired: "Tu saldo de APIMaster no es suficiente. Añade fondos e inténtalo de nuevo.", registerAndBindButton: "Registrarse y vincular", createTokenButton: "Crear Token de API", topUpButton: "Añadir fondos" },
+  fa: { mediaBindRequired: "تصویر و ویدیو به حساب APIMaster نیاز دارند. ثبت‌نام یا وارد شوید و تلگرام را متصل کنید.", mediaTokenRequired: "تصویر و ویدیو به توکن API شخصی APIMaster نیاز دارند. ابتدا توکن بسازید.", mediaTopUpRequired: "موجودی APIMaster کافی نیست. حساب را شارژ و دوباره تلاش کنید.", registerAndBindButton: "ثبت‌نام و اتصال", createTokenButton: "ساخت توکن API", topUpButton: "افزایش موجودی" },
+  fr: { mediaBindRequired: "Les images et vidéos nécessitent un compte APIMaster. Inscrivez-vous ou connectez-vous, puis liez Telegram.", mediaTokenRequired: "Les images et vidéos nécessitent votre propre jeton API APIMaster. Créez-en un d’abord.", mediaTopUpRequired: "Votre solde APIMaster est insuffisant. Ajoutez des fonds et réessayez.", registerAndBindButton: "S’inscrire et associer", createTokenButton: "Créer un jeton API", topUpButton: "Ajouter des fonds" },
+  hi: { mediaBindRequired: "इमेज और वीडियो के लिए APIMaster खाता चाहिए। साइन अप या लॉग इन करके Telegram जोड़ें।", mediaTokenRequired: "इमेज और वीडियो के लिए आपका अपना APIMaster API Token चाहिए। पहले Token बनाएँ।", mediaTopUpRequired: "आपका APIMaster बैलेंस पर्याप्त नहीं है। धन जोड़कर फिर कोशिश करें।", registerAndBindButton: "साइन अप और कनेक्ट", createTokenButton: "API Token बनाएँ", topUpButton: "धन जोड़ें" },
+  id: { mediaBindRequired: "Gambar dan video memerlukan akun APIMaster. Daftar atau masuk, lalu hubungkan Telegram.", mediaTokenRequired: "Gambar dan video memerlukan Token API APIMaster milik Anda. Buat Token terlebih dahulu.", mediaTopUpRequired: "Saldo APIMaster Anda tidak cukup. Tambahkan saldo lalu coba lagi.", registerAndBindButton: "Daftar dan hubungkan", createTokenButton: "Buat Token API", topUpButton: "Tambah saldo" },
+  it: { mediaBindRequired: "Immagini e video richiedono un account APIMaster. Registrati o accedi, poi collega Telegram.", mediaTokenRequired: "Immagini e video richiedono un tuo Token API APIMaster. Creane prima uno.", mediaTopUpRequired: "Il saldo APIMaster non è sufficiente. Aggiungi fondi e riprova.", registerAndBindButton: "Registrati e collega", createTokenButton: "Crea Token API", topUpButton: "Aggiungi fondi" },
+  ja: { mediaBindRequired: "画像と動画には APIMaster アカウントが必要です。登録またはログインして Telegram を連携してください。", mediaTokenRequired: "画像と動画には自分の APIMaster API Token が必要です。先に作成してください。", mediaTopUpRequired: "APIMaster の残高が不足しています。入金してもう一度お試しください。", registerAndBindButton: "登録して連携", createTokenButton: "API Token を作成", topUpButton: "入金する" },
+  ko: { mediaBindRequired: "이미지와 동영상에는 APIMaster 계정이 필요합니다. 가입 또는 로그인 후 Telegram을 연결하세요.", mediaTokenRequired: "이미지와 동영상에는 본인의 APIMaster API Token이 필요합니다. 먼저 Token을 만드세요.", mediaTopUpRequired: "APIMaster 잔액이 부족합니다. 충전한 뒤 다시 시도하세요.", registerAndBindButton: "가입하고 연결", createTokenButton: "API Token 만들기", topUpButton: "잔액 충전" },
+  ms: { mediaBindRequired: "Imej dan video memerlukan akaun APIMaster. Daftar atau log masuk, kemudian sambungkan Telegram.", mediaTokenRequired: "Imej dan video memerlukan Token API APIMaster anda sendiri. Cipta Token dahulu.", mediaTopUpRequired: "Baki APIMaster anda tidak mencukupi. Tambah dana dan cuba lagi.", registerAndBindButton: "Daftar dan sambung", createTokenButton: "Cipta Token API", topUpButton: "Tambah dana" },
+  nl: { mediaBindRequired: "Voor afbeeldingen en video’s is een APIMaster-account nodig. Meld je aan en koppel Telegram.", mediaTokenRequired: "Voor afbeeldingen en video’s heb je een eigen APIMaster API-token nodig. Maak eerst een token.", mediaTopUpRequired: "Je APIMaster-saldo is onvoldoende. Voeg saldo toe en probeer opnieuw.", registerAndBindButton: "Registreren en koppelen", createTokenButton: "API-token maken", topUpButton: "Saldo toevoegen" },
+  pl: { mediaBindRequired: "Obrazy i filmy wymagają konta APIMaster. Zarejestruj się lub zaloguj i połącz Telegram.", mediaTokenRequired: "Obrazy i filmy wymagają własnego Tokenu API APIMaster. Najpierw go utwórz.", mediaTopUpRequired: "Saldo APIMaster jest niewystarczające. Dodaj środki i spróbuj ponownie.", registerAndBindButton: "Zarejestruj i połącz", createTokenButton: "Utwórz Token API", topUpButton: "Dodaj środki" },
+  pt: { mediaBindRequired: "Imagens e vídeos requerem uma conta APIMaster. Registe-se ou entre e ligue o Telegram.", mediaTokenRequired: "Imagens e vídeos requerem o seu próprio Token de API APIMaster. Crie um primeiro.", mediaTopUpRequired: "O seu saldo APIMaster é insuficiente. Adicione fundos e tente novamente.", registerAndBindButton: "Registar e ligar", createTokenButton: "Criar Token de API", topUpButton: "Adicionar fundos" },
+  "pt-BR": { mediaBindRequired: "Imagens e vídeos exigem uma conta APIMaster. Cadastre-se ou entre e conecte o Telegram.", mediaTokenRequired: "Imagens e vídeos exigem seu próprio Token de API APIMaster. Crie um primeiro.", mediaTopUpRequired: "Seu saldo APIMaster é insuficiente. Adicione fundos e tente novamente.", registerAndBindButton: "Cadastrar e conectar", createTokenButton: "Criar Token de API", topUpButton: "Adicionar fundos" },
+  ru: { mediaBindRequired: "Для изображений и видео нужна учётная запись APIMaster. Зарегистрируйтесь или войдите и привяжите Telegram.", mediaTokenRequired: "Для изображений и видео нужен собственный API-токен APIMaster. Сначала создайте его.", mediaTopUpRequired: "Недостаточно средств на балансе APIMaster. Пополните его и повторите попытку.", registerAndBindButton: "Регистрация и привязка", createTokenButton: "Создать API-токен", topUpButton: "Пополнить баланс" },
+  th: { mediaBindRequired: "รูปภาพและวิดีโอต้องใช้บัญชี APIMaster สมัครหรือเข้าสู่ระบบแล้วเชื่อมต่อ Telegram", mediaTokenRequired: "รูปภาพและวิดีโอต้องใช้ Token API ของ APIMaster ของคุณเอง โปรดสร้าง Token ก่อน", mediaTopUpRequired: "ยอดคงเหลือ APIMaster ไม่เพียงพอ โปรดเติมเงินแล้วลองอีกครั้ง", registerAndBindButton: "สมัครและเชื่อมต่อ", createTokenButton: "สร้าง Token API", topUpButton: "เติมเงิน" },
+  tr: { mediaBindRequired: "Görsel ve videolar için APIMaster hesabı gerekir. Kaydolun veya giriş yapın ve Telegram’ı bağlayın.", mediaTokenRequired: "Görsel ve videolar için kendi APIMaster API Token’ınız gerekir. Önce bir Token oluşturun.", mediaTopUpRequired: "APIMaster bakiyeniz yetersiz. Bakiye ekleyip tekrar deneyin.", registerAndBindButton: "Kaydol ve bağla", createTokenButton: "API Token oluştur", topUpButton: "Bakiye ekle" },
+  uk: { mediaBindRequired: "Для зображень і відео потрібен обліковий запис APIMaster. Зареєструйтеся або увійдіть і під’єднайте Telegram.", mediaTokenRequired: "Для зображень і відео потрібен власний API-токен APIMaster. Спочатку створіть його.", mediaTopUpRequired: "На балансі APIMaster недостатньо коштів. Поповніть його та спробуйте ще раз.", registerAndBindButton: "Реєстрація і підключення", createTokenButton: "Створити API-токен", topUpButton: "Поповнити баланс" },
+  uz: { mediaBindRequired: "Rasm va videolar uchun APIMaster hisobi kerak. Ro‘yxatdan o‘ting yoki kiring va Telegram’ni ulang.", mediaTokenRequired: "Rasm va videolar uchun o‘zingizning APIMaster API Tokeningiz kerak. Avval Token yarating.", mediaTopUpRequired: "APIMaster balansingiz yetarli emas. Hisobni to‘ldirib, qayta urinib ko‘ring.", registerAndBindButton: "Ro‘yxatdan o‘tish va ulash", createTokenButton: "API Token yaratish", topUpButton: "Balansni to‘ldirish" },
+  vi: { mediaBindRequired: "Hình ảnh và video cần tài khoản APIMaster. Hãy đăng ký hoặc đăng nhập rồi liên kết Telegram.", mediaTokenRequired: "Hình ảnh và video cần Token API APIMaster của riêng bạn. Hãy tạo Token trước.", mediaTopUpRequired: "Số dư APIMaster không đủ. Hãy nạp thêm tiền rồi thử lại.", registerAndBindButton: "Đăng ký và liên kết", createTokenButton: "Tạo Token API", topUpButton: "Nạp tiền" },
+};
+
 const LOCALE_SET = new Set<string>(BOT_LOCALES);
 
 export function resolveBotLocale(language?: string | null): BotLocale {
@@ -217,7 +263,7 @@ function overrides(locale: BotLocale): MessageOverrides {
   if (locale === "zh-CN") return CHINESE_SIMPLIFIED;
   if (locale === "zh-TW") return CHINESE_TRADITIONAL;
   if (locale === "en") return {};
-  return CORE_TRANSLATIONS[locale];
+  return { ...CORE_TRANSLATIONS[locale], ...ACCESS_TRANSLATIONS[locale] };
 }
 
 export function botText(

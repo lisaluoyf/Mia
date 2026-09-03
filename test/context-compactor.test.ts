@@ -22,6 +22,9 @@ describe("context compactor", () => {
     });
     const compactor = new ContextCompactor({
       client: { resolveAPIKey: vi.fn().mockResolvedValue("user-key"), structuredChat },
+      credentials: { resolve: vi.fn().mockResolvedValue({
+        apiKey: "guest-test-key", model: "gpt-5.4", source: "guest", fallbackReason: "telegram_not_bound",
+      }) },
       store,
       logger: createLogger("silent"),
       model: "gpt-5.4",
@@ -51,6 +54,8 @@ describe("context compactor", () => {
       throughMessageId: 20,
     });
     const request = JSON.stringify(structuredChat.mock.calls[0]);
+    expect(structuredChat.mock.calls[0]?.[0]).toBe("guest-test-key");
+    expect(structuredChat.mock.calls[0]?.[1]).toBe("gpt-5.4");
     expect(request).toContain("旧记忆");
     expect(request).toContain("最近 10 轮对话");
 

@@ -165,7 +165,12 @@ export class IntentRouter {
     return this.options.model;
   }
 
-  async classify(input: IntentRouterInput, apiKey: string, images: readonly MediaBinary[] = []): Promise<RoutedIntent> {
+  async classify(
+    input: IntentRouterInput,
+    apiKey: string,
+    images: readonly MediaBinary[] = [],
+    model = this.options.model,
+  ): Promise<RoutedIntent> {
     const contextPayload = {
       text: input.text,
       media: { type: input.mediaType, count: input.mediaCount },
@@ -205,7 +210,7 @@ export class IntentRouter {
     try {
       raw = await this.client.structuredChat(
         apiKey,
-        this.options.model,
+        model,
         messages,
         "mia_media_intent",
         ROUTER_SCHEMA,

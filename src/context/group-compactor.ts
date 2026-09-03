@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Logger } from "pino";
 
 import type { APIMasterClient, StructuredMessage } from "../clients/apimaster.js";
+import type { ChatCredentialProvider } from "../credentials/chat.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import {
   GROUP_CONTEXT_COMPACTION_SYSTEM_PROMPT,
@@ -57,6 +58,7 @@ type GroupScope = Extract<ConversationScope, { type: "group" | "topic" }>;
 
 interface GroupCompactorDependencies {
   client: Pick<APIMasterClient, "resolveAPIKey" | "structuredChat">;
+  credentials?: ChatCredentialProvider;
   store: Pick<ContextStore,
     "getChat" | "getLatestSummary" | "getMessage" | "getUser" | "listMemories" |
     "listMessagesAfter" | "applyGroupCompaction">;
@@ -157,13 +159,21 @@ export class GroupContextCompactor {
             }),
           },
         ];
+        const credential = this.dependencies.credentials
+          ? await this.dependencies.credentials.resolve(payerUserId, this.dependencies.model)
+          : {
+              apiKey: await this.dependencies.client.resolveAPIKey(payerUserId, this.dependencies.model),
+              model: this.dependencies.model,
+              source: "user" as const,
+              fallbackReason: null,
+            };
         debugId = this.dependencies.debug?.start({
           telegramUserId: payerUserId,
           chatId: scope.chatId,
           chatType: chat?.type ?? "group",
           messageId: last.messageId,
           kind: "group_compaction",
-          model: this.dependencies.model,
+          model: credential.model,
           promptRefs: [
             promptReference("mia.group-context-compaction"),
             promptReference("mia.group-context-compaction-input"),
@@ -176,12 +186,16 @@ export class GroupContextCompactor {
             recentMessages: { order: "oldest_to_newest", dialogue },
           },
           requestPreview: prompt,
-          details: { fromMessageId: first.messageId, throughMessageId: last.messageId },
+          details: {
+            fromMessageId: first.messageId,
+            throughMessageId: last.messageId,
+            credentialSource: credential.source,
+            credentialFallbackReason: credential.fallbackReason,
+          },
         }) ?? null;
-        const apiKey = await this.dependencies.client.resolveAPIKey(payerUserId, this.dependencies.model);
         const raw = await this.dependencies.client.structuredChat(
-          apiKey,
-          this.dependencies.model,
+          credential.apiKey,
+          credential.model,
           prompt,
           "mia_group_context_compaction",
           GROUP_COMPACTION_JSON_SCHEMA,

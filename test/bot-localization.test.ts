@@ -76,4 +76,22 @@ describe("Telegram bot localization", () => {
       }
     }
   });
+
+  it("localizes every media activation message and button for all 25 locales", () => {
+    const accessKeys: BotMessageKey[] = [
+      "mediaBindRequired",
+      "mediaTokenRequired",
+      "mediaTopUpRequired",
+      "registerAndBindButton",
+      "createTokenButton",
+      "topUpButton",
+    ];
+    for (const locale of BOT_LOCALES) {
+      for (const key of accessKeys) {
+        const translated = botText(locale, key);
+        expect(translated.length, `${locale}:${key}`).toBeGreaterThan(2);
+        if (locale !== "en") expect(translated, `${locale}:${key}`).not.toBe(botText("en", key));
+      }
+    }
+  });
 });

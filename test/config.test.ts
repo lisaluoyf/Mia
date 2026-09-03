@@ -1,0 +1,26 @@
+import { describe, expect, it } from "vitest";
+
+import { loadConfig } from "../src/config.js";
+
+const requiredEnvironment = {
+  TELEGRAM_BOT_TOKEN: "123:test-token",
+  APIMASTER_BASE_URL: "https://apimaster.example",
+  MIA_INTERNAL_SERVICE_KEY: "internal-test-key-long-enough",
+};
+
+describe("Mia configuration", () => {
+  it("fails fast without the guest text-chat Token", () => {
+    expect(() => loadConfig(requiredEnvironment)).toThrow();
+  });
+
+  it("accepts a deployment-only guest Token and fixes its model to GPT-5.4", () => {
+    const config = loadConfig({ ...requiredEnvironment, MIA_GUEST_CHAT_API_KEY: "guest-test-key" });
+    expect(config.miaGuestChatApiKey).toBe("guest-test-key");
+    expect(config.miaGuestChatModel).toBe("gpt-5.4");
+    expect(() => loadConfig({
+      ...requiredEnvironment,
+      MIA_GUEST_CHAT_API_KEY: "guest-test-key",
+      MIA_GUEST_CHAT_MODEL: "another-model",
+    })).toThrow();
+  });
+});

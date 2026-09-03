@@ -3,8 +3,9 @@ import type { Message } from "grammy/types";
 import type { Logger } from "pino";
 
 import type { APIMasterClient } from "../clients/apimaster.js";
-import { ResolverError } from "../clients/apimaster.js";
+import { ChatCompletionError, ResolverError } from "../clients/apimaster.js";
 import { DEFAULT_MODELS } from "../constants.js";
+import type { ChatCredential, ChatCredentialProvider } from "../credentials/chat.js";
 import { buildConversationMessages, loadConversationContext } from "../context/conversation.js";
 import type { ContextCompactor } from "../context/compactor.js";
 import type { GroupContextCompactor } from "../context/group-compactor.js";
@@ -38,6 +39,7 @@ type StorableMessage = Message.TextMessage | Message.PhotoMessage | Message.Docu
 
 interface BotDependencies {
   client: APIMasterClient;
+  chatCredentials?: ChatCredentialProvider;
   logger: Logger;
   settings: Pick<ModelSettingsService, "getPreferences"> & Partial<Pick<ModelSettingsService, "getSnapshot">>;
   contexts: Pick<ContextStore, "upsertUser" | "upsertChat" | "upsertMember" | "saveMessage"> &
@@ -253,6 +255,10 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     pending.sourceMessageIds.at(-1) === message.reply_to_message?.message_id;
   const savedCallbackIntent = callbackReply ? mediaIntentSchema.safeParse(pending.slots) : null;
 
+  if (request.inputs.length > 0 && await rejectUnavailableMediaUser(ctx, message, dependencies)) {
+    return;
+  }
+
   if (request.inputs.length > 0 && request.text.trim() === "" && !pending) {
     await replyTo(ctx, message, botText(locale, "imageActionQuestion"));
     return;
@@ -260,6 +266,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
 
   let routed: RoutedIntent;
   let routerDebugId: string | null = null;
+  let routerCredential: ChatCredential | null = null;
   let onboardingEligibility: OnboardingEligibility | null = null;
   if (savedCallbackIntent?.success) {
     routed = {
@@ -296,15 +303,20 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     let debugId: string | null = null;
     try {
       await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
-      const routerKey = await dependencies.client.resolveAPIKey(message.from.id, dependencies.router.model);
+      routerCredential = await resolveTextCredential(
+        dependencies,
+        message.from.id,
+        dependencies.router.model,
+      );
       const requestContext = await buildRequestContext(
         ctx,
         message,
         dependencies,
         activeInputs[0] ?? null,
         pending?.intent ?? null,
+        routerCredential.source === "user",
       );
-      const fallbackImages = requestContext === null && inputs.length > 0
+      const fallbackImages = routerCredential.source === "user" && requestContext === null && inputs.length > 0
         ? await downloadTelegramImages(ctx.api, dependencies.botToken ?? "", inputs)
         : [];
       debugId = dependencies.debug?.start({
@@ -313,13 +325,15 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         chatType: message.chat.type,
         messageId: message.message_id,
         kind: "intent_router",
-        model: dependencies.router.model,
+        model: routerCredential.model,
         promptRefs: [promptReference("mia.intent-router")],
         contextLayers: requestContext?.layers ?? null,
         requestPreview: { text: promptFromMessage(policyInput, identity), replyToMessageId: message.reply_to_message?.message_id ?? null },
         media: inputs.map((input) => ({ messageId: input.messageId, type: input.type, mimeType: input.mimeType })),
         details: {
           phase: "intent_and_response",
+          credentialSource: routerCredential.source,
+          credentialFallbackReason: routerCredential.fallbackReason,
           onboarding: onboardingEligibility ? {
             serverEligible: onboardingEligibility.eligible,
             completedTurns: onboardingEligibility.completedTurns,
@@ -348,7 +362,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           active: Boolean(onboardingEligibility?.eligible || onboardingEligibility?.promptCount),
           missingFields: onboardingEligibility?.missingFields ?? [],
         },
-      }, routerKey, fallbackImages);
+      }, routerCredential.apiKey, fallbackImages, routerCredential.model);
       const kind: DebugRequestKind = routed.intent === "chat" ? "chat" : routed.intent === "vision_qa" ? "vision_qa" : "intent_router";
       dependencies.debug?.finish(debugId, {
         status: "succeeded",
@@ -383,6 +397,16 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         };
       }
     }
+  }
+
+  if (routerCredential?.source === "guest" && routed.intent !== "chat") {
+    await replyMediaAccessError(
+      ctx,
+      message,
+      new ResolverError(routerCredential.fallbackReason ?? "no_usable_api_key"),
+      locale,
+    );
+    return;
   }
 
   if (routed.intent === "chat") {
@@ -520,11 +544,15 @@ async function executeMediaIntent(
       return;
     }
     if (routed.intent === "video_generate") {
+      const model = snapshot?.settings.videoModel ??
+        dependencies.settings.getPreferences(message.from.id).videoModel ?? DEFAULT_MODELS.video;
+      await dependencies.client.resolveAPIKey(message.from.id, model);
       await createVideoDraft(ctx, message, routed, inputs, snapshot, dependencies);
       return;
     }
     if (routed.intent !== "image_generate" && routed.intent !== "image_edit") return;
     const model = snapshot?.settings.imageModel ?? dependencies.settings.getPreferences(message.from.id).imageModel ?? DEFAULT_MODELS.image;
+    await dependencies.client.resolveAPIKey(message.from.id, model);
     if (dependencies.mediaStore.getJobByIdempotencyKey(requestKey(message))) return;
     const status = await replyTo(ctx, message, botText(locale, "stillProcessing", { progress: "" }));
     const claim = dependencies.mediaStore.claimJob({
@@ -546,7 +574,7 @@ async function executeMediaIntent(
     }
   } catch (error) {
     dependencies.debug?.finish(debugId, { status: "failed", errorCode: debugErrorCode(error) });
-    await replyTo(ctx, message, mediaError(error, locale));
+    await replyMediaAccessError(ctx, message, error, locale);
   }
 }
 
@@ -706,6 +734,7 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
     return;
   }
   if (action === "generate") {
+    if (!await ensureCallbackMediaAccess(ctx, job, dependencies, locale)) return;
     const result = dependencies.mediaStore.claimDraft(job.id);
     if (result.outcome === "claimed") {
       const processingText = botText(locale, "stillProcessing", { progress: "" });
@@ -814,6 +843,7 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
       await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
       return;
     }
+    if (!await ensureCallbackMediaAccess(ctx, job, dependencies, locale)) return;
     if (job.type === "video_generate") {
       const draft = dependencies.mediaStore.createDraft({
         ...scopeForJob(job),
@@ -859,6 +889,23 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
   }
   if (action === "download") {
     await downloadResult(ctx, job, dependencies);
+  }
+}
+
+async function ensureCallbackMediaAccess(
+  ctx: Context,
+  job: MediaJob,
+  dependencies: BotDependencies,
+  locale: BotLocale,
+): Promise<boolean> {
+  try {
+    await dependencies.client.resolveAPIKey(job.telegramUserId, job.model);
+    return true;
+  } catch (error) {
+    const message = ctx.callbackQuery?.message;
+    await ctx.answerCallbackQuery();
+    if (message) await replyMediaAccessError(ctx, message, error, locale);
+    return false;
   }
 }
 
@@ -909,18 +956,25 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
   try {
     await ctx.api.sendChatAction(ctx.chat.id, "typing", ctx.message ? threadOption(ctx.message) : {});
     const selectedModel = dependencies.settings.getPreferences(ctx.from.id).chatModel ?? DEFAULT_MODELS.chat;
-    let model = selectedModel;
-    let apiKey: string;
-    try {
-      apiKey = await dependencies.client.resolveAPIKey(ctx.from.id, model);
-    } catch (error) {
-      if (!(error instanceof ResolverError) || error.code !== "no_usable_api_key" || sameModelId(model, DEFAULT_MODELS.chat)) throw error;
-      model = DEFAULT_MODELS.chat;
-      apiKey = await dependencies.client.resolveAPIKey(ctx.from.id, model);
+    const credential = await resolveTextCredential(
+      dependencies,
+      ctx.from.id,
+      selectedModel,
+      DEFAULT_MODELS.chat,
+    );
+    const model = credential.model;
+    if (credential.source === "user" && !sameModelId(model, selectedModel)) {
       await ctx.reply(botText(locale, "chatModelFallback", { selected: selectedModel, model }));
     }
     if (!ctx.message) return;
-    const requestContext = await buildRequestContext(ctx, ctx.message, dependencies, null, null);
+    const requestContext = await buildRequestContext(
+      ctx,
+      ctx.message,
+      dependencies,
+      null,
+      null,
+      credential.source === "user",
+    );
     debugId = dependencies.debug?.start({
       telegramUserId: ctx.from.id,
       chatId: ctx.chat.id,
@@ -932,13 +986,17 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
       contextLayers: requestContext?.layers ?? null,
       requestPreview: { text: prompt },
       media: requestContext?.layers.recentMessages ?? null,
+      details: {
+        credentialSource: credential.source,
+        credentialFallbackReason: credential.fallbackReason,
+      },
     }) ?? null;
     const response = requestContext
-      ? await dependencies.client.chatMessages(apiKey, model, [
+      ? await dependencies.client.chatMessages(credential.apiKey, model, [
         { role: "system", content: MIA_SYSTEM_PROMPT },
         ...requestContext.messages,
       ])
-      : await dependencies.client.chat(apiKey, model, prompt);
+      : await dependencies.client.chat(credential.apiKey, model, prompt);
     dependencies.debug?.finish(debugId, { status: "succeeded", responsePreview: response });
     const assistantMessageId = await sendConversationResponse(ctx, ctx.message, response, dependencies);
     recordCompletedChatTurn(ctx.message, assistantMessageId, dependencies);
@@ -968,6 +1026,7 @@ async function buildRequestContext(
   dependencies: BotDependencies,
   activeMedia: MediaInput | null,
   currentTask: string | null,
+  includeMedia = true,
 ): Promise<{ messages: ReturnType<typeof buildConversationMessages>; layers: DebugContextLayers } | null> {
   if (!message.from || !ctx.me || !dependencies.botToken || !hasContextReader(dependencies.contexts)) return null;
   const context = loadConversationContext({
@@ -993,7 +1052,7 @@ async function buildRequestContext(
     context.replyToMessageId,
     context.activeMediaMessageId,
   ].filter((messageId): messageId is number => messageId !== null));
-  const images = context.mediaInputs.length === 0
+  const images = !includeMedia || context.mediaInputs.length === 0
     ? []
     : await downloadConversationImages(
       ctx.api,
@@ -1005,6 +1064,34 @@ async function buildRequestContext(
     messages: buildConversationMessages(context, images, ctx.me.id),
     layers: debugContextLayers(context),
   };
+}
+
+async function resolveTextCredential(
+  dependencies: BotDependencies,
+  telegramUserId: number,
+  requestedModel: string,
+  fallbackUserModel?: string,
+): Promise<ChatCredential> {
+  if (dependencies.chatCredentials) {
+    return dependencies.chatCredentials.resolve(telegramUserId, requestedModel, fallbackUserModel);
+  }
+  try {
+    return {
+      apiKey: await dependencies.client.resolveAPIKey(telegramUserId, requestedModel),
+      model: requestedModel,
+      source: "user",
+      fallbackReason: null,
+    };
+  } catch (error) {
+    if (!(error instanceof ResolverError) || error.code !== "no_usable_api_key" ||
+        !fallbackUserModel || sameModelId(requestedModel, fallbackUserModel)) throw error;
+    return {
+      apiKey: await dependencies.client.resolveAPIKey(telegramUserId, fallbackUserModel),
+      model: fallbackUserModel,
+      source: "user",
+      fallbackReason: null,
+    };
+  }
 }
 
 function debugErrorCode(error: unknown): string {
@@ -1184,6 +1271,58 @@ function mediaError(error: unknown, locale: BotLocale): string {
     return botText(locale, "unsupportedImage");
   }
   return userFacingError(error, undefined, locale);
+}
+
+async function rejectUnavailableMediaUser(
+  ctx: Context,
+  message: Message,
+  dependencies: BotDependencies,
+): Promise<boolean> {
+  if (!message.from) return true;
+  try {
+    if (dependencies.settings.getSnapshot) {
+      await dependencies.settings.getSnapshot(message.from.id);
+    } else {
+      await dependencies.client.resolveAPIKey(message.from.id, DEFAULT_MODELS.image);
+    }
+    return false;
+  } catch (error) {
+    await replyMediaAccessError(ctx, message, error, resolveBotLocale(message.from.language_code));
+    return true;
+  }
+}
+
+async function replyMediaAccessError(
+  ctx: Context,
+  message: Message,
+  error: unknown,
+  locale: BotLocale,
+): Promise<void> {
+  if (error instanceof ResolverError && error.code === "telegram_not_bound") {
+    const keyboard = new InlineKeyboard().url(
+      botText(locale, "registerAndBindButton"),
+      "https://apimaster.ai/register?next=/console/personal",
+    );
+    await replyTo(ctx, message, botText(locale, "mediaBindRequired"), { reply_markup: keyboard });
+    return;
+  }
+  if (error instanceof ResolverError && error.code === "no_usable_api_key") {
+    const keyboard = new InlineKeyboard().url(
+      botText(locale, "createTokenButton"),
+      "https://apimaster.ai/console/tokens",
+    );
+    await replyTo(ctx, message, botText(locale, "mediaTokenRequired"), { reply_markup: keyboard });
+    return;
+  }
+  if (error instanceof ChatCompletionError && error.status === 402) {
+    const keyboard = new InlineKeyboard().url(
+      botText(locale, "topUpButton"),
+      "https://apimaster.ai/console/wallet",
+    );
+    await replyTo(ctx, message, botText(locale, "mediaTopUpRequired"), { reply_markup: keyboard });
+    return;
+  }
+  await replyTo(ctx, message, mediaError(error, locale));
 }
 
 async function editCallbackMessage(ctx: Context, text: string): Promise<void> {

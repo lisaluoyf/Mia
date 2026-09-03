@@ -2,6 +2,7 @@ import { InlineKeyboard, InputFile, type Api } from "grammy";
 import type { Logger } from "pino";
 
 import type { APIMasterClient, NormalizedTaskStatus } from "../clients/apimaster.js";
+import { MediaAPIError, ResolverError } from "../clients/apimaster.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { MediaStore } from "./store.js";
 import type { MediaJob } from "./types.js";
@@ -178,7 +179,13 @@ export class MediaWorker {
     } catch (error) {
       this.options.store.transitionJob(job.id, ["submitting"], "failed", { errorCode: errorCode(error) });
       this.options.debug?.finish(debugId, { status: "failed", errorCode: errorCode(error) });
-      await this.notifyFailure(job, botText(mediaJobLocale(job.options), "submissionFailed"));
+      const locale = mediaJobLocale(job.options);
+      const accessFailure = submissionAccessFailure(error, locale);
+      await this.notifyFailure(
+        job,
+        accessFailure?.text ?? botText(locale, "submissionFailed"),
+        accessFailure?.keyboard,
+      );
     }
   }
 
@@ -343,14 +350,17 @@ export class MediaWorker {
     });
   }
 
-  private async notifyFailure(job: MediaJob, text: string): Promise<void> {
+  private async notifyFailure(job: MediaJob, text: string, keyboard?: InlineKeyboard): Promise<void> {
     if (hasEphemeralStatus(job) && job.statusMessageId) {
       const edited = await this.options.api.editMessageText(job.chatId, job.statusMessageId, text, {
-        reply_markup: { inline_keyboard: [] },
+        reply_markup: keyboard ?? { inline_keyboard: [] },
       }).then(() => true).catch(() => false);
       if (edited) return;
     }
-    await this.options.api.sendMessage(job.chatId, text, replyOptions(job)).catch(() => undefined);
+    await this.options.api.sendMessage(job.chatId, text, {
+      ...replyOptions(job),
+      ...(keyboard ? { reply_markup: keyboard } : {}),
+    }).catch(() => undefined);
   }
 
   private async updateStatus(job: MediaJob, text: string): Promise<void> {
@@ -358,6 +368,31 @@ export class MediaWorker {
       await this.options.api.editMessageText(job.chatId, job.statusMessageId, text).catch(() => undefined);
     }
   }
+}
+
+function submissionAccessFailure(error: unknown, locale: string): { text: string; keyboard: InlineKeyboard } | null {
+  if (error instanceof MediaAPIError && error.code === "insufficient_quota") {
+    return {
+      text: botText(locale, "mediaTopUpRequired"),
+      keyboard: new InlineKeyboard().url(botText(locale, "topUpButton"), "https://apimaster.ai/console/wallet"),
+    };
+  }
+  if (error instanceof ResolverError && error.code === "telegram_not_bound") {
+    return {
+      text: botText(locale, "mediaBindRequired"),
+      keyboard: new InlineKeyboard().url(
+        botText(locale, "registerAndBindButton"),
+        "https://apimaster.ai/register?next=/console/personal",
+      ),
+    };
+  }
+  if (error instanceof ResolverError && error.code === "no_usable_api_key") {
+    return {
+      text: botText(locale, "mediaTokenRequired"),
+      keyboard: new InlineKeyboard().url(botText(locale, "createTokenButton"), "https://apimaster.ai/console/tokens"),
+    };
+  }
+  return null;
 }
 
 function hasEphemeralStatus(job: MediaJob): boolean {

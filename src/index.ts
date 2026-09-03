@@ -17,6 +17,7 @@ import { DebugRecorder } from "./debug/recorder.js";
 import { DebugService } from "./debug/service.js";
 import { DebugStore } from "./debug/store.js";
 import { OnboardingService } from "./onboarding/service.js";
+import { ChatCredentialResolver } from "./credentials/chat.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -43,8 +44,13 @@ async function main(): Promise<void> {
   debugRefreshTimer.unref();
   const store = new SettingsStore(resolve(config.databasePath));
   const contexts = new ContextStore(resolve(config.databasePath));
+  const chatCredentials = new ChatCredentialResolver(client, {
+    apiKey: config.miaGuestChatApiKey,
+    model: config.miaGuestChatModel,
+  });
   const compactor = new ContextCompactor({
     client,
+    credentials: chatCredentials,
     store: contexts,
     logger,
     model: config.miaContextModel,
@@ -52,6 +58,7 @@ async function main(): Promise<void> {
   });
   const groupCompactor = new GroupContextCompactor({
     client,
+    credentials: chatCredentials,
     store: contexts,
     logger,
     model: config.miaContextModel,
@@ -66,6 +73,7 @@ async function main(): Promise<void> {
   });
   const bot = createBot(config.telegramBotToken, {
     client,
+    chatCredentials,
     logger,
     settings,
     contexts,

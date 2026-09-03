@@ -16,6 +16,8 @@ const environmentSchema = z.object({
   MIA_ROUTER_MODEL: z.string().trim().min(1).default("gpt-5.4"),
   MIA_ROUTER_TIMEOUT_MS: z.coerce.number().int().min(500).max(30000).default(8000),
   MIA_CONTEXT_MODEL: z.string().trim().min(1).default("gpt-5.4"),
+  MIA_GUEST_CHAT_API_KEY: z.string().trim().min(1),
+  MIA_GUEST_CHAT_MODEL: z.literal("gpt-5.4").default("gpt-5.4"),
   MIA_PUBLIC_BASE_URL: z.url().optional(),
   MEDIA_WORKER_INTERVAL_MS: z.coerce.number().int().min(1000).max(60000).default(5000),
   MEDIA_RESULT_MAX_BYTES: z.coerce.number().int().min(1_000_000).max(2_000_000_000).default(50_000_000),
@@ -36,6 +38,8 @@ export interface AppConfig {
   miaRouterModel: string;
   miaRouterTimeoutMs: number;
   miaContextModel: string;
+  miaGuestChatApiKey: string;
+  miaGuestChatModel: string;
   publicBaseUrl: string | null;
   mediaWorkerIntervalMs: number;
   mediaResultMaxBytes: number;
@@ -64,6 +68,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     miaRouterModel: parsed.MIA_ROUTER_MODEL,
     miaRouterTimeoutMs: parsed.MIA_ROUTER_TIMEOUT_MS,
     miaContextModel: parsed.MIA_CONTEXT_MODEL,
+    miaGuestChatApiKey: parsed.MIA_GUEST_CHAT_API_KEY,
+    miaGuestChatModel: parsed.MIA_GUEST_CHAT_MODEL,
     publicBaseUrl: parsed.MIA_PUBLIC_BASE_URL === undefined ? null : withoutTrailingSlash(parsed.MIA_PUBLIC_BASE_URL),
     mediaWorkerIntervalMs: parsed.MEDIA_WORKER_INTERVAL_MS,
     mediaResultMaxBytes: parsed.MEDIA_RESULT_MAX_BYTES,

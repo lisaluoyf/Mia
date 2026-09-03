@@ -22,6 +22,9 @@ describe("group context compactor", () => {
     });
     const compactor = new GroupContextCompactor({
       client: { resolveAPIKey: vi.fn().mockResolvedValue("payer-key"), structuredChat },
+      credentials: { resolve: vi.fn().mockResolvedValue({
+        apiKey: "guest-test-key", model: "gpt-5.4", source: "guest", fallbackReason: "no_usable_api_key",
+      }) },
       store,
       logger: createLogger("silent"),
       model: "gpt-5.4",
@@ -47,6 +50,8 @@ describe("group context compactor", () => {
       createdByUserId: 42,
     }]);
     const request = JSON.stringify(structuredChat.mock.calls[0]);
+    expect(structuredChat.mock.calls[0]?.[0]).toBe("guest-test-key");
+    expect(structuredChat.mock.calls[0]?.[1]).toBe("gpt-5.4");
     expect(request).toContain("一次完成两项工作");
     expect(request).toContain("message_id=50");
 

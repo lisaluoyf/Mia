@@ -62,7 +62,7 @@ describe("Telegram media callbacks", () => {
     const classify = vi.fn();
     const getPreferences = vi.fn().mockReturnValue({ imageModel: "gpt-image-2" });
     const bot = createBot("123:test", {
-      client: {} as APIMasterClient,
+      client: { resolveAPIKey: vi.fn().mockResolvedValue("user-key") } as unknown as APIMasterClient,
       logger: createLogger("silent"),
       settings: { getPreferences },
       contexts: {
@@ -239,7 +239,7 @@ describe("Telegram media callbacks", () => {
       has_main_web_app: false,
     };
     const bot = createBot("123:test", {
-      client: {} as APIMasterClient,
+      client: { resolveAPIKey: vi.fn().mockResolvedValue("user-key") } as unknown as APIMasterClient,
       logger: createLogger("silent"),
       settings: { getPreferences: vi.fn() },
       contexts: {

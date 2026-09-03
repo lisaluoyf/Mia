@@ -1,18 +1,18 @@
 # Mia
 
-Mia is a Telegram AI assistant that uses an already-bound APIMaster account and
-one of that user's existing API Keys. Mia supports chat, image generation and
-editing, image understanding, and confirmed asynchronous video generation.
+Mia is a Telegram AI assistant. Unbound users and bound users without a usable
+API Token can use text chat through a dedicated service credential; bound users
+continue using their own APIMaster Keys and selected models. Image generation,
+editing, understanding, and video generation always require the user's own Key.
 
 ## Behavior
 
 - Private chats: text, images, image documents, and albums enter one intent pipeline.
 - Groups: Mia responds to `/image`, `/vision`, `/video`, mentions, direct replies,
   and explicit Mia calls made while replying to media. Results stay in the same Topic.
-- `/image`, `/vision`, and `/video` bypass the classifier. Natural-language media
-requests use `gpt-5.4` with the triggering user's APIMaster Key. For chat and
-vision answers that call returns the final text; only media actions continue to
-the selected image or video model.
+- `/image`, `/vision`, and `/video` bypass the classifier. Natural-language requests
+use `gpt-5.4`; only `telegram_not_bound` and `no_usable_api_key` fall back to the
+guest text credential. Guest media intents stop at an account activation prompt.
 - Videos always require a 10-minute confirmation draft before the paid request.
 - Image and video generation share a three-job per-user concurrency limit.
 - APIMaster owns accounts, Keys, quota checks, and model routing.
@@ -23,9 +23,9 @@ the selected image or video model.
 - Model requests receive Mia's system rules, current conversation metadata,
   private-user long-term memory, the rolling conversation summary, and the
   unsummarized messages in chronological order.
-- Images are sent with their pixels, source turn, stable reference, and one of
-  `current`, `replied`, `active`, or `historical` so an older image is not
-  mistaken for the current image.
+- For users with their own compatible Key, images are sent with pixels, source
+  turn, stable reference, and one of `current`, `replied`, `active`, or
+  `historical`. Guest text requests receive media metadata but never pixels.
 - After every ten successful private text-chat turns, Mia replies first and
   then asynchronously asks `MIA_CONTEXT_MODEL` to return the complete refreshed
   memory list and rolling summary. The SQLite replacement is transactional.
@@ -42,10 +42,10 @@ pnpm dev
 ```
 
 The APIMaster `new-api` process must have the same `MIA_INTERNAL_SERVICE_KEY`
-and expose the Telegram Key resolver and Mia model catalog. `MIA_ROUTER_MODEL`
-defaults to `gpt-5.4`; Mia resolves the triggering user's Key for that model, so
-there is no platform-owned routing credential. `MIA_CONTEXT_MODEL` independently
-defaults to `gpt-5.4` for the ten-turn background compaction. Mia exposes `GET /health`
+and expose the Telegram Key resolver and Mia model catalog. `MIA_GUEST_CHAT_API_KEY`
+must be a deployment-only APIMaster Token restricted to `gpt-5.4`; it is never
+used for vision, images, or video. `MIA_ROUTER_MODEL` and `MIA_CONTEXT_MODEL`
+default to `gpt-5.4`. Mia exposes `GET /health`
 and the authenticated `POST /telegram/update` receiver on `127.0.0.1:3010` by
 default.
 

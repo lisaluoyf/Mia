@@ -92,6 +92,19 @@ describe("Mia intent router", () => {
     expect(JSON.stringify(structuredChat.mock.calls[0]?.[2])).toContain("data:image/png;base64,AQID");
   });
 
+  it("allows the credential resolver to force the guest GPT-5.4 model", async () => {
+    const structuredChat = vi.fn().mockResolvedValue({
+      intent: "chat", confidence: 0.99, instruction: "", media_source: "none",
+      image_options: null, video_options: null, final_response: "Hello",
+      conversation_mode: "casual", onboarding_opportunity: false, profile_updates: null,
+    });
+    const router = new IntentRouter({ structuredChat }, { model: "configured-router", timeoutMs: 1000 });
+
+    await router.classify(base, "guest-test-key", [], "gpt-5.4");
+
+    expect(structuredChat.mock.calls[0]?.[1]).toBe("gpt-5.4");
+  });
+
   it("returns casual onboarding signals and explicit profile updates in the same call", async () => {
     const structuredChat = vi.fn().mockResolvedValue({
       intent: "chat", confidence: 0.99, instruction: "", media_source: "none",

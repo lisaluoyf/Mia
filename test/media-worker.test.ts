@@ -6,6 +6,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 
 import type { APIMasterClient } from "../src/clients/apimaster.js";
+import { MediaAPIError } from "../src/clients/apimaster.js";
 import { createLogger } from "../src/logger.js";
 import { MediaStore } from "../src/media/store.js";
 import { MediaWorker } from "../src/media/worker.js";
@@ -112,6 +113,41 @@ describe("media worker transient regeneration status", () => {
     });
     expect(sendMessage).not.toHaveBeenCalled();
     expect(store.getJobByIdempotencyKey("callback:again-1")?.status).toBe("failed");
+  });
+
+  it("shows a wallet button when APIMaster rejects media before charging", async () => {
+    createJob();
+    const editMessageText = vi.fn().mockResolvedValue({});
+    const submitImage = vi.fn().mockRejectedValue(new MediaAPIError("insufficient_quota", 402));
+    const worker = new MediaWorker({
+      client: {
+        resolveAPIKey: vi.fn().mockResolvedValue("user-key"),
+        submitImage,
+      } as unknown as APIMasterClient,
+      store,
+      api: { editMessageText, sendMessage: vi.fn() } as unknown as Api,
+      botToken: "123:test",
+      logger: createLogger("silent"),
+      intervalMs: 1_000,
+      resultMaxBytes: 10_000_000,
+      publicBaseUrl: null,
+    });
+
+    await worker.tick();
+
+    expect(submitImage).toHaveBeenCalledOnce();
+    expect(store.getJobByIdempotencyKey("callback:again-1")).toMatchObject({
+      status: "failed",
+      upstreamTaskId: null,
+      errorCode: "insufficient_quota",
+    });
+    expect(editMessageText).toHaveBeenCalledWith(
+      42,
+      78,
+      expect.stringContaining("余额不足"),
+      expect.anything(),
+    );
+    expect(JSON.stringify(editMessageText.mock.calls[0]?.[3])).toContain("https://apimaster.ai/console/wallet");
   });
 
   it("delivers a synchronous image-edit result without polling", async () => {
