@@ -458,7 +458,7 @@ async function executeMediaIntent(
     if (routed.intent !== "image_generate" && routed.intent !== "image_edit") return;
     const model = snapshot?.settings.imageModel ?? dependencies.settings.getPreferences(message.from.id).imageModel ?? DEFAULT_MODELS.image;
     if (dependencies.mediaStore.getJobByIdempotencyKey(requestKey(message))) return;
-    const status = await replyTo(ctx, message, botText(locale, "queuedImage"));
+    const status = await replyTo(ctx, message, botText(locale, "stillProcessing", { progress: "" }));
     const claim = dependencies.mediaStore.claimJob({
       ...scopeFor(message),
       type: routed.intent,
@@ -544,8 +544,9 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
   if (action === "generate") {
     const result = dependencies.mediaStore.claimDraft(job.id);
     if (result.outcome === "claimed") {
-      await ctx.answerCallbackQuery({ text: botText(locale, "videoQueuedShort") });
-      await editCallbackMessage(ctx, botText(locale, "videoQueued"));
+      const processingText = botText(locale, "stillProcessing", { progress: "" });
+      await ctx.answerCallbackQuery({ text: processingText });
+      await editCallbackMessage(ctx, processingText);
     } else if (result.outcome === "limit_reached") {
       await ctx.answerCallbackQuery({ text: botText(locale, "activeLimit"), show_alert: true });
     } else {
