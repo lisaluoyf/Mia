@@ -96,26 +96,26 @@ function createWorker(publicBaseUrl: string | null) {
 }
 
 describe("MediaWorker download buttons", () => {
-  it("uses a signed Mia URL without exposing the upstream result", async () => {
+  it("keeps original downloads in Telegram without exposing the upstream result", async () => {
     const { worker, store, sendPhoto } = createWorker("https://apimaster.ai");
 
     await worker.tick();
 
     const replyMarkup = sendPhoto.mock.calls[0]?.[2]?.reply_markup;
     expect(replyMarkup.inline_keyboard[1]).toEqual([
-      { text: "Download original", url: "https://apimaster.ai/mia/media/download/signed-download-token" },
+      { text: "Download original", callback_data: "media:7:download" },
       {
         text: "Share on X",
         url: "https://x.com/intent/post?text=I+just+created+this+image+with+Mia.&url=https%3A%2F%2Fapimaster.ai%2Fmia%2Fshare%2Fsigned-share-token",
       },
     ]);
     expect(JSON.stringify(replyMarkup)).not.toContain("upstream.invalid");
-    expect(store.createAccessToken).toHaveBeenCalledWith("download", job.id);
     expect(store.createAccessToken).toHaveBeenCalledWith("share", job.id);
+    expect(store.createAccessToken).not.toHaveBeenCalledWith("download", job.id);
     expect(store.saveLocalResult).toHaveBeenCalledWith(job.id, new Uint8Array([1, 2, 3]));
   });
 
-  it("keeps the callback fallback when no public Mia URL is configured", async () => {
+  it("uses the same Telegram callback when no public Mia URL is configured", async () => {
     const { worker, store, sendPhoto } = createWorker(null);
 
     await worker.tick();

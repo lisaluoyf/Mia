@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { InputFile } from "grammy";
 
 import type { APIMasterClient } from "../src/clients/apimaster.js";
 import { createLogger } from "../src/logger.js";
@@ -8,10 +12,114 @@ import { createBot } from "../src/telegram/bot.js";
 
 describe("Telegram media callbacks", () => {
   let store: MediaStore | undefined;
+  let resultDirectory: string | undefined;
 
   afterEach(() => {
     store?.close();
     store = undefined;
+    if (resultDirectory) rmSync(resultDirectory, { recursive: true, force: true });
+    resultDirectory = undefined;
+  });
+
+  it("sends the locally stored original as a Telegram document", async () => {
+    resultDirectory = mkdtempSync(join(tmpdir(), "mia-download-callback-"));
+    store = new MediaStore(":memory:", { resultDirectory });
+    const claimed = store.claimJob({
+      telegramUserId: 42,
+      chatId: 42,
+      threadId: null,
+      type: "image_generate",
+      idempotencyKey: "message:42:70",
+      requestMessageId: 70,
+      model: "gpt-image-2",
+      instruction: "A moonlit portrait",
+      options: { locale: "zh-CN" },
+    });
+    if (claimed.outcome !== "created") throw new Error("Expected media job creation");
+    store.transitionJob(claimed.job.id, ["queued"], "submitting");
+    store.transitionJob(claimed.job.id, ["submitting"], "submitted", { upstreamTaskId: "task-1" });
+    store.transitionJob(claimed.job.id, ["submitted"], "succeeded", {
+      statusMessageId: 77,
+      progress: 100,
+      resultUrl: "https://media.example/result.png",
+      resultMimeType: "image/png",
+    });
+    store.saveLocalResult(claimed.job.id, Buffer.from("original-image-bytes"));
+
+    const botInfo = {
+      id: 100,
+      is_bot: true,
+      first_name: "Mia",
+      username: "apimasterai_bot",
+      can_join_groups: true,
+      can_read_all_group_messages: true,
+      supports_inline_queries: false,
+      can_connect_to_business: false,
+      has_main_web_app: false,
+    };
+    const bot = createBot("123:test", {
+      client: {
+        resolveAPIKey: vi.fn(),
+        getContent: vi.fn(),
+      } as unknown as APIMasterClient,
+      logger: createLogger("silent"),
+      settings: { getPreferences: vi.fn() },
+      contexts: {
+        upsertUser: vi.fn(),
+        upsertChat: vi.fn(),
+        upsertMember: vi.fn(),
+        saveMessage: vi.fn(),
+      },
+      mediaStore: store,
+      botToken: "123:test",
+      resultMaxBytes: 10_000_000,
+    });
+    bot.botInfo = botInfo;
+    const calls: Array<{ method: string; payload: Record<string, unknown> }> = [];
+    bot.api.config.use((_previous, method, payload) => {
+      calls.push({ method, payload });
+      return Promise.resolve({ ok: true, result: true } as never);
+    });
+
+    await bot.handleUpdate({
+      update_id: 9004,
+      callback_query: {
+        id: "callback-download-1",
+        from: {
+          id: 42,
+          is_bot: false,
+          first_name: "Liz",
+          language_code: "zh-CN",
+        },
+        message: {
+          message_id: 77,
+          date: 1_788_333_500,
+          chat: { id: 42, type: "private", first_name: "Liz" },
+          from: botInfo,
+          photo: [{ file_id: "generated-photo", file_unique_id: "generated-unique", width: 1024, height: 1024 }],
+          caption: "图片已生成",
+        },
+        chat_instance: "instance-1",
+        data: `media:${claimed.job.id}:download`,
+      },
+    } as never);
+
+    expect(calls.map(({ method }) => method)).toEqual(["answerCallbackQuery", "sendDocument"]);
+    expect(calls[0]).toEqual({
+      method: "answerCallbackQuery",
+      payload: { callback_query_id: "callback-download-1" },
+    });
+    expect(calls[1]).toMatchObject({
+      method: "sendDocument",
+      payload: {
+        chat_id: 42,
+      },
+    });
+    expect(calls[1]?.payload.document).toBeInstanceOf(InputFile);
+    expect(calls[1]?.payload.document).toMatchObject({
+      filename: "mia-image.png",
+      fileData: Buffer.from("original-image-bytes"),
+    });
   });
 
   it("opens a selective force-reply prompt bound to the generated image", async () => {

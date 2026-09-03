@@ -1046,23 +1046,28 @@ async function downloadResult(ctx: Context, job: MediaJob, dependencies: BotDepe
     return;
   }
   const locale = mediaJobLocale(job.options, ctx.from?.language_code);
-  try {
-    const local = dependencies.mediaStore.readLocalResult(job.id, job.resultMimeType);
-    if (local) {
+  const local = dependencies.mediaStore.readLocalResult(job.id, job.resultMimeType);
+  const resultUrl = job.resultUrl;
+  if (local) {
+    await ctx.answerCallbackQuery();
+    try {
       await ctx.api.sendDocument(job.chatId, new InputFile(local.bytes, local.filename), threadOptionFromJob(job));
-      await ctx.answerCallbackQuery({ text: botText(locale, "sent") });
-      return;
+    } catch {
+      await ctx.api.sendMessage(job.chatId, botText(locale, "downloadUnavailable"), threadOptionFromJob(job));
     }
-    if (!job.resultUrl) {
-      await ctx.answerCallbackQuery({ text: botText(locale, "originalUnavailable"), show_alert: true });
-      return;
-    }
+    return;
+  }
+  if (!resultUrl) {
+    await ctx.answerCallbackQuery({ text: botText(locale, "originalUnavailable"), show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery();
+  try {
     const apiKey = await dependencies.client.resolveAPIKey(job.telegramUserId, job.model);
-    const media = await dependencies.client.getContent(apiKey, job.resultUrl, dependencies.resultMaxBytes);
+    const media = await dependencies.client.getContent(apiKey, resultUrl, dependencies.resultMaxBytes);
     await ctx.api.sendDocument(job.chatId, new InputFile(media.bytes, media.filename), threadOptionFromJob(job));
-    await ctx.answerCallbackQuery({ text: botText(locale, "sent") });
   } catch {
-    await ctx.answerCallbackQuery({ text: botText(locale, "downloadUnavailable"), show_alert: true });
+    await ctx.api.sendMessage(job.chatId, botText(locale, "downloadUnavailable"), threadOptionFromJob(job));
   }
 }
 

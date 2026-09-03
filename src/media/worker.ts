@@ -285,22 +285,15 @@ export class MediaWorker {
     const input = new InputFile(media.bytes, media.filename);
     const keyboard = new InlineKeyboard()
       .text(botText(locale, job.type === "video_generate" ? "generateAgain" : "generateAnother"), `media:${job.id}:again`)
-      .text(botText(locale, "continueEditing"), `media:${job.id}:edit`).row();
-    if (this.options.publicBaseUrl) {
-      const token = this.options.store.createAccessToken("download", job.id);
-      keyboard.url(botText(locale, "downloadOriginal"), `${this.options.publicBaseUrl}/mia/media/download/${token.token}`);
-      if (job.type !== "video_generate" && media.mimeType.startsWith("image/")) {
-        const share = this.options.store.createAccessToken("share", job.id);
-        const shareUrl = `${this.options.publicBaseUrl}/mia/share/${share.token}`;
-        const intent = new URL("https://x.com/intent/post");
-        intent.searchParams.set("text", sharePostText(locale));
-        intent.searchParams.set("url", shareUrl);
-        keyboard.url(botText(locale, "share"), intent.toString());
-      }
-    } else {
-      // Keep callback downloads working in private/dev deployments without a
-      // browser-reachable Mia URL, and for messages created before this change.
-      keyboard.text(botText(locale, "downloadOriginal"), `media:${job.id}:download`);
+      .text(botText(locale, "continueEditing"), `media:${job.id}:edit`).row()
+      .text(botText(locale, "downloadOriginal"), `media:${job.id}:download`);
+    if (this.options.publicBaseUrl && job.type !== "video_generate" && media.mimeType.startsWith("image/")) {
+      const share = this.options.store.createAccessToken("share", job.id);
+      const shareUrl = `${this.options.publicBaseUrl}/mia/share/${share.token}`;
+      const intent = new URL("https://x.com/intent/post");
+      intent.searchParams.set("text", sharePostText(locale));
+      intent.searchParams.set("url", shareUrl);
+      keyboard.url(botText(locale, "share"), intent.toString());
     }
     let sent;
     if (job.type === "video_generate" && media.mimeType.startsWith("video/")) {
