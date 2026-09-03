@@ -1,5 +1,8 @@
 import type { Update } from "grammy/types";
 import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { createLogger } from "../src/logger.js";
 import { createServer } from "../src/server.js";
@@ -69,6 +72,7 @@ describe("Mia server", () => {
   it("streams signed media downloads through the public Mia route", async () => {
     const store = {
       getAccessToken: vi.fn().mockReturnValue({ jobId: 7 }),
+      getLocalResult: vi.fn().mockReturnValue(null),
       getJob: vi.fn().mockReturnValue({
         status: "succeeded",
         resultUrl: "https://upstream.invalid/private-result",
@@ -102,6 +106,53 @@ describe("Mia server", () => {
     await app.close();
   });
 
+  it("downloads a locally stored Base64 result without requiring an upstream URL", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "mia-server-result-"));
+    const path = join(directory, "7");
+    writeFileSync(path, "base64-image");
+    const client = {
+      resolveAPIKey: vi.fn(),
+      streamContent: vi.fn(),
+    };
+    const app = createServer({
+      logger: createLogger("silent"),
+      serviceKey,
+      handleUpdate: vi.fn(),
+      mediaDownload: {
+        store: {
+          getAccessToken: vi.fn().mockReturnValue({ jobId: 7 }),
+          getJob: vi.fn().mockReturnValue({
+            id: 7,
+            status: "succeeded",
+            resultUrl: null,
+            resultMimeType: "image/png",
+            type: "image_generate",
+          }),
+          getLocalResult: vi.fn().mockReturnValue({
+            path,
+            size: 12,
+            mimeType: "image/png",
+            filename: "mia-image.png",
+          }),
+        },
+        client,
+      } as never,
+    });
+
+    try {
+      const response = await app.inject({ method: "GET", url: "/mia/media/download/signed-token" });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe("base64-image");
+      expect(response.headers["content-type"]).toBe("image/png");
+      expect(response.headers["content-disposition"]).toBe('attachment; filename="mia-image.png"');
+      expect(client.resolveAPIKey).not.toHaveBeenCalled();
+      expect(client.streamContent).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects invalid media download tokens", async () => {
     const app = createServer({
       logger: createLogger("silent"),
@@ -128,6 +179,7 @@ describe("Mia server", () => {
       mediaDownload: {
         store: {
           getAccessToken: vi.fn().mockReturnValue({ jobId: 7 }),
+          getLocalResult: vi.fn().mockReturnValue(null),
           getJob: vi.fn().mockReturnValue({
             status: "succeeded",
             resultUrl: "https://upstream.invalid/private-result",

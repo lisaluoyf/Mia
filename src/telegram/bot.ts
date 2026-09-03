@@ -698,13 +698,23 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
 }
 
 async function downloadResult(ctx: Context, job: MediaJob, dependencies: BotDependencies): Promise<void> {
-  if (!job.resultUrl || !ctx.callbackQuery || !dependencies.resultMaxBytes) {
+  if (!ctx.callbackQuery || !dependencies.resultMaxBytes || !dependencies.mediaStore) {
     const locale = mediaJobLocale(job.options, ctx.from?.language_code);
     await ctx.answerCallbackQuery({ text: botText(locale, "originalUnavailable"), show_alert: true });
     return;
   }
   const locale = mediaJobLocale(job.options, ctx.from?.language_code);
   try {
+    const local = dependencies.mediaStore.readLocalResult(job.id, job.resultMimeType);
+    if (local) {
+      await ctx.api.sendDocument(job.chatId, new InputFile(local.bytes, local.filename), threadOptionFromJob(job));
+      await ctx.answerCallbackQuery({ text: botText(locale, "sent") });
+      return;
+    }
+    if (!job.resultUrl) {
+      await ctx.answerCallbackQuery({ text: botText(locale, "originalUnavailable"), show_alert: true });
+      return;
+    }
     const apiKey = await dependencies.client.resolveAPIKey(job.telegramUserId, job.model);
     const media = await dependencies.client.getContent(apiKey, job.resultUrl, dependencies.resultMaxBytes);
     await ctx.api.sendDocument(job.chatId, new InputFile(media.bytes, media.filename), threadOptionFromJob(job));

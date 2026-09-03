@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import Database from "better-sqlite3";
 
@@ -132,6 +132,13 @@ interface CountRow {
 
 interface ChangesResult {
   changes: number;
+}
+
+export interface LocalMediaResult {
+  path: string;
+  size: number;
+  mimeType: string;
+  filename: string;
 }
 
 function requireSafeInteger(value: number, name: string, allowNegative = false): void {
@@ -272,6 +279,7 @@ function accessTokenFromRow(row: AccessTokenRow): MediaAccessToken {
 
 export class MediaStore {
   private readonly database: Database.Database;
+  private readonly resultDirectory: string | null;
   private readonly now: () => Date;
   private readonly pendingIntentTtlMs: number;
   private readonly activeImageTtlMs: number;
@@ -282,6 +290,9 @@ export class MediaStore {
 
   constructor(databasePath: string, options: MediaStoreOptions = {}) {
     if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
+    this.resultDirectory = options.resultDirectory ??
+      (databasePath === ":memory:" ? null : join(dirname(databasePath), "media-results"));
+    if (this.resultDirectory) mkdirSync(this.resultDirectory, { recursive: true, mode: 0o700 });
     this.now = options.now ?? (() => new Date());
     this.pendingIntentTtlMs = options.pendingIntentTtlMs ?? DEFAULT_PENDING_INTENT_TTL_MS;
     this.activeImageTtlMs = options.activeImageTtlMs ?? DEFAULT_ACTIVE_IMAGE_TTL_MS;
@@ -691,6 +702,50 @@ export class MediaStore {
     return row ? mediaJobFromRow(row) : null;
   }
 
+  saveLocalResult(jobId: number, bytes: Uint8Array): void {
+    requireSafeInteger(jobId, "jobId");
+    if (!this.getJob(jobId)) throw new Error("Media job not found");
+    if (!this.resultDirectory) throw new Error("Local media result storage is not configured");
+    const destination = this.localResultPath(jobId);
+    const temporary = `${destination}.${randomBytes(8).toString("hex")}.tmp`;
+    try {
+      writeFileSync(temporary, bytes, { flag: "wx", mode: 0o600 });
+      renameSync(temporary, destination);
+    } catch (error) {
+      try {
+        unlinkSync(temporary);
+      } catch (cleanupError) {
+        if (!isMissingFile(cleanupError)) throw cleanupError;
+      }
+      throw error;
+    }
+  }
+
+  getLocalResult(jobId: number, mimeType: string | null): LocalMediaResult | null {
+    requireSafeInteger(jobId, "jobId");
+    if (!this.resultDirectory) return null;
+    const path = this.localResultPath(jobId);
+    try {
+      const stat = lstatSync(path);
+      if (!stat.isFile()) return null;
+      const normalizedMimeType = mimeType?.trim() || "application/octet-stream";
+      return {
+        path,
+        size: stat.size,
+        mimeType: normalizedMimeType,
+        filename: localResultFilename(normalizedMimeType),
+      };
+    } catch (error) {
+      if (isMissingFile(error)) return null;
+      throw error;
+    }
+  }
+
+  readLocalResult(jobId: number, mimeType: string | null): (LocalMediaResult & { bytes: Uint8Array }) | null {
+    const result = this.getLocalResult(jobId, mimeType);
+    return result ? { ...result, bytes: readFileSync(result.path) } : null;
+  }
+
   listJobInputs(jobId: number): StoredMediaInput[] {
     requireSafeInteger(jobId, "jobId");
     const rows = this.database.prepare(`
@@ -1045,6 +1100,7 @@ export class MediaStore {
         WHERE id = ?
       `);
       for (const row of retainedRows) {
+        this.deleteLocalResult(row.id);
         inputRowsDeleted += deleteInputs.run(row.id).changes;
         this.database.prepare("DELETE FROM mia_media_access_tokens WHERE job_id = ?").run(row.id);
         clearMedia.run(now, row.id);
@@ -1061,7 +1117,33 @@ export class MediaStore {
     }).immediate();
   }
 
+  private localResultPath(jobId: number): string {
+    if (!this.resultDirectory) throw new Error("Local media result storage is not configured");
+    return join(this.resultDirectory, String(jobId));
+  }
+
+  private deleteLocalResult(jobId: number): void {
+    if (!this.resultDirectory) return;
+    try {
+      unlinkSync(this.localResultPath(jobId));
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+  }
+
   close(): void {
     this.database.close();
   }
+}
+
+function isMissingFile(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function localResultFilename(mimeType: string): string {
+  if (mimeType === "image/png") return "mia-image.png";
+  if (mimeType === "image/jpeg") return "mia-image.jpg";
+  if (mimeType === "image/webp") return "mia-image.webp";
+  if (mimeType === "video/mp4") return "mia-video.mp4";
+  return "mia-media.bin";
 }

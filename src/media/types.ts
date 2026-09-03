@@ -160,6 +160,7 @@ export interface MediaCleanupResult {
 
 export interface MediaStoreOptions {
   now?: () => Date;
+  resultDirectory?: string;
   pendingIntentTtlMs?: number;
   activeImageTtlMs?: number;
   draftTtlMs?: number;

@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
@@ -92,10 +93,19 @@ export function createServer({ logger, serviceKey, handleUpdate, miniApp, mediaD
     ) => {
       const access = mediaDownload.store.getAccessToken(request.params.token, "download");
       const job = access ? mediaDownload.store.getJob(access.jobId) : null;
-      if (!job?.resultUrl || job.status !== "succeeded") {
+      if (!job || job.status !== "succeeded") {
         return reply.code(404).send({ error: "download_not_found" });
       }
       try {
+        const local = mediaDownload.store.getLocalResult(job.id, job.resultMimeType);
+        if (local) {
+          reply.header("content-type", local.mimeType);
+          reply.header("content-length", String(local.size));
+          reply.header("content-disposition", `attachment; filename="${local.filename}"`);
+          reply.header("cache-control", "private, no-store");
+          return reply.send(createReadStream(local.path));
+        }
+        if (!job.resultUrl) return reply.code(404).send({ error: "download_not_found" });
         const apiKey = await mediaDownload.client.resolveAPIKey(job.telegramUserId, job.model);
         const upstream = await mediaDownload.client.streamContent(apiKey, job.resultUrl);
         if (!upstream.body) return reply.code(502).send({ error: "download_unavailable" });

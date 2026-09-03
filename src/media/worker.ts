@@ -224,6 +224,8 @@ export class MediaWorker {
     let media;
     if (state.resultBase64) {
       media = { bytes: new Uint8Array(Buffer.from(state.resultBase64, "base64")), mimeType: "image/png", filename: "mia-image.png" };
+      if (media.bytes.byteLength > this.options.resultMaxBytes) throw new Error("content_too_large");
+      this.options.store.saveLocalResult(job.id, media.bytes);
     } else if (state.resultUrl) {
       try {
         media = await this.options.client.getContent(apiKey, state.resultUrl, this.options.resultMaxBytes);

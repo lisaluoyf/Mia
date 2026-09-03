@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Api } from "grammy";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { APIMasterClient } from "../src/clients/apimaster.js";
 import { createLogger } from "../src/logger.js";
@@ -8,14 +11,18 @@ import { MediaWorker } from "../src/media/worker.js";
 
 describe("media worker transient regeneration status", () => {
   let store: MediaStore | undefined;
+  let resultDirectory: string | undefined;
 
   afterEach(() => {
     store?.close();
     store = undefined;
+    if (resultDirectory) rmSync(resultDirectory, { recursive: true, force: true });
+    resultDirectory = undefined;
   });
 
   function createJob() {
-    store = new MediaStore(":memory:");
+    resultDirectory = mkdtempSync(join(tmpdir(), "mia-worker-results-"));
+    store = new MediaStore(":memory:", { resultDirectory });
     const claimed = store.claimJob({
       telegramUserId: 42,
       chatId: 42,
@@ -75,6 +82,7 @@ describe("media worker transient regeneration status", () => {
       statusMessageId: 79,
       resultTelegramFileId: "new-photo",
     });
+    expect(Buffer.from(store.readLocalResult(1, "image/png")?.bytes ?? []).toString("utf8")).toBe("image");
   });
 
   it("replaces the progress text with an error when submission fails", async () => {

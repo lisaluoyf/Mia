@@ -234,6 +234,29 @@ describe("media store", () => {
     expect(current.getAccessToken(share.token)).toBeNull();
   });
 
+  it("stores Base64 results privately and removes them after retention expires", () => {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), "mia-media-results-"));
+    const current = new MediaStore(":memory:", {
+      now: () => now,
+      resultDirectory: join(temporaryDirectory, "results"),
+    });
+    store = current;
+    const claimed = current.claimJob(job());
+    if (claimed.outcome !== "created") throw new Error("Expected job creation");
+    current.saveLocalResult(claimed.job.id, Buffer.from("original-image"));
+    current.transitionJob(claimed.job.id, ["queued"], "submitting");
+    current.transitionJob(claimed.job.id, ["submitting"], "submitted", { upstreamTaskId: "task-1" });
+    current.transitionJob(claimed.job.id, ["submitted"], "succeeded", { resultMimeType: "image/png" });
+
+    const stored = current.readLocalResult(claimed.job.id, "image/png");
+    expect(Buffer.from(stored?.bytes ?? []).toString("utf8")).toBe("original-image");
+    expect(stored?.filename).toBe("mia-image.png");
+
+    now = new Date(now.getTime() + 7 * DAY);
+    current.cleanupExpired();
+    expect(current.getLocalResult(claimed.job.id, "image/png")).toBeNull();
+  });
+
   it("expires timed-out jobs and later clears retained media references without deleting audit rows", () => {
     const current = createStore();
     const claimed = current.claimJob(job(), [media(0)]);
