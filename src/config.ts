@@ -14,7 +14,7 @@ const environmentSchema = z.object({
   DATABASE_PATH: z.string().trim().min(1).default("data/mia.sqlite"),
   MINI_APP_AUTH_MAX_AGE_SECONDS: z.coerce.number().int().min(60).max(604800).default(86400),
   MIA_ROUTER_MODEL: z.string().trim().min(1).default("gpt-5.4"),
-  MIA_ROUTER_TIMEOUT_MS: z.coerce.number().int().min(500).max(30000).default(8000),
+  MIA_ROUTER_TIMEOUT_MS: z.coerce.number().int().min(500).max(60000).default(30000),
   MIA_CONTEXT_MODEL: z.string().trim().min(1).default("gpt-5.4"),
   MIA_GUEST_CHAT_API_KEY: z.string().trim().min(1),
   MIA_GUEST_CHAT_MODEL: z.literal("gpt-5.4").default("gpt-5.4"),

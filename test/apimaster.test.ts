@@ -148,6 +148,72 @@ describe("APIMaster client", () => {
     });
   });
 
+  it("uses Responses structured output with automatic Web Search and captures hidden search metadata", async () => {
+    const output = {
+      intent: "chat",
+      confidence: 0.99,
+      instruction: "",
+      media_source: "none",
+      image_options: null,
+      video_options: null,
+      final_response: "北京明天晴，最高 32℃。",
+      conversation_mode: "task",
+      onboarding_opportunity: false,
+      profile_updates: null,
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      output: [
+        { type: "web_search_call", status: "completed", action: { type: "search", query: "北京明天天气" } },
+        {
+          type: "message",
+          content: [{
+            type: "output_text",
+            text: JSON.stringify(output),
+            annotations: [{ type: "url_citation", url: "https://weather.example/beijing", title: "天气预报" }],
+          }],
+        },
+      ],
+    }));
+    const client = createClient(fetcher);
+
+    await expect(client.structuredResponse(
+      "user-api-key",
+      "gpt-5.4",
+      [
+        { role: "system", content: "system rules" },
+        { role: "user", content: [
+          { type: "text", text: "北京明天天气" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,AQID" } },
+        ] },
+      ],
+      "mia_media_intent",
+      { type: "object" },
+      30_000,
+    )).resolves.toEqual({
+      data: output,
+      webSearch: {
+        callCount: 1,
+        queries: ["北京明天天气"],
+        sources: [{ title: "天气预报", url: "https://weather.example/beijing" }],
+      },
+    });
+    const [url, init] = fetcher.mock.calls[0] ?? [];
+    expect(url).toBe("https://apimaster.example/v1/responses");
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer user-api-key");
+    const requestBody: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    expect(requestBody).toMatchObject({
+      model: "gpt-5.4",
+      instructions: "system rules",
+      tools: [{ type: "web_search" }],
+      tool_choice: "auto",
+      text: { format: { type: "json_schema", name: "mia_media_intent", strict: true } },
+      stream: false,
+      store: false,
+    });
+    expect(JSON.stringify(requestBody)).toContain('"type":"input_image"');
+    expect(JSON.stringify(requestBody)).not.toContain('"type":"image_url"');
+  });
+
   it("loads the user's model catalog without exposing a key", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       success: true,

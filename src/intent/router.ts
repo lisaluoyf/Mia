@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { APIMasterClient, MediaBinary, StructuredMessage } from "../clients/apimaster.js";
+import type { APIMasterClient, MediaBinary, StructuredMessage, WebSearchUsage } from "../clients/apimaster.js";
 import { INTENT_ROUTER_SYSTEM_PROMPT } from "../prompts.js";
 
 export const mediaIntentSchema = z.object({
@@ -56,6 +56,7 @@ export interface IntentRouterInput {
 export interface RoutedIntent extends MediaIntent {
   missingRequired: string[];
   fallbackReason?: "low_confidence" | "router_unavailable" | "invalid_output";
+  webSearch?: WebSearchUsage;
 }
 
 const ROUTER_SCHEMA = {
@@ -157,7 +158,7 @@ export function validateIntentRequirements(intent: MediaIntent, input: IntentRou
 
 export class IntentRouter {
   constructor(
-    private readonly client: Pick<APIMasterClient, "structuredChat">,
+    private readonly client: Pick<APIMasterClient, "structuredResponse">,
     private readonly options: { model: string; timeoutMs: number; confidenceThreshold?: number },
   ) {}
 
@@ -208,7 +209,7 @@ export class IntentRouter {
 
     let raw: unknown;
     try {
-      raw = await this.client.structuredChat(
+      const result = await this.client.structuredResponse(
         apiKey,
         model,
         messages,
@@ -216,23 +217,31 @@ export class IntentRouter {
         ROUTER_SCHEMA,
         this.options.timeoutMs,
       );
+      raw = result.data;
+      const parsed = mediaIntentSchema.safeParse(raw);
+      if (!parsed.success) return fallback("invalid_output");
+      return this.validatedResult(parsed.data, input, result.webSearch);
     } catch {
       return fallback("router_unavailable");
     }
-    const parsed = mediaIntentSchema.safeParse(raw);
-    if (!parsed.success) {
+  }
+
+  private validatedResult(
+    intent: MediaIntent,
+    input: IntentRouterInput,
+    webSearch: WebSearchUsage,
+  ): RoutedIntent {
+    const returnsText = intent.intent === "chat" || intent.intent === "vision_qa";
+    if ((returnsText && !intent.final_response?.trim()) || (!returnsText && intent.final_response !== null)) {
       return fallback("invalid_output");
     }
-    const returnsText = parsed.data.intent === "chat" || parsed.data.intent === "vision_qa";
-    if ((returnsText && !parsed.data.final_response?.trim()) || (!returnsText && parsed.data.final_response !== null)) {
-      return fallback("invalid_output");
-    }
-    if (parsed.data.confidence < (this.options.confidenceThreshold ?? 0.65)) {
+    if (intent.confidence < (this.options.confidenceThreshold ?? 0.65)) {
       return { ...fallback("low_confidence"), instruction: input.text };
     }
     return {
-      ...parsed.data,
-      missingRequired: validateIntentRequirements(parsed.data, input),
+      ...intent,
+      missingRequired: validateIntentRequirements(intent, input),
+      webSearch,
     };
   }
 }

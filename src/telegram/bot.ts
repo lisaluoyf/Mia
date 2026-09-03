@@ -371,6 +371,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           phase: "intent_and_response",
           routedIntent: routed.intent,
           fallbackReason: routed.fallbackReason ?? null,
+          webSearch: routed.webSearch ?? { callCount: 0, queries: [], sources: [] },
           onboarding: onboardingDebugDetails(onboardingEligibility, routed, false),
         },
         kind,
@@ -430,6 +431,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           phase: "intent_and_response",
           routedIntent: routed.intent,
           fallbackReason: routed.fallbackReason ?? null,
+          webSearch: routed.webSearch ?? { callCount: 0, queries: [], sources: [] },
           onboarding: onboardingDebugDetails(onboardingEligibility, routed, triggered),
         },
       });

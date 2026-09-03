@@ -35,6 +35,29 @@ const structuredChatResponseSchema = z.object({
   })).min(1),
 });
 
+const responsesResponseSchema = z.object({
+  output: z.array(z.object({
+    type: z.string(),
+    action: z.object({
+      type: z.string().optional(),
+      query: z.string().optional(),
+    }).passthrough().optional(),
+    content: z.array(z.object({
+      type: z.string(),
+      text: z.string().optional(),
+      annotations: z.array(z.object({
+        type: z.string(),
+        url: z.string().optional(),
+        title: z.string().optional(),
+        url_citation: z.object({
+          url: z.string().optional(),
+          title: z.string().optional(),
+        }).passthrough().optional(),
+      }).passthrough()).optional(),
+    }).passthrough()).optional(),
+  }).passthrough()),
+});
+
 const imageSubmitResponseSchema = z.object({
   data: z.array(z.object({ task_id: z.string().min(1), status: z.string().optional() })).min(1),
 });
@@ -145,6 +168,17 @@ export class MediaAPIError extends Error {
 export interface StructuredMessage {
   role: "system" | "user" | "assistant";
   content: unknown;
+}
+
+export interface WebSearchUsage {
+  callCount: number;
+  queries: string[];
+  sources: Array<{ title: string | null; url: string }>;
+}
+
+export interface StructuredResponseResult {
+  data: unknown;
+  webSearch: WebSearchUsage;
 }
 
 export interface MediaBinary {
@@ -392,6 +426,81 @@ export class APIMasterClient {
       }
     }
     return content;
+  }
+
+  async structuredResponse(
+    apiKey: string,
+    model: string,
+    messages: readonly StructuredMessage[],
+    schemaName: string,
+    schema: object,
+    timeoutMs = this.options.timeoutMs,
+  ): Promise<StructuredResponseResult> {
+    const instructions = messages
+      .filter((message) => message.role === "system")
+      .map((message) => contentAsText(message.content))
+      .join("\n\n");
+    const input = messages
+      .filter((message) => message.role !== "system")
+      .map((message) => ({
+        role: message.role,
+        content: responsesContent(message.content),
+      }));
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.options.baseUrl}/v1/responses`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          model,
+          instructions,
+          input,
+          tools: [{ type: "web_search" }],
+          tool_choice: "auto",
+          text: {
+            format: { type: "json_schema", name: schemaName, strict: true, schema },
+          },
+          stream: false,
+          store: false,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch {
+      throw new ChatCompletionError();
+    }
+    if (!response.ok) throw new ChatCompletionError(response.status);
+    const payload: unknown = await response.json().catch(() => undefined);
+    const parsed = responsesResponseSchema.safeParse(payload);
+    if (!parsed.success) throw new ChatCompletionError(response.status);
+    const text = parsed.data.output.flatMap((item) => item.content ?? [])
+      .filter((content) => content.type === "output_text" && typeof content.text === "string")
+      .map((content) => content.text ?? "")
+      .join("");
+    if (!text) throw new ChatCompletionError(response.status);
+    let data: unknown;
+    try {
+      data = JSON.parse(text) as unknown;
+    } catch {
+      throw new ChatCompletionError(response.status);
+    }
+    const searchCalls = parsed.data.output.filter((item) => item.type === "web_search_call");
+    const sources = parsed.data.output.flatMap((item) => item.content ?? [])
+      .flatMap((content) => content.annotations ?? [])
+      .filter((annotation) => annotation.type === "url_citation")
+      .map((annotation) => ({
+        title: annotation.url_citation?.title ?? annotation.title ?? null,
+        url: annotation.url_citation?.url ?? annotation.url ?? "",
+      }))
+      .filter((source) => source.url !== "")
+      .filter((source, index, all) => all.findIndex((candidate) => candidate.url === source.url) === index);
+    return {
+      data,
+      webSearch: {
+        callCount: searchCalls.length,
+        queries: searchCalls.map((item) => item.action?.query).filter((query): query is string => Boolean(query)),
+        sources,
+      },
+    };
   }
 
   async vision(
@@ -648,6 +757,27 @@ export class APIMasterClient {
       return false;
     }
   }
+}
+
+function contentAsText(content: unknown): string {
+  if (typeof content === "string") return content;
+  return JSON.stringify(content);
+}
+
+function responsesContent(content: unknown): unknown {
+  if (!Array.isArray(content)) return contentAsText(content);
+  return content.map((part: unknown) => {
+    if (!part || typeof part !== "object") return { type: "input_text", text: String(part) };
+    const value = part as Record<string, unknown>;
+    if (value.type === "text" && typeof value.text === "string") {
+      return { type: "input_text", text: value.text };
+    }
+    if (value.type === "image_url" && value.image_url && typeof value.image_url === "object") {
+      const url = (value.image_url as Record<string, unknown>).url;
+      if (typeof url === "string") return { type: "input_image", image_url: url };
+    }
+    return { type: "input_text", text: JSON.stringify(value) };
+  });
 }
 
 function normalizeTaskStatus(status: string): NormalizedTaskStatus["status"] {

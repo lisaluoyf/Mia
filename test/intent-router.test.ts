@@ -11,9 +11,12 @@ const base = {
   activePrivateImage: false,
 };
 
+const noSearch = { callCount: 0, queries: [], sources: [] };
+const response = (data: unknown, webSearch = noSearch) => ({ data, webSearch });
+
 describe("Mia intent router", () => {
   it("accepts strict structured image output and extracts requirements", async () => {
-    const structuredChat = vi.fn().mockResolvedValue({
+    const structuredResponse = vi.fn().mockResolvedValue(response({
       intent: "image_generate",
       confidence: 0.96,
       instruction: "海边日落",
@@ -24,8 +27,8 @@ describe("Mia intent router", () => {
       conversation_mode: "task",
       onboarding_opportunity: false,
       profile_updates: null,
-    });
-    const router = new IntentRouter({ structuredChat }, {
+    }));
+    const router = new IntentRouter({ structuredResponse }, {
       model: "router-model",
       timeoutMs: 1000,
     });
@@ -34,7 +37,7 @@ describe("Mia intent router", () => {
       instruction: "海边日落",
       missingRequired: [],
     });
-    const call: unknown[] = structuredChat.mock.calls[0] ?? [];
+    const call: unknown[] = structuredResponse.mock.calls[0] ?? [];
     const model = call[1];
     const messages = call[2];
     const schemaName = call[3];
@@ -49,8 +52,8 @@ describe("Mia intent router", () => {
       intent: "video_generate", confidence: 0.2, instruction: "script", media_source: "none",
       image_options: null, video_options: { mode: "text_to_video", duration_seconds: null, aspect_ratio: null, resolution: null, image_roles: [] },
     }]) {
-      const structuredChat = output instanceof Error ? vi.fn().mockRejectedValue(output) : vi.fn().mockResolvedValue(output);
-      const router = new IntentRouter({ structuredChat }, {
+      const structuredResponse = output instanceof Error ? vi.fn().mockRejectedValue(output) : vi.fn().mockResolvedValue(response(output));
+      const router = new IntentRouter({ structuredResponse }, {
         model: "router", timeoutMs: 1000,
       });
       const result = await router.classify(base, "user-key");
@@ -69,7 +72,7 @@ describe("Mia intent router", () => {
   });
 
   it("returns final chat and vision answers from the same GPT-5.4 call", async () => {
-    const structuredChat = vi.fn().mockResolvedValue({
+    const structuredResponse = vi.fn().mockResolvedValue(response({
       intent: "vision_qa",
       confidence: 0.99,
       instruction: "第二行是什么意思？",
@@ -80,8 +83,8 @@ describe("Mia intent router", () => {
       conversation_mode: "task",
       onboarding_opportunity: false,
       profile_updates: null,
-    });
-    const router = new IntentRouter({ structuredChat }, { model: "gpt-5.4", timeoutMs: 1000 });
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 1000 });
     const result = await router.classify({
       ...base,
       text: "第二行是什么意思？",
@@ -89,41 +92,42 @@ describe("Mia intent router", () => {
       mediaCount: 1,
     }, "user-key", [{ bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png", filename: "screen.png" }]);
     expect(result).toMatchObject({ intent: "vision_qa", final_response: "第二行表示服务器连接失败。" });
-    expect(JSON.stringify(structuredChat.mock.calls[0]?.[2])).toContain("data:image/png;base64,AQID");
+    expect(JSON.stringify(structuredResponse.mock.calls[0]?.[2])).toContain("data:image/png;base64,AQID");
   });
 
   it("allows the credential resolver to force the guest GPT-5.4 model", async () => {
-    const structuredChat = vi.fn().mockResolvedValue({
+    const structuredResponse = vi.fn().mockResolvedValue(response({
       intent: "chat", confidence: 0.99, instruction: "", media_source: "none",
       image_options: null, video_options: null, final_response: "Hello",
       conversation_mode: "casual", onboarding_opportunity: false, profile_updates: null,
-    });
-    const router = new IntentRouter({ structuredChat }, { model: "configured-router", timeoutMs: 1000 });
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "configured-router", timeoutMs: 1000 });
 
     await router.classify(base, "guest-test-key", [], "gpt-5.4");
 
-    expect(structuredChat.mock.calls[0]?.[1]).toBe("gpt-5.4");
+    expect(structuredResponse.mock.calls[0]?.[1]).toBe("gpt-5.4");
   });
 
   it("returns casual onboarding signals and explicit profile updates in the same call", async () => {
-    const structuredChat = vi.fn().mockResolvedValue({
+    const structuredResponse = vi.fn().mockResolvedValue(response({
       intent: "chat", confidence: 0.99, instruction: "", media_source: "none",
       image_options: null, video_options: null, final_response: "Nice to meet you, Roma.",
       conversation_mode: "casual", onboarding_opportunity: true,
       profile_updates: { preferred_name: "Roma", primary_role: "developer", primary_goal: null },
-    });
-    const router = new IntentRouter({ structuredChat }, { model: "gpt-5.4", timeoutMs: 1000 });
+    }, { callCount: 1, queries: ["current developer tools"], sources: [] }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 1000 });
     const result = await router.classify({ ...base, text: "Call me Roma. I'm a developer.", onboarding: { active: true, missingFields: ["preferred_name", "primary_role", "primary_goal"] } }, "key");
     expect(result).toMatchObject({ conversation_mode: "casual", onboarding_opportunity: true, profile_updates: { preferred_name: "Roma", primary_role: "developer", primary_goal: null } });
-    expect(structuredChat).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(structuredChat.mock.calls[0]?.[2])).toContain("missingFields");
+    expect(result.webSearch).toEqual({ callCount: 1, queries: ["current developer tools"], sources: [] });
+    expect(structuredResponse).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(structuredResponse.mock.calls[0]?.[2])).toContain("missingFields");
   });
 
   it("registers mia.system as a base module included once by the actual router prompt", () => {
     const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
     expect(basePrompt).toMatchObject({ kind: "base" });
-    expect(routerPrompt).toMatchObject({ version: 2, kind: "composed", includes: ["mia.system"] });
+    expect(routerPrompt).toMatchObject({ version: 3, kind: "composed", includes: ["mia.system"] });
     expect(routerPrompt?.text).toContain(basePrompt?.text ?? "missing");
   });
 });
