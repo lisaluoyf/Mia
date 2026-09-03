@@ -22,6 +22,7 @@ mirror="$deploy_root/repo.git"
 releases="$deploy_root/releases"
 shared="$deploy_root/shared"
 current_link="$deploy_root/current"
+runtime_link="${MIA_RUNTIME_LINK:-/opt/mia}"
 started_at="$SECONDS"
 
 mkdir -p "$releases" "$shared/dependencies" "$shared/pnpm-store"
@@ -44,11 +45,30 @@ if [[ "$remote_sha" != "$git_sha" ]]; then
   exit 1
 fi
 
+pm2_pid() {
+  sudo -u "$runtime_user" -H bash -lc "pm2 pid mia" 2>/dev/null | tail -n 1
+}
+
+running_release() {
+  local pid
+  pid="$(pm2_pid)"
+  [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" -gt 0 ]] && readlink -f "/proc/$pid/cwd"
+}
+
 current_release="$(readlink -f "$current_link" 2>/dev/null || true)"
-if [[ -f "$current_release/release.json" ]] && grep -q "\"git_sha\": \"$git_sha\"" "$current_release/release.json"; then
+active_release="$(running_release || true)"
+if [[ -f "$current_release/release.json" ]] &&
+   grep -q "\"git_sha\": \"$git_sha\"" "$current_release/release.json" &&
+   [[ "$active_release" == "$current_release" ]]; then
   echo "Mia $git_sha is already deployed."
   exit 0
 fi
+
+previous_release="$active_release"
+case "$previous_release" in
+  "$releases"/*) ;;
+  *) previous_release="$current_release" ;;
+esac
 
 short_sha="${git_sha:0:12}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -114,13 +134,23 @@ trap - EXIT
 
 ln -sfn "releases/$release_name" "$deploy_root/current.next"
 mv -Tf "$deploy_root/current.next" "$current_link"
+ln -sfn "$release" "$runtime_link.next"
+mv -Tf "$runtime_link.next" "$runtime_link"
+
+reload_release() {
+  local target="$1"
+  sudo -u "$runtime_user" -H bash -lc \
+    "cd '$target' && pm2 startOrReload '$target/ecosystem.config.cjs' --update-env && pm2 save"
+}
 
 rollback() {
-  echo "Mia health check failed; rolling back to $current_release." >&2
-  if [[ -n "$current_release" && -d "$current_release" ]]; then
-    ln -sfn "releases/$(basename "$current_release")" "$deploy_root/current.rollback"
+  echo "Mia activation check failed; rolling back to $previous_release." >&2
+  if [[ -n "$previous_release" && -d "$previous_release" ]]; then
+    ln -sfn "releases/$(basename "$previous_release")" "$deploy_root/current.rollback"
     mv -Tf "$deploy_root/current.rollback" "$current_link"
-    sudo -u "$runtime_user" -H bash -lc "cd /opt/mia && pm2 startOrReload ecosystem.config.cjs --update-env && pm2 save"
+    ln -sfn "$previous_release" "$runtime_link.rollback"
+    mv -Tf "$runtime_link.rollback" "$runtime_link"
+    reload_release "$previous_release"
   fi
   if [[ -d "$release" ]]; then
     find -P "$release" -depth -delete
@@ -128,12 +158,13 @@ rollback() {
   exit 1
 }
 
-sudo -u "$runtime_user" -H bash -lc \
-  "cd /opt/mia && pm2 startOrReload ecosystem.config.cjs --update-env && pm2 save" || rollback
+reload_release "$release" || rollback
 
 healthy=0
 for _attempt in {1..15}; do
-  if curl -fsS http://172.17.0.1:3010/health >/dev/null 2>&1; then
+  active_release="$(running_release || true)"
+  if [[ "$active_release" == "$release" ]] &&
+     curl -fsS http://172.17.0.1:3010/health >/dev/null 2>&1; then
     healthy=1
     break
   fi
@@ -142,8 +173,8 @@ done
 [[ "$healthy" -eq 1 ]] || rollback
 
 declare -A keep=(["$release"]=1)
-if [[ -n "$current_release" && -d "$current_release" && "$current_release" != "$release" ]]; then
-  keep["$current_release"]=1
+if [[ -n "$previous_release" && -d "$previous_release" && "$previous_release" != "$release" ]]; then
+  keep["$previous_release"]=1
 fi
 while IFS= read -r candidate && [[ "${#keep[@]}" -lt "$keep_releases" ]]; do
   [[ "$candidate" == "$release" ]] && continue
@@ -158,4 +189,4 @@ while IFS= read -r candidate; do
   esac
 done < <(find "$releases" -mindepth 1 -maxdepth 1 -type d -print)
 
-echo "Mia release=$release_name sha=$git_sha health=ok duration=$((SECONDS - started_at))s rollback=$(basename "$current_release")"
+echo "Mia release=$release_name sha=$git_sha health=ok process_cwd=$active_release duration=$((SECONDS - started_at))s rollback=$(basename "$previous_release")"
