@@ -129,7 +129,8 @@ describe("sticker callbacks", () => {
     await bot.handleUpdate(callbackUpdate(job.id, "edit", 9101) as never);
 
     expect(store?.getPendingIntent({ telegramUserId: 42, chatId: 42, threadId: null })).toMatchObject({
-      missingRequired: ["instruction", "callback_reply", "sticker_output"],
+      intent: "sticker_create",
+      missingRequired: ["instruction", "callback_reply"],
       sourceMessageIds: [77, 78],
     });
 

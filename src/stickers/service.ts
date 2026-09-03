@@ -2,12 +2,6 @@ import sharp from "sharp";
 
 export const MAX_TELEGRAM_STICKER_BYTES = 512 * 1024;
 
-const STICKER_INTENT_PATTERN = /(?:贴纸|表情包|sticker)/iu;
-
-export function isStickerRequest(text: string | undefined): boolean {
-  return STICKER_INTENT_PATTERN.test(text ?? "");
-}
-
 export function stickerPrompt(text: string | undefined): string {
   const request = text?.trim() || "Turn the subject into a sticker.";
   return [

@@ -321,7 +321,7 @@ export class MediaStore {
         telegram_user_id INTEGER NOT NULL,
         chat_id INTEGER NOT NULL,
         thread_id INTEGER NOT NULL DEFAULT 0 CHECK (thread_id >= 0),
-        intent TEXT NOT NULL CHECK (intent IN ('image_generate', 'image_edit', 'vision_qa', 'video_generate')),
+        intent TEXT NOT NULL CHECK (intent IN ('image_generate', 'image_edit', 'sticker_create', 'vision_qa', 'video_generate')),
         slots_json TEXT NOT NULL,
         missing_required_json TEXT NOT NULL,
         source_message_ids_json TEXT NOT NULL,
@@ -449,6 +449,43 @@ export class MediaStore {
       );
       CREATE INDEX IF NOT EXISTS idx_mia_processed_updates_expiry
         ON mia_processed_updates(expires_at);
+    `);
+    this.migratePendingStickerIntent();
+  }
+
+  private migratePendingStickerIntent(): void {
+    const row = this.database.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'mia_pending_intents'",
+    ).get() as { sql: string } | undefined;
+    if (!row || row.sql.includes("'sticker_create'")) return;
+    this.database.exec(`
+      BEGIN IMMEDIATE;
+      DROP INDEX IF EXISTS idx_mia_pending_intents_expiry;
+      ALTER TABLE mia_pending_intents RENAME TO mia_pending_intents_legacy;
+      CREATE TABLE mia_pending_intents (
+        telegram_user_id INTEGER NOT NULL,
+        chat_id INTEGER NOT NULL,
+        thread_id INTEGER NOT NULL DEFAULT 0 CHECK (thread_id >= 0),
+        intent TEXT NOT NULL CHECK (intent IN ('image_generate', 'image_edit', 'sticker_create', 'vision_qa', 'video_generate')),
+        slots_json TEXT NOT NULL,
+        missing_required_json TEXT NOT NULL,
+        source_message_ids_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        PRIMARY KEY (telegram_user_id, chat_id, thread_id)
+      );
+      INSERT INTO mia_pending_intents (
+        telegram_user_id, chat_id, thread_id, intent, slots_json,
+        missing_required_json, source_message_ids_json, created_at, updated_at, expires_at
+      )
+      SELECT
+        telegram_user_id, chat_id, thread_id, intent, slots_json,
+        missing_required_json, source_message_ids_json, created_at, updated_at, expires_at
+      FROM mia_pending_intents_legacy;
+      DROP TABLE mia_pending_intents_legacy;
+      CREATE INDEX idx_mia_pending_intents_expiry ON mia_pending_intents(expires_at);
+      COMMIT;
     `);
   }
 

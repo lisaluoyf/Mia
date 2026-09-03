@@ -35,7 +35,7 @@ import { sameModelId, type ModelSettingsService, type SettingsSnapshot } from ".
 import type { ContextStore } from "../storage/store.js";
 import type { ConversationScope } from "../storage/types.js";
 import { MIA_SYSTEM_PROMPT, promptReference } from "../prompts.js";
-import { isStickerRequest, stickerPrompt, stickerSetTitle } from "../stickers/service.js";
+import { stickerPrompt, stickerSetTitle } from "../stickers/service.js";
 import { botText, mediaJobLocale, resolveBotLocale, type BotLocale } from "./localization.js";
 import { renderGroupSummaryHtml } from "./group-summary-html.js";
 import { userFacingError } from "./messages.js";
@@ -268,16 +268,6 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   const suppliesPendingMedia = pending !== null && request.inputs.length > 0;
   if (!shouldRespond(policyInput, identity) && !explicit && !namedMediaReply && !explicitSummaryPhrase && !suppliesPendingMedia) return;
 
-  const stickerIntent = request.inputs.length > 0 && isStickerRequest(request.text);
-  if (stickerIntent && message.chat.type !== "private") {
-    await replyTo(ctx, message, botText(locale, "stickerPrivateOnly"));
-    return;
-  }
-  if (stickerIntent && request.inputs.length !== 1) {
-    await replyTo(ctx, message, botText(locale, "stickerSingleImage"));
-    return;
-  }
-
   if (explicit?.command === "media_on" || explicit?.command === "media_off") {
     await handleMediaAdmin(ctx, explicit.command === "media_on", dependencies.mediaStore);
     return;
@@ -317,7 +307,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     mimeType: active.mimeType,
     mediaGroupId: active.mediaGroupId,
   }] : [];
-  const stickerContinuation = pending?.missingRequired.includes("sticker_output") === true;
+  const stickerContinuation = pending?.intent === "sticker_create" ||
+    pending?.missingRequired.includes("sticker_output") === true;
   const pendingInputs: MediaInput[] = [];
   if (pending) {
     for (const sourceMessageId of pending.sourceMessageIds) {
@@ -349,12 +340,11 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   let routerDebugId: string | null = null;
   let routerCredential: ChatCredential | null = null;
   let onboardingEligibility: OnboardingEligibility | null = null;
-  if (stickerIntent) {
-    routed = directIntent("image_edit", stickerPrompt(request.text), "message");
-  } else if (savedCallbackIntent?.success) {
+  if (savedCallbackIntent?.success) {
     routed = {
       ...savedCallbackIntent.data,
-      instruction: stickerContinuation ? stickerPrompt(request.text) : request.text.trim(),
+      intent: stickerContinuation ? "sticker_create" : savedCallbackIntent.data.intent,
+      instruction: request.text.trim(),
       missingRequired: request.text.trim() ? [] : ["instruction"],
     };
   } else if (explicit?.command === "image") {
@@ -493,8 +483,9 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       if (saved.success) {
         routed = {
           ...saved.data,
+          intent: stickerContinuation ? "sticker_create" : saved.data.intent,
           instruction: pending.missingRequired.some((field) => field === "instruction" || field === "question")
-            ? stickerContinuation ? stickerPrompt(request.text) : request.text.trim()
+            ? request.text.trim()
             : saved.data.instruction,
           missingRequired: [],
         };
@@ -504,6 +495,15 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
 
   if (routed.intent === "group_summary") {
     await handleGroupSummary(ctx, message, dependencies, locale);
+    return;
+  }
+
+  if (routed.intent === "sticker_create" && message.chat.type !== "private") {
+    await replyTo(ctx, message, botText(locale, "stickerPrivateOnly"));
+    return;
+  }
+  if (routed.intent === "sticker_create" && inputs.length > 1) {
+    await replyTo(ctx, message, botText(locale, "stickerSingleImage"));
     return;
   }
 
@@ -558,11 +558,12 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   }
 
   const missing = [...routed.missingRequired];
-  if ((routed.intent === "image_edit" || routed.intent === "vision_qa" ||
+  if ((routed.intent === "image_edit" || routed.intent === "sticker_create" || routed.intent === "vision_qa" ||
       routed.intent === "video_generate" && routed.video_options?.mode === "image_to_video") && inputs.length === 0) {
     missing.push("image");
   }
-  if (routed.instruction.trim() === "" && !missing.includes("instruction") && !missing.includes("question")) {
+  if (routed.intent !== "sticker_create" && routed.instruction.trim() === "" &&
+      !missing.includes("instruction") && !missing.includes("question")) {
     missing.push(routed.intent === "vision_qa" ? "question" : "instruction");
   }
   if (missing.length > 0) {
@@ -589,7 +590,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     return;
   }
   dependencies.mediaStore.clearPendingIntent(scopeFor(message));
-  await executeMediaIntent(ctx, message, routed, inputs, dependencies, stickerIntent || stickerContinuation);
+  await executeMediaIntent(ctx, message, routed, inputs, dependencies, stickerContinuation);
 }
 
 async function executeMediaIntent(
@@ -598,7 +599,7 @@ async function executeMediaIntent(
   routed: RoutedIntent,
   inputs: MediaInput[],
   dependencies: BotDependencies,
-  stickerIntent = false,
+  legacyStickerContinuation = false,
 ): Promise<void> {
   if (!message.from || !dependencies.mediaStore || !dependencies.botToken) return;
   const locale = resolveBotLocale(message.from.language_code);
@@ -668,23 +669,24 @@ async function executeMediaIntent(
       await createVideoDraft(ctx, message, routed, inputs, snapshot, dependencies);
       return;
     }
-    if (routed.intent !== "image_generate" && routed.intent !== "image_edit") return;
+    if (routed.intent !== "image_generate" && routed.intent !== "image_edit" && routed.intent !== "sticker_create") return;
+    const stickerOutput = routed.intent === "sticker_create" || legacyStickerContinuation;
     const model = snapshot?.settings.imageModel ?? dependencies.settings.getPreferences(message.from.id).imageModel ?? DEFAULT_MODELS.image;
     await dependencies.client.resolveAPIKey(message.from.id, model);
     if (dependencies.mediaStore.getJobByIdempotencyKey(requestKey(message))) return;
     const status = await replyTo(ctx, message, botText(locale, "stillProcessing", { progress: "" }));
     const claim = dependencies.mediaStore.claimJob({
       ...scopeFor(message),
-      type: routed.intent,
+      type: routed.intent === "sticker_create" ? "image_edit" : routed.intent,
       idempotencyKey: requestKey(message),
       requestMessageId: message.message_id,
       statusMessageId: status.message_id,
       model,
-      instruction: routed.instruction,
+      instruction: stickerOutput ? stickerPrompt(routed.instruction) : routed.instruction,
       options: {
         aspectRatio: routed.image_options?.aspect_ratio ?? "1:1",
         locale,
-        ...(stickerIntent ? {
+        ...(stickerOutput ? {
           outputMode: "telegram_sticker",
           stickerTitle: stickerSetTitle(message.from.first_name),
         } : {}),
@@ -912,9 +914,9 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
     }
     dependencies.mediaStore.savePendingIntent({
       ...scopeForJob(job),
-      intent: "image_edit",
+      intent: job.options.outputMode === "telegram_sticker" ? "sticker_create" : "image_edit",
       slots: {
-        intent: "image_edit",
+        intent: job.options.outputMode === "telegram_sticker" ? "sticker_create" : "image_edit",
         confidence: 1,
         instruction: "",
         media_source: "reply",
@@ -922,10 +924,7 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
         video_options: null,
         final_response: null,
       },
-      missingRequired: [
-        "instruction",
-        ...(job.options.outputMode === "telegram_sticker" ? ["sticker_output"] : []),
-      ],
+      missingRequired: ["instruction"],
       sourceMessageIds: [resultMessageId],
     });
     await ctx.answerCallbackQuery();
@@ -949,9 +948,9 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
       });
       dependencies.mediaStore.savePendingIntent({
         ...scopeForJob(job),
-        intent: "image_edit",
+        intent: job.options.outputMode === "telegram_sticker" ? "sticker_create" : "image_edit",
         slots: {
-          intent: "image_edit",
+          intent: job.options.outputMode === "telegram_sticker" ? "sticker_create" : "image_edit",
           confidence: 1,
           instruction: "",
           media_source: "reply",
@@ -959,11 +958,7 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
           video_options: null,
           final_response: null,
         },
-        missingRequired: [
-          "instruction",
-          "callback_reply",
-          ...(job.options.outputMode === "telegram_sticker" ? ["sticker_output"] : []),
-        ],
+        missingRequired: ["instruction", "callback_reply"],
         sourceMessageIds: [resultMessageId, prompt.message_id],
       });
     } catch (error) {
@@ -1347,7 +1342,9 @@ function directIntent(intent: PendingMediaIntent, instruction: string, mediaSour
     instruction,
     media_source: mediaSource,
     media_message_ids: [],
-    image_options: intent === "image_generate" || intent === "image_edit" ? { aspect_ratio: null } : null,
+    image_options: intent === "image_generate" || intent === "image_edit" || intent === "sticker_create"
+      ? { aspect_ratio: null }
+      : null,
     video_options: intent === "video_generate" ? {
       mode: mediaSource === "none" ? "text_to_video" : "image_to_video",
       duration_seconds: null,
@@ -1377,7 +1374,7 @@ export function isExplicitGroupSummaryPhrase(text: string): boolean {
 
 function isMediaIntent(intent: RoutedIntent["intent"]): intent is PendingMediaIntent {
   return intent === "image_generate" || intent === "image_edit" ||
-    intent === "vision_qa" || intent === "video_generate";
+    intent === "sticker_create" || intent === "vision_qa" || intent === "video_generate";
 }
 
 function parseVideoOptions(text: string, hasImages: boolean) {

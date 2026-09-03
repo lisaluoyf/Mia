@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 
 import {
-  isStickerRequest,
   isStickerSetNameOccupied,
   MAX_TELEGRAM_STICKER_BYTES,
   prepareTelegramSticker,
@@ -10,14 +9,6 @@ import {
 } from "../src/stickers/service.js";
 
 describe("sticker helpers", () => {
-  it("requires explicit sticker intent", () => {
-    expect(isStickerRequest("做成贴纸")).toBe(true);
-    expect(isStickerRequest("生成一个表情包")).toBe(true);
-    expect(isStickerRequest("make a sticker")).toBe(true);
-    expect(isStickerRequest("看看这张照片")).toBe(false);
-    expect(isStickerRequest(undefined)).toBe(false);
-  });
-
   it("builds a deterministic valid Telegram sticker set name", () => {
     const name = stickerSetName(9_007_199_254_740_991, 9_007_199_254_740_991, "MiaAssistantBot");
     expect(name).toMatch(/^[A-Za-z][A-Za-z0-9_]{0,63}$/);

@@ -99,6 +99,58 @@ describe("media store", () => {
     expect(current.getPendingIntent({ telegramUserId: 99, chatId: -1001, threadId: 10 })).toBeNull();
   });
 
+  it("stores sticker creation as a pending media intent", () => {
+    const current = createStore();
+    current.savePendingIntent({
+      telegramUserId: 42,
+      chatId: 42,
+      threadId: null,
+      intent: "sticker_create",
+      slots: { intent: "sticker_create", instruction: "做一个无语反应" },
+      missingRequired: ["image"],
+      sourceMessageIds: [7],
+    });
+
+    expect(current.getPendingIntent({ telegramUserId: 42, chatId: 42, threadId: null })).toMatchObject({
+      intent: "sticker_create",
+      missingRequired: ["image"],
+    });
+  });
+
+  it("migrates the old pending-intent constraint without losing rows", () => {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), "mia-pending-sticker-"));
+    const databasePath = join(temporaryDirectory, "mia.sqlite");
+    const legacy = new Database(databasePath);
+    legacy.exec(`
+      CREATE TABLE mia_pending_intents (
+        telegram_user_id INTEGER NOT NULL,
+        chat_id INTEGER NOT NULL,
+        thread_id INTEGER NOT NULL DEFAULT 0 CHECK (thread_id >= 0),
+        intent TEXT NOT NULL CHECK (intent IN ('image_generate', 'image_edit', 'vision_qa', 'video_generate')),
+        slots_json TEXT NOT NULL,
+        missing_required_json TEXT NOT NULL,
+        source_message_ids_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        PRIMARY KEY (telegram_user_id, chat_id, thread_id)
+      );
+      INSERT INTO mia_pending_intents VALUES (
+        42, 42, 0, 'image_edit', '{"instruction":"brighter"}', '["image"]', '[7]',
+        '2026-09-02T08:00:00.000Z', '2026-09-02T08:00:00.000Z', '2026-09-02T08:10:00.000Z'
+      );
+    `);
+    legacy.close();
+
+    const current = createStore(databasePath);
+    expect(current.getPendingIntent({ telegramUserId: 42, chatId: 42, threadId: null })?.intent).toBe("image_edit");
+    current.savePendingIntent({
+      telegramUserId: 99, chatId: 99, threadId: null, intent: "sticker_create",
+      slots: {}, missingRequired: ["image"], sourceMessageIds: [8],
+    });
+    expect(current.getPendingIntent({ telegramUserId: 99, chatId: 99, threadId: null })?.intent).toBe("sticker_create");
+  });
+
   it("claims Telegram update IDs once across restarts", () => {
     temporaryDirectory = mkdtempSync(join(tmpdir(), "mia-update-id-"));
     const databasePath = join(temporaryDirectory, "mia.sqlite");

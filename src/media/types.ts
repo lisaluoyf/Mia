@@ -3,12 +3,14 @@ export type RoutedIntent =
   | "group_summary"
   | "image_generate"
   | "image_edit"
+  | "sticker_create"
   | "vision_qa"
   | "video_generate";
 
 export type PendingMediaIntent =
   | "image_generate"
   | "image_edit"
+  | "sticker_create"
   | "vision_qa"
   | "video_generate";
 

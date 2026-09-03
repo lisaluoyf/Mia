@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import sharp from "sharp";
 
 import type { APIMasterClient } from "../src/clients/apimaster.js";
 import type { IntentRouter } from "../src/intent/router.js";
@@ -47,6 +48,9 @@ function installApi(bot: ReturnType<typeof createBot>) {
         },
       } as never);
     }
+    if (method === "getFile") {
+      return Promise.resolve({ ok: true, result: { file_id: "photo", file_unique_id: "photo-unique", file_path: "photos/source.jpg", file_size: 5 } } as never);
+    }
     return Promise.resolve({ ok: true, result: true } as never);
   });
   return calls;
@@ -76,11 +80,25 @@ describe("Telegram sticker intent", () => {
     store?.close();
     store = undefined;
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
-  function setup() {
+  async function setup() {
     store = new MediaStore(":memory:");
-    const classify = vi.fn();
+    const classify = vi.fn().mockResolvedValue({
+      intent: "sticker_create",
+      confidence: 0.98,
+      instruction: "做成点赞反应",
+      media_source: "message",
+      media_message_ids: [],
+      image_options: { aspect_ratio: "1:1" },
+      video_options: null,
+      final_response: null,
+      conversation_mode: "task",
+      onboarding_opportunity: false,
+      profile_updates: null,
+      missingRequired: [],
+    });
     const resolveAPIKey = vi.fn().mockResolvedValue("user-key");
     const getSnapshot = vi.fn().mockResolvedValue({
       apimasterUserId: "user-1",
@@ -99,16 +117,23 @@ describe("Telegram sticker intent", () => {
     });
     bot.botInfo = botInfo;
     const calls = installApi(bot);
+    const source = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: { r: 10, g: 20, b: 30 } },
+    }).jpeg().toBuffer();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(source, {
+      headers: { "content-type": "image/jpeg" },
+    })));
     return { bot, calls, classify, resolveAPIKey };
   }
 
   it("creates exactly one sticker-mode image job for an explicit private photo", async () => {
-    const { bot, classify, resolveAPIKey } = setup();
+    const { bot, classify, resolveAPIKey } = await setup();
 
-    await bot.handleUpdate(update(42, "把它做成点赞贴纸", 1001) as never);
+    await bot.handleUpdate(update(42, "给这个做个 TG 里能用的点赞反应", 1001) as never);
 
     const job = store?.getJobByIdempotencyKey("message:42:7");
-    expect(classify).not.toHaveBeenCalled();
+    expect(classify).toHaveBeenCalledOnce();
+    expect(resolveAPIKey).toHaveBeenCalledWith(42, "gpt-5.4");
     expect(resolveAPIKey).toHaveBeenCalledWith(42, "gpt-image-2");
     expect(job).toMatchObject({
       telegramUserId: 42,
@@ -122,7 +147,7 @@ describe("Telegram sticker intent", () => {
   });
 
   it("does not create or classify a bare private photo", async () => {
-    const { bot, classify, resolveAPIKey, calls } = setup();
+    const { bot, classify, resolveAPIKey, calls } = await setup();
 
     await bot.handleUpdate(update(42, undefined, 1002) as never);
 
@@ -133,13 +158,55 @@ describe("Telegram sticker intent", () => {
   });
 
   it("keeps sticker generation disabled in groups", async () => {
-    const { bot, classify, resolveAPIKey, calls } = setup();
+    const { bot, classify, resolveAPIKey, calls } = await setup();
 
     await bot.handleUpdate(update(-1001, "@MiaAssistantBot 做贴纸", 1003) as never);
 
     expect(store?.getJobByIdempotencyKey("message:-1001:7")).toBeNull();
-    expect(classify).not.toHaveBeenCalled();
-    expect(resolveAPIKey).not.toHaveBeenCalled();
+    expect(classify).toHaveBeenCalledOnce();
+    expect(resolveAPIKey).toHaveBeenCalledWith(42, "gpt-5.4");
+    expect(resolveAPIKey).not.toHaveBeenCalledWith(42, "gpt-image-2");
     expect(calls.find((call) => call.method === "sendMessage")?.payload.text).toContain("只支持和 Mia 私聊");
+  });
+
+  it("keeps the sticker intent when the user supplies the image in the next message", async () => {
+    const { bot, classify } = await setup();
+    classify.mockReset()
+      .mockResolvedValueOnce({
+        intent: "sticker_create", confidence: 0.98, instruction: "做成无语反应", media_source: "none",
+        media_message_ids: [], image_options: { aspect_ratio: "1:1" }, video_options: null,
+        final_response: null, conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+        missingRequired: ["image"],
+      })
+      .mockResolvedValueOnce({
+        intent: "chat", confidence: 0.99, instruction: "", media_source: "none",
+        media_message_ids: [], image_options: null, video_options: null, final_response: "收到图片。",
+        conversation_mode: "task", onboarding_opportunity: false, profile_updates: null, missingRequired: [],
+      });
+
+    await bot.handleUpdate({
+      update_id: 1004,
+      message: {
+        message_id: 6,
+        date: 1_788_333_500,
+        chat: { id: 42, type: "private", first_name: "Liz" },
+        from: { id: 42, is_bot: false, first_name: "Liz", language_code: "zh-CN" },
+        text: "给我做个 TG 里能用的无语反应",
+      },
+    } as never);
+
+    expect(store?.getPendingIntent({ telegramUserId: 42, chatId: 42, threadId: null })).toMatchObject({
+      intent: "sticker_create",
+      missingRequired: ["image"],
+    });
+
+    await bot.handleUpdate(update(42, undefined, 1005) as never);
+
+    expect(classify).toHaveBeenCalledTimes(2);
+    expect(store?.getJobByIdempotencyKey("message:42:7")).toMatchObject({
+      type: "image_edit",
+      options: { outputMode: "telegram_sticker" },
+    });
+    expect(store?.getPendingIntent({ telegramUserId: 42, chatId: 42, threadId: null })).toBeNull();
   });
 });

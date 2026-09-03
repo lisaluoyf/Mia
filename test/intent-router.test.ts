@@ -62,13 +62,37 @@ describe("Mia intent router", () => {
     }
   });
 
-  it("requires an image for edit, vision and image-to-video", () => {
+  it("requires an image for edit, sticker, vision and image-to-video", () => {
     const shared = { confidence: 1, instruction: "do it", media_source: "none" as const, image_options: null, final_response: null };
     expect(validateIntentRequirements({ ...shared, intent: "image_edit", video_options: null }, base)).toContain("image");
+    expect(validateIntentRequirements({ ...shared, intent: "sticker_create", instruction: "", video_options: null }, base))
+      .toEqual(["image"]);
     expect(validateIntentRequirements({ ...shared, intent: "vision_qa", video_options: null }, base)).toContain("image");
     expect(validateIntentRequirements({ ...shared, intent: "video_generate", video_options: {
       mode: "image_to_video", duration_seconds: 4, aspect_ratio: "16:9", resolution: "768P", image_roles: [],
     } }, base)).toContain("image");
+  });
+
+  it("recognizes sticker creation as a first-class media intent", async () => {
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      intent: "sticker_create", confidence: 0.98, instruction: "做成一个无语反应，保留眼镜", media_source: "message",
+      media_message_ids: [], image_options: { aspect_ratio: "1:1" }, video_options: null,
+      final_response: null, conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 1000 });
+
+    await expect(router.classify({
+      ...base,
+      text: "给这个做个 TG 里能用的无语反应，眼镜别去掉",
+      mediaType: "image",
+      mediaCount: 1,
+    }, "key", [{ bytes: new Uint8Array([1]), mimeType: "image/png", filename: "subject.png" }]))
+      .resolves.toMatchObject({
+        intent: "sticker_create",
+        instruction: "做成一个无语反应，保留眼镜",
+        missingRequired: [],
+      });
+    expect(JSON.stringify(structuredResponse.mock.calls[0]?.[4])).toContain("sticker_create");
   });
 
   it("returns final chat and vision answers from the same GPT-5.4 call", async () => {
@@ -192,7 +216,7 @@ describe("Mia intent router", () => {
     const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
     expect(basePrompt).toMatchObject({ kind: "base" });
-    expect(routerPrompt).toMatchObject({ version: 5, kind: "composed", includes: ["mia.system"] });
+    expect(routerPrompt).toMatchObject({ version: 6, kind: "composed", includes: ["mia.system"] });
     expect(routerPrompt?.text).toContain(basePrompt?.text ?? "missing");
   });
 });

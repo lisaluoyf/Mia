@@ -4,7 +4,7 @@ import type { APIMasterClient, MediaBinary, StructuredMessage, WebSearchUsage } 
 import { INTENT_ROUTER_SYSTEM_PROMPT } from "../prompts.js";
 
 export const mediaIntentSchema = z.object({
-  intent: z.enum(["chat", "group_summary", "image_generate", "image_edit", "vision_qa", "video_generate"]),
+  intent: z.enum(["chat", "group_summary", "image_generate", "image_edit", "sticker_create", "vision_qa", "video_generate"]),
   confidence: z.number().min(0).max(1),
   instruction: z.string().max(8000),
   media_source: z.enum(["none", "message", "reply", "active_private_image", "context"]),
@@ -84,7 +84,7 @@ const ROUTER_SCHEMA = {
     "conversation_mode", "onboarding_opportunity", "profile_updates",
   ],
   properties: {
-    intent: { type: "string", enum: ["chat", "group_summary", "image_generate", "image_edit", "vision_qa", "video_generate"] },
+    intent: { type: "string", enum: ["chat", "group_summary", "image_generate", "image_edit", "sticker_create", "vision_qa", "video_generate"] },
     confidence: { type: "number", minimum: 0, maximum: 1 },
     instruction: { type: "string" },
     media_source: { type: "string", enum: ["none", "message", "reply", "active_private_image", "context"] },
@@ -168,10 +168,11 @@ export function validateIntentRequirements(intent: MediaIntent, input: IntentRou
   const missing: string[] = [];
   const hasImages = input.mediaCount > 0 || input.replyMediaCount > 0 || input.activePrivateImage ||
     (intent.media_message_ids?.length ?? 0) > 0;
-  if (intent.intent !== "chat" && intent.intent !== "group_summary" && intent.instruction.trim() === "") {
+  if (intent.intent !== "chat" && intent.intent !== "group_summary" && intent.intent !== "sticker_create" &&
+      intent.instruction.trim() === "") {
     missing.push(intent.intent === "vision_qa" ? "question" : "instruction");
   }
-  if ((intent.intent === "image_edit" || intent.intent === "vision_qa") && !hasImages) {
+  if ((intent.intent === "image_edit" || intent.intent === "sticker_create" || intent.intent === "vision_qa") && !hasImages) {
     missing.push("image");
   }
   if (intent.intent === "video_generate" && intent.video_options?.mode === "image_to_video" && !hasImages) {
