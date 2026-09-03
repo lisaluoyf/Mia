@@ -11,7 +11,7 @@ import { debugContextLayers } from "../debug/context.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { DebugContextLayers, DebugRequestKind } from "../debug/types.js";
 import { mediaIntentSchema, type IntentRouter, type RoutedIntent } from "../intent/router.js";
-import { MediaInputError, downloadTelegramImages } from "../media/intake.js";
+import { MediaInputError, downloadConversationImages, downloadTelegramImages } from "../media/intake.js";
 import type { MediaStore } from "../media/store.js";
 import type { MediaInput, MediaJob, PendingMediaIntent } from "../media/types.js";
 import { sameModelId, type ModelSettingsService, type SettingsSnapshot } from "../settings/service.js";
@@ -820,9 +820,19 @@ async function buildRequestContext(
       currentTask,
     },
   }, ctx.me.id);
+  const requiredMediaMessageIds = new Set([
+    context.currentMessageId,
+    context.replyToMessageId,
+    context.activeMediaMessageId,
+  ].filter((messageId): messageId is number => messageId !== null));
   const images = context.mediaInputs.length === 0
     ? []
-    : await downloadTelegramImages(ctx.api, dependencies.botToken, context.mediaInputs);
+    : await downloadConversationImages(
+      ctx.api,
+      dependencies.botToken,
+      context.mediaInputs,
+      requiredMediaMessageIds,
+    );
   return {
     messages: buildConversationMessages(context, images, ctx.me.id),
     layers: debugContextLayers(context),

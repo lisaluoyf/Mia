@@ -134,7 +134,7 @@ function mediaStatus(context: ConversationContext, messageId: number): string {
 
 export function buildConversationMessages(
   context: ConversationContext,
-  images: readonly MediaBinary[],
+  images: readonly (MediaBinary | undefined)[],
   botUserId: number,
 ): StructuredMessage[] {
   const imageByMessage = new Map<number, MediaBinary>();
