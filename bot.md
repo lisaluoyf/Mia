@@ -64,7 +64,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 
 | 组件 | 当前基线 | 状态 |
 | --- | --- | --- |
-| Mia | `762c7bd` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、媒体能力、群聊消息采集、开发者 Debug 控制台和参考图改图修复 |
+| Mia | `70c6774` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、媒体能力和开发者 Debug 控制台 |
 | APIMaster new-api | `9130c1d` | GHCR 镜像蓝绿部署，提供 Telegram 用户 Key 解析、规范化 Mia 模型目录、产品名和 Debug 身份解析 |
 | APIMaster Web | `7d62618` | Next.js PM2 双实例运行，提供登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
 | Mini App | `/mia/` | 已由 Nginx 公开，Telegram 默认菜单按钮 `Mia` 已配置 |
@@ -280,6 +280,8 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 | `7d62618` | `RomaCredit/apimaster-workspace` | 登录态鉴权、Lisa 白名单、Mia Debug API 代理和页面入口保护 |
 | `a298ac4` | `lisaluoyf/Mia` | 修正生产 Debug API 路由并完成可追溯发布 |
 | `762c7bd` | `lisaluoyf/Mia` | 参考图改图切换到 APIMaster 网页同款 `/v1/images/edits` 同步链路 |
+| `a124a56` | `lisaluoyf/Mia` | 私聊前 100 轮用户画像引导、25 种语言角色按钮、画像长期记忆和 Debug 审计 |
+| `70c6774` | `lisaluoyf/Mia` | 群聊与 Topic 上下文压缩、公开群记忆、原子水位和管理员清除保护 |
 
 ## 当前验证状态
 
@@ -298,7 +300,9 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - Developer Debug Console：Mia 69/69 测试、ESLint、服务端与前端 TypeScript、生产构建和 `git diff --check` 通过；new-api `go test ./controller ./router` 通过。桌面端 Requests/Memory/Prompts、五层展开、Prompt 跳转和 390×844 移动端无横向溢出已完成浏览器验收（2026-09-03）。
 - Debug 三端一致性：Mia 本地、GitHub `main` 和生产 release 均为 `a298ac4`；new-api 均为 `9130c1d`，生产 API 与 worker 运行同一不可变镜像；APIMaster Web 均为 `7d62618`，PM2 两个实例在线。未登录访问 `/mia/debug` 会跳转到 `/login?next=/mia/debug`，未登录 Debug API 返回 401（2026-09-03）。
 - Mia 参考图改图：`762c7bd` 已从 GitHub `main` 由生产服务器构建并发布；73/73 测试、服务端与 Mini App 类型检查、Lint、生产构建、内部健康检查和公网 `/mia/` 200 探针通过，PM2 在线且 0 次重启，服务器保留 3 个 release（2026-09-03）。
-- Mia 群共享上下文：当前共享工作区 100/100 全量测试、ESLint、服务端与前端 TypeScript、生产构建和 `git diff --check` 通过；覆盖 50 条消息/12,000 tokens 双阈值、摘要与记忆单次模型调用、原子水位、跨 Topic 来源拦截、群记忆继承、触发者公开发言优先、个人记忆隔离和群清除管理员权限（2026-09-03，待独立提交部署）。
+- Mia 私聊用户画像引导：提交 `a124a56` 已实现并随生产 `70c6774` 发布；只在私聊前 100 个成功轮次内寻找闲聊机会，最多主动询问两次且第二次至少间隔 20 轮。角色、称呼和主要目标写入用户长期记忆；群聊和 Topic 不读取或更新 onboarding 状态。隔离提交通过 93/93 测试、ESLint、前后端 TypeScript、生产构建和 `git diff --check`（2026-09-03）。
+- Mia 群共享上下文：提交 `70c6774` 已独立提交、推送并部署；100/100 全量测试、ESLint、服务端与前端 TypeScript、生产构建和 `git diff --check` 通过；覆盖 50 条消息/12,000 tokens 双阈值、摘要与记忆单次模型调用、原子水位、跨 Topic 来源拦截、群记忆继承、触发者公开发言优先、个人记忆隔离和群清除管理员权限（2026-09-03）。
+- Mia `70c6774` 生产验收：服务器从 GitHub 精确 SHA 构建，内部 `/health` 返回 200，PM2 在线且 0 次重启，运行目录与 release 元数据均指向 `70c67745c9ff19d8fe6ea81ce4db3c3a1dbd8e22`；SQLite 完整性为 `ok`，`mia_user_onboarding`、`mia_summaries` 和 `mia_memories` 均存在，新进程错误日志为空。APIMaster Web、new-api、Flask 和静态资源只读冒烟为 19/19 通过，未修改或重启 APIMaster 主服务（2026-09-03）。
 
 ## 下一阶段优先级
 
