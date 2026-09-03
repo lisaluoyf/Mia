@@ -64,7 +64,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 
 | 组件 | 当前基线 | 状态 |
 | --- | --- | --- |
-| Mia | `f99cb8a` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、精简版专用群聊总结、媒体与贴纸能力、Responses 自动 Web Search 和开发者 Debug 控制台 |
+| Mia | `57772e6` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、精简版专用群聊总结、结构化 Telegram 回复、群聊唤醒后智能连续跟进、媒体与贴纸能力、Responses 自动 Web Search 和开发者 Debug 控制台 |
 | APIMaster new-api | `9130c1d` | GHCR 镜像蓝绿部署，提供 Telegram 用户 Key 解析、规范化 Mia 模型目录、产品名和 Debug 身份解析 |
 | APIMaster Web | `7d62618` | Next.js PM2 双实例运行，提供登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
 | Mini App | `/mia/` | 已由 Nginx 公开，Telegram 默认菜单按钮 `Mia` 已配置 |
@@ -167,7 +167,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 
 当前实现边界：单次最多提供 10 张图片候选或图片输入；时区没有可靠 Telegram 来源时明确传 `null`；首版不在群聊中自动提取个人长期记忆。
 
-### 通用结构化回复与 Telegram 展示（已验证，待生产部署）
+### 通用结构化回复与 Telegram 展示（已部署）
 
 - [x] 新增 `MiaResponse v1` 严格 JSON Schema，统一承载短标题、段落、列表、事实项、代码和受控动作 ID；模型不直接生成 HTML、Markdown、URL 或 callback data。
 - [x] 普通聊天、实时天气、看图问答和其他长回答由同一意图调用返回结构化 `reply`；简单寒暄仍保持一段自然文本，信息较多时才使用标题、粗体标签、列表和段落留白。
@@ -218,7 +218,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] 普通群文字在响应策略判断前入库；休眠状态下未 `@Mia` 的消息仍存储但不触发模型。
 - [x] `edited_message:text` 更新原消息存储，不触发新的 AI 回复。
 
-### 群聊唤醒后的智能连续跟进（已验证，待生产部署）
+### 群聊唤醒后的智能连续跟进（已部署，待真实群聊验收）
 
 - [x] `@Mia` 或直接回复 Mia 会立即处理并唤醒当前作用域；普通群按 `chat_id`、Topic 按 `chat_id + message_thread_id` 严格隔离。
 - [x] 唤醒后，所有成员的后续文字及带 caption 图片进入选择性意图判断；成员闲聊、感谢、表情式回复、无明确请求的陈述和无法确认是对 Mia 说的话默认静默观察。
@@ -228,6 +228,8 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] 自动判断与普通文字回复复用 Mia 公共 `gpt-5.4` 凭证，不扣唤醒者或发送者额度；图片、视频和视觉生成仍解析实际请求者自己的 APIMaster Key、模型偏好、余额并沿用确认流程。
 - [x] 自动判断前不发送 `typing`；只有决定介入后才显示状态。纯图片、无 caption 图片和当前不支持的文件只作为上下文保存，编辑消息只更新存储。
 - [x] 路由输出必须从当前批次选择回复目标；跨批次或伪造消息 ID、无效 Schema、低置信度和模型错误在自动模式下均静默处理。
+
+生产发布 `57772e6` 已完成精确 SHA 部署；服务器现场构建、内部 `/health`、PM2 `online`/零重启、SQLite 完整性、新状态表 schema、空错误日志、3 版本保留及 APIMaster 公共状态探针均通过（2026-09-03）。真实 Telegram 群中的分段补充、成员闲聊静默、成功处理续期、10 分钟休眠和 Topic 隔离仍需客户端人工验收。
 
 存储底座提交：`f69dd98`；Telegram 消息采集接入提交：`57ca489`。两者与 Mini App 共用同一个 `DATABASE_PATH` SQLite 文件，但通过表、联合主键和作用域约束逻辑隔离。`9fff043` 已把历史上下文、回复关系和相关图片接入生产模型请求。
 
