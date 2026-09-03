@@ -74,7 +74,7 @@ const ENGLISH = {
   generateAnother: "Generate another",
   continueEditing: "Continue editing",
   downloadOriginal: "Download original",
-  share: "Share",
+  share: "Share on X",
   videoReady: "Video ready",
   imageReady: "Image ready",
 } as const;
@@ -151,7 +151,7 @@ const CHINESE_SIMPLIFIED: MessageOverrides = {
   generateAnother: "再生成一张",
   continueEditing: "继续修改",
   downloadOriginal: "下载原图",
-  share: "分享",
+  share: "分享到 X",
   videoReady: "视频已生成",
   imageReady: "图片已生成",
 };
@@ -169,7 +169,7 @@ const CHINESE_TRADITIONAL: MessageOverrides = {
   generateAnother: "再生成一張",
   continueEditing: "繼續修改",
   downloadOriginal: "下載原圖",
-  share: "分享",
+  share: "分享到 X",
   ratioButton: "切換畫幅",
   generateVideoButton: "生成影片",
   cancelButton: "取消",

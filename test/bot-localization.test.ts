@@ -27,7 +27,7 @@ describe("Telegram bot localization", () => {
     expect(botText("zh-hans", "generateAnother")).toBe("再生成一张");
     expect(botText("zh-hans", "continueEditing")).toBe("继续修改");
     expect(botText("zh-hans", "downloadOriginal")).toBe("下载原图");
-    expect(botText("zh-hans", "share")).toBe("分享");
+    expect(botText("zh-hans", "share")).toBe("分享到 X");
     expect(botText("zh-hans", "noUsableKey", { model: "gpt-image-2" }))
       .toContain("gpt-image-2");
     expect(mediaJobLocale({ locale: "zh-hans" })).toBe("zh-CN");

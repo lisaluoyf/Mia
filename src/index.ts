@@ -89,7 +89,7 @@ async function main(): Promise<void> {
       settings,
       staticRoot: resolve("dist/web"),
     },
-    mediaDownload: { store: mediaStore, client },
+    mediaDownload: { store: mediaStore, client, publicBaseUrl: config.publicBaseUrl },
     debug: new DebugService(debugStore, contexts),
   });
   let stopping = false;

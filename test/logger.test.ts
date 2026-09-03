@@ -27,7 +27,7 @@ describe("logger redaction", () => {
     expect(output).not.toContain("secret-api-key");
   });
 
-  it("redacts expiring media download tokens from request URLs", async () => {
+  it("redacts expiring media access tokens from request URLs", async () => {
     let output = "";
     const destination = new Writable({
       write(chunk: unknown, _encoding, callback) {
@@ -37,8 +37,14 @@ describe("logger redaction", () => {
     });
     const logger = createLogger("info", destination);
     logger.info({ req: { method: "GET", url: "/media/download/private-token-value" } });
+    logger.info({ req: { method: "GET", url: "/mia/share/private-share-token?utm_source=x" } });
+    logger.info({ req: { method: "GET", url: "/mia/media/share/private-image-token" } });
     await new Promise((resolve) => setImmediate(resolve));
     expect(output).not.toContain("private-token-value");
+    expect(output).not.toContain("private-share-token");
+    expect(output).not.toContain("private-image-token");
     expect(output).toContain("/media/download/[REDACTED]");
+    expect(output).toContain("/mia/share/[REDACTED]?utm_source=x");
+    expect(output).toContain("/mia/media/share/[REDACTED]");
   });
 });

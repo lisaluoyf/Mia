@@ -229,6 +229,7 @@ export class MediaWorker {
     } else if (state.resultUrl) {
       try {
         media = await this.options.client.getContent(apiKey, state.resultUrl, this.options.resultMaxBytes);
+        this.options.store.saveLocalResult(job.id, media.bytes);
       } catch (error) {
         if (job.type === "video_generate" && errorCode(error) === "content_too_large" && this.options.publicBaseUrl) {
           const token = this.options.store.createAccessToken("download", job.id);
@@ -254,6 +255,14 @@ export class MediaWorker {
     if (this.options.publicBaseUrl) {
       const token = this.options.store.createAccessToken("download", job.id);
       keyboard.url(botText(locale, "downloadOriginal"), `${this.options.publicBaseUrl}/mia/media/download/${token.token}`);
+      if (job.type !== "video_generate" && media.mimeType.startsWith("image/")) {
+        const share = this.options.store.createAccessToken("share", job.id);
+        const shareUrl = `${this.options.publicBaseUrl}/mia/share/${share.token}`;
+        const intent = new URL("https://x.com/intent/post");
+        intent.searchParams.set("text", sharePostText(locale));
+        intent.searchParams.set("url", shareUrl);
+        keyboard.url(botText(locale, "share"), intent.toString());
+      }
     } else {
       // Keep callback downloads working in private/dev deployments without a
       // browser-reachable Mia URL, and for messages created before this change.
@@ -352,6 +361,12 @@ function stringOption(value: unknown, fallback: string): string {
 
 function numberOption(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isInteger(value) ? value : fallback;
+}
+
+function sharePostText(locale: string): string {
+  if (locale === "zh-CN") return "我刚刚用 Mia 创作了这张图片。";
+  if (locale === "zh-TW") return "我剛剛用 Mia 創作了這張圖片。";
+  return "I just created this image with Mia.";
 }
 
 function errorCode(error: unknown): string {

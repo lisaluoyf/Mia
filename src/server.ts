@@ -35,6 +35,7 @@ interface ServerOptions {
   mediaDownload?: {
     store: MediaStore;
     client: APIMasterClient;
+    publicBaseUrl?: string | null;
   };
   debug?: DebugService;
 }
@@ -87,6 +88,13 @@ export function createServer({ logger, serviceKey, handleUpdate, miniApp, mediaD
 
   app.get("/health", () => ({ status: "ok" }));
   if (mediaDownload) {
+    const localShareResult = (token: string) => {
+      const access = mediaDownload.store.getAccessToken(token, "share");
+      const job = access ? mediaDownload.store.getJob(access.jobId) : null;
+      if (!job || job.status !== "succeeded" || job.type === "video_generate") return null;
+      const local = mediaDownload.store.getLocalResult(job.id, job.resultMimeType);
+      return local?.mimeType.startsWith("image/") ? local : null;
+    };
     const handleMediaDownload = async (
       request: FastifyRequest<{ Params: { token: string } }>,
       reply: FastifyReply,
@@ -125,6 +133,23 @@ export function createServer({ logger, serviceKey, handleUpdate, miniApp, mediaD
     // resolve through the same handler.
     app.get<{ Params: { token: string } }>("/media/download/:token", handleMediaDownload);
     app.get<{ Params: { token: string } }>("/mia/media/download/:token", handleMediaDownload);
+    app.get<{ Params: { token: string } }>("/mia/media/share/:token", (request, reply) => {
+      const local = localShareResult(request.params.token);
+      if (!local) return reply.code(404).send({ error: "share_not_found" });
+      reply.header("content-type", local.mimeType);
+      reply.header("content-length", String(local.size));
+      reply.header("cache-control", "public, max-age=300");
+      return reply.send(createReadStream(local.path));
+    });
+    app.get<{ Params: { token: string } }>("/mia/share/:token", (request, reply) => {
+      const local = localShareResult(request.params.token);
+      const publicBaseUrl = mediaDownload.publicBaseUrl;
+      if (!local || !publicBaseUrl) return reply.code(404).type("text/plain").send("Share link expired");
+      const imageUrl = `${publicBaseUrl}/mia/media/share/${request.params.token}`;
+      reply.header("cache-control", "public, max-age=300");
+      reply.header("x-robots-tag", "noindex, nofollow");
+      return reply.type("text/html; charset=utf-8").send(sharePage(imageUrl));
+    });
   }
   app.post("/telegram/update", (request, reply) => {
     if (!authenticated(request.headers["x-mia-internal-key"], serviceKey)) {
@@ -145,4 +170,32 @@ export function createServer({ logger, serviceKey, handleUpdate, miniApp, mediaD
   });
 
   return app;
+}
+
+function sharePage(imageUrl: string): string {
+  const escapedUrl = escapeHtml(imageUrl);
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Created with Mia</title>
+  <meta name="description" content="An image created with Mia">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Mia">
+  <meta property="og:title" content="Created with Mia">
+  <meta property="og:description" content="An image created with Mia">
+  <meta property="og:image" content="${escapedUrl}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Created with Mia">
+  <meta name="twitter:description" content="An image created with Mia">
+  <meta name="twitter:image" content="${escapedUrl}">
+  <style>html,body{margin:0;min-height:100%;background:#111;color:#fff;font-family:system-ui,sans-serif}main{width:min(100%,960px);margin:auto;padding:24px;box-sizing:border-box}h1{font-size:20px;font-weight:600}img{display:block;width:100%;height:auto;max-height:calc(100vh - 100px);object-fit:contain;background:#000}</style>
+</head>
+<body><main><h1>Created with Mia</h1><img src="${escapedUrl}" alt="An image created with Mia"></main></body>
+</html>`;
+}
+
+function escapeHtml(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }

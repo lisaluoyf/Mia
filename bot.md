@@ -139,7 +139,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] 视频 10 分钟未扣费确认草稿，可调整时长和画幅。
 - [x] 图片与视频共享每用户 3 个在途任务，使用 SQLite 原子检查和幂等键。
 - [x] 后台 worker 恢复未完成任务；已进入不确定提交状态的任务绝不自动重提。
-- [x] Telegram photo/video/document 回传、原文件下载、Inline Mode 分享令牌和超大视频临时下载代理。
+- [x] Telegram photo/video/document 回传、原文件下载、图片分享到 X 和超大视频临时下载代理。
 
 ### 待开发
 
@@ -244,7 +244,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] 图片输入限制为最多 10 张、单张 10 MB、原始和预处理后各 30 MB；使用 Sharp 解码、方向修正、缩放，并按透明度输出 PNG/JPEG。
 - [x] 通用 `mia_media_jobs`、输入表、待补充意图、视频草稿、当前私聊图片、群开关、媒体引用和分享/下载令牌已实现。
 - [x] 草稿、任务、结果引用和令牌使用 10 分钟/15 分钟/60 分钟/7 天对应生命周期；清理保留任务审计行但移除过期媒体引用。
-- [ ] 在 BotFather 开启 Inline Mode，并完成真实 Telegram 分享验收。
+- [x] Telegram Inline 分享已取消；图片改为通过 7 天分享页直接唤起 X 发帖。
 - [ ] 部署前给至少一个生产用户可用模型增加 `vision` 与 `vision-recommended` 标签。
 - [x] 生产部署完成；端到端人工验收尚未执行。
 

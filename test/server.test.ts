@@ -153,6 +153,50 @@ describe("Mia server", () => {
     }
   });
 
+  it("serves an expiring image share page with X card metadata", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "mia-share-result-"));
+    const path = join(directory, "7");
+    writeFileSync(path, "shared-image");
+    const store = {
+      getAccessToken: vi.fn().mockReturnValue({ jobId: 7 }),
+      getJob: vi.fn().mockReturnValue({
+        id: 7,
+        status: "succeeded",
+        type: "image_generate",
+        resultMimeType: "image/png",
+      }),
+      getLocalResult: vi.fn().mockReturnValue({
+        path,
+        size: 12,
+        mimeType: "image/png",
+        filename: "mia-image.png",
+      }),
+    };
+    const app = createServer({
+      logger: createLogger("silent"),
+      serviceKey,
+      handleUpdate: vi.fn(),
+      mediaDownload: { store, client: {}, publicBaseUrl: "https://apimaster.ai" } as never,
+    });
+
+    try {
+      const page = await app.inject({ method: "GET", url: "/mia/share/share-token" });
+      expect(page.statusCode).toBe(200);
+      expect(page.headers["content-type"]).toContain("text/html");
+      expect(page.body).toContain('content="summary_large_image"');
+      expect(page.body).toContain('content="https://apimaster.ai/mia/media/share/share-token"');
+      expect(store.getAccessToken).toHaveBeenCalledWith("share-token", "share");
+
+      const image = await app.inject({ method: "GET", url: "/mia/media/share/share-token" });
+      expect(image.statusCode).toBe(200);
+      expect(image.body).toBe("shared-image");
+      expect(image.headers["content-type"]).toBe("image/png");
+    } finally {
+      await app.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects invalid media download tokens", async () => {
     const app = createServer({
       logger: createLogger("silent"),

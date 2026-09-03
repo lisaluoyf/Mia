@@ -23,7 +23,7 @@ export function createLogger(level: string, destination?: DestinationStream): Lo
           const url = request.url ?? request.raw?.url;
           return {
             method: request.method,
-            url: url?.replace(/(\/media\/download\/)[^/?]+/g, "$1[REDACTED]"),
+            url: url?.replace(/(\/(?:media\/download|media\/share|share)\/)[^/?]+/g, "$1[REDACTED]"),
           };
         },
       },

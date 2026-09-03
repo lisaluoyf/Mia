@@ -1036,19 +1036,6 @@ export function createBot(token: string, dependencies: BotDependencies): Bot {
     if (dependencies.mediaStore && !dependencies.mediaStore.claimTelegramUpdate(ctx.update.update_id)) return;
     return handleCallback(ctx, dependencies);
   });
-  bot.on("inline_query", async (ctx) => {
-    if (!dependencies.mediaStore) return;
-    const token = dependencies.mediaStore.getAccessToken(ctx.inlineQuery.query.trim(), "share");
-    const job = token ? dependencies.mediaStore.getJob(token.jobId) : null;
-    if (!job?.resultTelegramFileId) {
-      await ctx.answerInlineQuery([], { cache_time: 1, is_personal: true });
-      return;
-    }
-    const result = job.type === "video_generate"
-      ? [{ type: "video" as const, id: String(job.id), title: "Mia video", video_file_id: job.resultTelegramFileId }]
-      : [{ type: "photo" as const, id: String(job.id), photo_file_id: job.resultTelegramFileId }];
-    await ctx.answerInlineQuery(result, { cache_time: 30, is_personal: true });
-  });
   bot.catch(({ ctx, error }) => dependencies.logger.error({ err: error, updateId: ctx.update.update_id }, "Unhandled Telegram update error"));
   return bot;
 }
