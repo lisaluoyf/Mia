@@ -64,7 +64,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 
 | 组件 | 当前基线 | 状态 |
 | --- | --- | --- |
-| Mia | `a298ac4` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、媒体能力、群聊消息采集和开发者 Debug 控制台 |
+| Mia | `762c7bd` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、媒体能力、群聊消息采集、开发者 Debug 控制台和参考图改图修复 |
 | APIMaster new-api | `9130c1d` | GHCR 镜像蓝绿部署，提供 Telegram 用户 Key 解析、规范化 Mia 模型目录、产品名和 Debug 身份解析 |
 | APIMaster Web | `7d62618` | Next.js PM2 双实例运行，提供登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
 | Mini App | `/mia/` | 已由 Nginx 公开，Telegram 默认菜单按钮 `Mia` 已配置 |
@@ -234,12 +234,12 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - APIMaster 用户 Key 仅发送给配置的 APIMaster origin，不会随外部媒体结果 URL 转发。
 - 媒体日志禁止记录 Key、Bot Token 下载 URL、媒体正文和完整敏感提示词。
 
-## 通用媒体框架（已部署；图生图接口修复待发版）
+## 通用媒体框架（已部署，待真实 Telegram 验收）
 
 - [x] `new-api` 模型目录向后兼容增加 `supports_vision`、`vision_recommended` 和规范化 `video_capabilities`。
 - [x] 视觉能力只读取精确元数据标签，不按模型名猜测；只有能力元数据完整的视频模型可被 Mia 选择。
 - [x] `minimax-h3` 在 Mia 暴露文生/图生视频、4–15 秒、`768P`、三种画幅及最多 10 张参考图。
-- [x] 文生图调用 `POST /v1/images/generations/async` 并轮询 `/v1/tasks/:task_id`；参考图改图与 APIMaster 网页保持一致，调用同步 `POST /v1/images/edits`，单图使用 multipart `image`、多图使用 `image[]`，兼容 URL 与 base64 结果（本地完成，待发版）。
+- [x] 文生图调用 `POST /v1/images/generations/async` 并轮询 `/v1/tasks/:task_id`；参考图改图与 APIMaster 网页保持一致，调用同步 `POST /v1/images/edits`，单图使用 multipart `image`、多图使用 `image[]`，兼容 URL 与 base64 结果（`762c7bd` 已部署）。
 - [x] 视频调用 `POST /v1/videos`，轮询 `/v1/videos/:task_id`，成品读取 `/v1/videos/:task_id/content`。
 - [x] 图片输入限制为最多 10 张、单张 10 MB、原始和预处理后各 30 MB；使用 Sharp 解码、方向修正、缩放，并按透明度输出 PNG/JPEG。
 - [x] 通用 `mia_media_jobs`、输入表、待补充意图、视频草稿、当前私聊图片、群开关、媒体引用和分享/下载令牌已实现。
@@ -267,6 +267,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 | `9130c1d` | `lisaluoyf/new-api` | 通过内部接口按服务端邮箱白名单解析 Debug 开发者与绑定 Telegram ID |
 | `7d62618` | `RomaCredit/apimaster-workspace` | 登录态鉴权、Lisa 白名单、Mia Debug API 代理和页面入口保护 |
 | `a298ac4` | `lisaluoyf/Mia` | 修正生产 Debug API 路由并完成可追溯发布 |
+| `762c7bd` | `lisaluoyf/Mia` | 参考图改图切换到 APIMaster 网页同款 `/v1/images/edits` 同步链路 |
 
 ## 当前验证状态
 
@@ -284,6 +285,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - `new-api` 媒体目录：`go test ./... -count=1` 全量通过，包含显式视觉标签与 `minimax-h3` 能力目录测试（2026-09-02）；目录部分已随 `d88afd5` 提交并部署，Mia 媒体执行链路已随 `9fff043` 部署。
 - Developer Debug Console：Mia 69/69 测试、ESLint、服务端与前端 TypeScript、生产构建和 `git diff --check` 通过；new-api `go test ./controller ./router` 通过。桌面端 Requests/Memory/Prompts、五层展开、Prompt 跳转和 390×844 移动端无横向溢出已完成浏览器验收（2026-09-03）。
 - Debug 三端一致性：Mia 本地、GitHub `main` 和生产 release 均为 `a298ac4`；new-api 均为 `9130c1d`，生产 API 与 worker 运行同一不可变镜像；APIMaster Web 均为 `7d62618`，PM2 两个实例在线。未登录访问 `/mia/debug` 会跳转到 `/login?next=/mia/debug`，未登录 Debug API 返回 401（2026-09-03）。
+- Mia 参考图改图：`762c7bd` 已从 GitHub `main` 由生产服务器构建并发布；73/73 测试、服务端与 Mini App 类型检查、Lint、生产构建、内部健康检查和公网 `/mia/` 200 探针通过，PM2 在线且 0 次重启，服务器保留 3 个 release（2026-09-03）。
 
 ## 下一阶段优先级
 
