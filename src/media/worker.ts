@@ -391,7 +391,9 @@ export class MediaWorker {
     const keyboard = new InlineKeyboard().url(
       botText(locale, "addStickerPack"),
       `https://t.me/addstickers/${setName}`,
-    );
+    ).row()
+      .text(botText(locale, "generateAnother"), `media:${job.id}:again`)
+      .text(botText(locale, "continueEditing"), `media:${job.id}:edit`);
     const sent = await this.options.api.sendSticker(job.chatId, sticker.file_id, {
       ...replyOptions(job),
       reply_markup: keyboard,
@@ -399,6 +401,15 @@ export class MediaWorker {
     if (hasEphemeralStatus(job) && job.statusMessageId) {
       await this.options.api.deleteMessage(job.chatId, job.statusMessageId).catch(() => undefined);
     }
+    this.options.store.saveTelegramMedia(job.chatId, job.threadId, {
+      position: 0,
+      messageId: sent.message_id,
+      fileId: sticker.file_id,
+      fileUniqueId: sticker.file_unique_id,
+      type: "document",
+      mimeType: "image/webp",
+      mediaGroupId: null,
+    });
     this.options.store.transitionJob(job.id, [job.status], "succeeded", {
       statusMessageId: sent.message_id,
       progress: 100,

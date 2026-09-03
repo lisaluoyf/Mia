@@ -115,7 +115,10 @@ describe("sticker media delivery", () => {
     expect(sendSticker).toHaveBeenCalledWith(42, "sticker-file", expect.objectContaining({
       reply_parameters: { message_id: 7, allow_sending_without_reply: true },
     }));
-    expect(JSON.stringify(sendSticker.mock.calls[0]?.[2])).toContain(`https://t.me/addstickers/${setName}`);
+    const replyMarkup = JSON.stringify(sendSticker.mock.calls[0]?.[2]);
+    expect(replyMarkup).toContain(`https://t.me/addstickers/${setName}`);
+    expect(replyMarkup).toContain(`media:${job.id}:again`);
+    expect(replyMarkup).toContain(`media:${job.id}:edit`);
     expect(store?.getJob(job.id)).toMatchObject({
       status: "succeeded",
       resultMimeType: "image/webp",
@@ -125,6 +128,11 @@ describe("sticker media delivery", () => {
     const metadata = await sharp(stored?.bytes).metadata();
     expect(metadata).toMatchObject({ format: "webp", width: 512, height: 512, hasAlpha: true });
     expect(stored?.size).toBeLessThanOrEqual(MAX_TELEGRAM_STICKER_BYTES);
+    expect(store?.getTelegramMedia(42, 9)).toMatchObject([{
+      fileId: "sticker-file",
+      type: "document",
+      mimeType: "image/webp",
+    }]);
   });
 
   it("reuses the deterministic pack when a delivery retry finds its name occupied", async () => {

@@ -317,6 +317,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     mimeType: active.mimeType,
     mediaGroupId: active.mediaGroupId,
   }] : [];
+  const stickerContinuation = pending?.missingRequired.includes("sticker_output") === true;
   const pendingInputs: MediaInput[] = [];
   if (pending) {
     for (const sourceMessageId of pending.sourceMessageIds) {
@@ -353,7 +354,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   } else if (savedCallbackIntent?.success) {
     routed = {
       ...savedCallbackIntent.data,
-      instruction: request.text.trim(),
+      instruction: stickerContinuation ? stickerPrompt(request.text) : request.text.trim(),
       missingRequired: request.text.trim() ? [] : ["instruction"],
     };
   } else if (explicit?.command === "image") {
@@ -493,7 +494,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         routed = {
           ...saved.data,
           instruction: pending.missingRequired.some((field) => field === "instruction" || field === "question")
-            ? request.text.trim()
+            ? stickerContinuation ? stickerPrompt(request.text) : request.text.trim()
             : saved.data.instruction,
           missingRequired: [],
         };
@@ -588,7 +589,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     return;
   }
   dependencies.mediaStore.clearPendingIntent(scopeFor(message));
-  await executeMediaIntent(ctx, message, routed, inputs, dependencies, stickerIntent);
+  await executeMediaIntent(ctx, message, routed, inputs, dependencies, stickerIntent || stickerContinuation);
 }
 
 async function executeMediaIntent(
@@ -901,8 +902,11 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
   }
   if (action === "edit") {
     const resultMessageId = query.message?.message_id ?? job.statusMessageId;
-    if (job.type === "video_generate" || !resultMessageId ||
-        dependencies.mediaStore.getTelegramMedia(job.chatId, resultMessageId).length === 0) {
+    const hasResultMedia = resultMessageId !== null && resultMessageId !== undefined &&
+      dependencies.mediaStore.getTelegramMedia(job.chatId, resultMessageId).length > 0;
+    const hasStickerResult = resultMessageId !== null && resultMessageId !== undefined &&
+      job.options.outputMode === "telegram_sticker";
+    if (job.type === "video_generate" || !resultMessageId || (!hasResultMedia && !hasStickerResult)) {
       await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
       return;
     }
@@ -918,7 +922,10 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
         video_options: null,
         final_response: null,
       },
-      missingRequired: ["instruction"],
+      missingRequired: [
+        "instruction",
+        ...(job.options.outputMode === "telegram_sticker" ? ["sticker_output"] : []),
+      ],
       sourceMessageIds: [resultMessageId],
     });
     await ctx.answerCallbackQuery();
@@ -952,7 +959,11 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
           video_options: null,
           final_response: null,
         },
-        missingRequired: ["instruction", "callback_reply"],
+        missingRequired: [
+          "instruction",
+          "callback_reply",
+          ...(job.options.outputMode === "telegram_sticker" ? ["sticker_output"] : []),
+        ],
         sourceMessageIds: [resultMessageId, prompt.message_id],
       });
     } catch (error) {
