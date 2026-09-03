@@ -12,6 +12,9 @@ import { createBot } from "./telegram/bot.js";
 import { IntentRouter } from "./intent/router.js";
 import { MediaStore } from "./media/store.js";
 import { MediaWorker } from "./media/worker.js";
+import { DebugRecorder } from "./debug/recorder.js";
+import { DebugService } from "./debug/service.js";
+import { DebugStore } from "./debug/store.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -22,6 +25,20 @@ async function main(): Promise<void> {
     serviceKey: config.miaInternalServiceKey,
     timeoutMs: config.requestTimeoutMs,
   });
+  const debugStore = new DebugStore(resolve(config.databasePath));
+  const debug = new DebugRecorder(debugStore);
+  const refreshDebugUsers = async (): Promise<void> => {
+    try {
+      const ids = await client.resolveDebugTelegramUsers(config.debugAllowedEmails);
+      debug.replaceAllowedUsers(ids);
+      logger.info({ developerCount: ids.length }, "Mia developer debug identities refreshed");
+    } catch (error) {
+      logger.warn({ err: error }, "Mia developer debug identities could not be refreshed");
+    }
+  };
+  await refreshDebugUsers();
+  const debugRefreshTimer = setInterval(() => void refreshDebugUsers(), 60 * 60 * 1_000);
+  debugRefreshTimer.unref();
   const store = new SettingsStore(resolve(config.databasePath));
   const contexts = new ContextStore(resolve(config.databasePath));
   const compactor = new ContextCompactor({
@@ -29,6 +46,7 @@ async function main(): Promise<void> {
     store: contexts,
     logger,
     model: config.miaContextModel,
+    debug,
   });
   const mediaStore = new MediaStore(resolve(config.databasePath));
   const settings = new ModelSettingsService(client, store);
@@ -46,6 +64,7 @@ async function main(): Promise<void> {
     mediaStore,
     botToken: config.telegramBotToken,
     resultMaxBytes: config.mediaResultMaxBytes,
+    debug,
   });
   await bot.init();
   const worker = new MediaWorker({
@@ -57,6 +76,7 @@ async function main(): Promise<void> {
     intervalMs: config.mediaWorkerIntervalMs,
     resultMaxBytes: config.mediaResultMaxBytes,
     publicBaseUrl: config.publicBaseUrl,
+    debug,
   });
   worker.start();
   const server = createServer({
@@ -70,6 +90,7 @@ async function main(): Promise<void> {
       staticRoot: resolve("dist/web"),
     },
     mediaDownload: { store: mediaStore, client },
+    debug: new DebugService(debugStore, contexts),
   });
   let stopping = false;
 
@@ -81,9 +102,11 @@ async function main(): Promise<void> {
     logger.info({ signal }, "Stopping Mia");
     await server.close();
     worker.stop();
+    clearInterval(debugRefreshTimer);
     store.close();
     contexts.close();
     mediaStore.close();
+    debugStore.close();
   };
 
   process.once("SIGINT", () => void stop("SIGINT"));

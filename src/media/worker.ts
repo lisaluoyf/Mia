@@ -2,6 +2,7 @@ import { InlineKeyboard, InputFile, type Api } from "grammy";
 import type { Logger } from "pino";
 
 import type { APIMasterClient, NormalizedTaskStatus } from "../clients/apimaster.js";
+import type { DebugRecorder } from "../debug/recorder.js";
 import type { MediaStore } from "./store.js";
 import type { MediaJob } from "./types.js";
 import { dataUrl, downloadTelegramImages } from "./intake.js";
@@ -16,6 +17,7 @@ interface WorkerOptions {
   intervalMs: number;
   resultMaxBytes: number;
   publicBaseUrl: string | null;
+  debug?: DebugRecorder;
 }
 
 export class MediaWorker {
@@ -101,9 +103,28 @@ export class MediaWorker {
     const claimed = this.options.store.transitionJob(job.id, ["queued"], "submitting");
     if (!claimed) return;
     let apiKey: string;
+    const inputs = this.options.store.listJobInputs(job.id);
+    const debugId = this.options.debug?.start({
+      telegramUserId: job.telegramUserId,
+      chatId: job.chatId,
+      chatType: job.chatId === job.telegramUserId ? "private" : "group",
+      messageId: job.requestMessageId,
+      kind: job.type,
+      model: job.model,
+      requestPreview: { instruction: job.instruction, options: job.options },
+      media: inputs.map((input, index) => ({
+        messageId: input.messageId,
+        type: input.type,
+        mimeType: input.mimeType,
+        role: job.type === "video_generate"
+          ? index === 0 ? "first_frame" : index === 1 ? "last_frame" : "reference_image"
+          : "reference_image",
+      })),
+      details: { mediaJobId: job.id, phase: "submission" },
+      externalKey: `media-job:${job.id}`,
+    }) ?? null;
     try {
       apiKey = await this.options.client.resolveAPIKey(job.telegramUserId, job.model);
-      const inputs = this.options.store.listJobInputs(job.id);
       const images = await downloadTelegramImages(this.options.api, this.options.botToken, inputs);
       let taskId: string;
       if (job.type === "video_generate") {
@@ -129,11 +150,18 @@ export class MediaWorker {
         taskId = await this.options.client.submitImage(apiKey, job.model, job.instruction, aspectRatio, images);
       }
       this.options.store.transitionJob(job.id, ["submitting"], "submitted", { upstreamTaskId: taskId });
+      this.options.debug?.finish(debugId, {
+        status: "submitted",
+        taskId,
+        responsePreview: { status: "submitted" },
+        details: { mediaJobId: job.id, phase: "polling" },
+      });
       if (!hasEphemeralStatus(job)) {
         await this.updateStatus(job, botText(mediaJobLocale(job.options), "submitted"));
       }
     } catch (error) {
       this.options.store.transitionJob(job.id, ["submitting"], "failed", { errorCode: errorCode(error) });
+      this.options.debug?.finish(debugId, { status: "failed", errorCode: errorCode(error) });
       await this.notifyFailure(job, botText(mediaJobLocale(job.options), "submissionFailed"));
     }
   }
@@ -146,11 +174,13 @@ export class MediaWorker {
       : await this.options.client.pollImage(apiKey, job.model, job.upstreamTaskId);
     if (state.status === "failed") {
       this.options.store.transitionJob(job.id, [job.status], "failed", { errorCode: state.errorCode ?? "generation_failed" });
+      this.finishMediaTrace(job, state, "failed");
       await this.notifyFailure(job, botText(mediaJobLocale(job.options), "generationFailed"));
       return;
     }
     if (state.status === "succeeded") {
       await this.deliver(job, apiKey, state);
+      this.finishMediaTrace(job, state, "succeeded");
       return;
     }
     if (job.status === "submitted") {
@@ -161,6 +191,32 @@ export class MediaWorker {
       const progress = state.progress === null ? "" : ` (${state.progress}%)`;
       await this.updateStatus(job, botText(mediaJobLocale(job.options), "stillProcessing", { progress }));
     }
+  }
+
+  private finishMediaTrace(job: MediaJob, state: NormalizedTaskStatus, status: "succeeded" | "failed"): void {
+    const id = this.options.debug?.start({
+      telegramUserId: job.telegramUserId,
+      chatId: job.chatId,
+      chatType: job.chatId === job.telegramUserId ? "private" : "group",
+      messageId: job.requestMessageId,
+      kind: job.type,
+      model: job.model,
+      requestPreview: { instruction: job.instruction, options: job.options },
+      details: { mediaJobId: job.id, phase: "completed" },
+      taskId: job.upstreamTaskId,
+      externalKey: `media-job:${job.id}`,
+    }) ?? null;
+    this.options.debug?.finish(id, {
+      status,
+      taskId: job.upstreamTaskId,
+      errorCode: state.errorCode,
+      responsePreview: {
+        status: state.status,
+        progress: state.progress,
+        result: state.resultUrl ? "protected upstream result" : state.resultBase64 ? "base64 result omitted" : null,
+      },
+      details: { mediaJobId: job.id, phase: "completed" },
+    });
   }
 
   private async deliver(job: MediaJob, apiKey: string, state: NormalizedTaskStatus): Promise<void> {

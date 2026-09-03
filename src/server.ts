@@ -14,6 +14,8 @@ import { registerMiniAppRoutes } from "./mini-app/routes.js";
 import type { ModelSettingsService } from "./settings/service.js";
 import type { APIMasterClient } from "./clients/apimaster.js";
 import type { MediaStore } from "./media/store.js";
+import { registerDebugRoutes } from "./debug/routes.js";
+import type { DebugService } from "./debug/service.js";
 
 const telegramUpdateSchema = z.object({
   update_id: z.number().int().nonnegative(),
@@ -33,6 +35,7 @@ interface ServerOptions {
     store: MediaStore;
     client: APIMasterClient;
   };
+  debug?: DebugService;
 }
 
 function authenticated(provided: string | string[] | undefined, expected: string): boolean {
@@ -44,7 +47,7 @@ function authenticated(provided: string | string[] | undefined, expected: string
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
-export function createServer({ logger, serviceKey, handleUpdate, miniApp, mediaDownload }: ServerOptions) {
+export function createServer({ logger, serviceKey, handleUpdate, miniApp, mediaDownload, debug }: ServerOptions) {
   const app = Fastify({ loggerInstance: logger, bodyLimit: 1024 * 1024, trustProxy: true });
 
   app.addHook("onRequest", (request, reply, done) => {
@@ -70,7 +73,15 @@ export function createServer({ logger, serviceKey, handleUpdate, miniApp, mediaD
         decorateReply: true,
       });
       app.get("/mia", (_request, reply) => reply.redirect("/mia/"));
+      app.get("/mia/debug", (_request, reply) => reply.sendFile("index.html"));
     }
+  }
+
+  if (debug) {
+    void app.register((instance, _options, done) => {
+      registerDebugRoutes(instance, { serviceKey, service: debug });
+      done();
+    });
   }
 
   app.get("/health", () => ({ status: "ok" }));

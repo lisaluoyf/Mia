@@ -304,3 +304,17 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - 用户说“推上线”时，必须先验证并提交到 `lisaluoyf/Mia` 的 GitHub `main`，再由生产服务器拉取并构建该精确 Git SHA；禁止默认直传本地 `dist`。
 - 标准入口为 `pnpm deploy:production`：复用依赖缓存、健康失败自动回滚，成功后服务器只保留最近 3 个可运行版本。
 - 只有用户明确要求“紧急直传”时才允许跳过标准流程，且随后必须补齐 GitHub 提交。
+
+## Developer Debug Console (2026-09-03)
+
+- [x] 已实现独立开发者控制台页面：`/mia/debug`；生产数据通过 API Master 登录会话服务端鉴权后代理，不信任浏览器传入邮箱。
+- [x] 仅 `MIA_DEBUG_ALLOWED_EMAILS` 中的 API Master 账号可访问；默认值为已确认的 Lisa 账号。未登录返回登录要求，其他账号返回 404。
+- [x] API Master 服务端解析真实用户和已绑定 Telegram ID，Mia 只按该 Telegram ID 返回请求数据，避免跨用户读取。
+- [x] 已实现请求快照 SQLite 存储：聊天、意图路由、视觉问答、图片/视频任务和每 10 轮记忆整理均记录状态、模型、耗时、Prompt 引用及可审计输入/输出摘要。
+- [x] 已实现脱敏：API Key、Bot Token、授权头、Telegram 文件下载 URL、Base64 和二进制正文不写入日志；日志默认保留 7 天、每个开发者最多 100 条，可手动清空。
+- [x] 已实现五层上下文展示：Mia 规则、会话元数据、长期记忆、滚动摘要、按时间顺序的消息/回复关系/当前消息/图片角色。
+- [x] 已增加只读 `Prompts` Tab，展示 Prompt 稳定 ID、版本、用途和完整当前文本；请求详情可跳转到实际使用的 Prompt 版本。生产 Prompt 不可在控制台编辑。
+- [x] 已增加 `Memory` Tab，展示当前长期记忆、滚动摘要、10 轮进度和压缩历史；暂无压缩历史时明确显示空状态。
+- [x] 已完成本地浏览器验收：桌面 Requests/Memory/Prompts 可用，五层上下文可展开；390×844 移动视口无横向溢出，长文本可换行。
+- [x] 已完成代码校验：Mia 69/69 测试、ESLint、服务端与前端 TypeScript 检查、生产构建和 `git diff --check` 通过；new-api `go test ./controller ./router` 通过。
+- [ ] 尚未完成本次变更的 GitHub 推送、生产部署和真实登录账号验收。

@@ -7,6 +7,9 @@ import { ResolverError } from "../clients/apimaster.js";
 import { DEFAULT_MODELS } from "../constants.js";
 import { buildConversationMessages, loadConversationContext } from "../context/conversation.js";
 import type { ContextCompactor } from "../context/compactor.js";
+import { debugContextLayers } from "../debug/context.js";
+import type { DebugRecorder } from "../debug/recorder.js";
+import type { DebugContextLayers, DebugRequestKind } from "../debug/types.js";
 import { mediaIntentSchema, type IntentRouter, type RoutedIntent } from "../intent/router.js";
 import { MediaInputError, downloadTelegramImages } from "../media/intake.js";
 import type { MediaStore } from "../media/store.js";
@@ -14,7 +17,7 @@ import type { MediaInput, MediaJob, PendingMediaIntent } from "../media/types.js
 import { sameModelId, type ModelSettingsService, type SettingsSnapshot } from "../settings/service.js";
 import type { ContextStore } from "../storage/store.js";
 import type { ConversationScope } from "../storage/types.js";
-import { MIA_SYSTEM_PROMPT } from "../prompts.js";
+import { MIA_SYSTEM_PROMPT, promptReference } from "../prompts.js";
 import { botText, mediaJobLocale, resolveBotLocale, type BotLocale } from "./localization.js";
 import { userFacingError } from "./messages.js";
 import { promptFromMessage, shouldRespond } from "./policy.js";
@@ -37,6 +40,7 @@ interface BotDependencies {
   mediaStore?: MediaStore;
   botToken?: string;
   resultMaxBytes?: number;
+  debug?: DebugRecorder;
 }
 
 interface IncomingRequest {
@@ -266,19 +270,33 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     const scope = conversationScope(message);
     const recent = dependencies.contexts.listRecentMessages?.(scope, 8) ?? [];
     const summary = dependencies.contexts.getLatestSummary?.(scope)?.content ?? null;
+    let debugId: string | null = null;
     try {
       await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
       const routerKey = await dependencies.client.resolveAPIKey(message.from.id, dependencies.router.model);
-      const conversationMessages = await buildRequestContext(
+      const requestContext = await buildRequestContext(
         ctx,
         message,
         dependencies,
         activeInputs[0] ?? null,
         pending?.intent ?? null,
       );
-      const fallbackImages = conversationMessages === null && inputs.length > 0
+      const fallbackImages = requestContext === null && inputs.length > 0
         ? await downloadTelegramImages(ctx.api, dependencies.botToken ?? "", inputs)
         : [];
+      debugId = dependencies.debug?.start({
+        telegramUserId: message.from.id,
+        chatId: message.chat.id,
+        chatType: message.chat.type,
+        messageId: message.message_id,
+        kind: "intent_router",
+        model: dependencies.router.model,
+        promptRefs: [promptReference("mia.system"), promptReference("mia.intent-router")],
+        contextLayers: requestContext?.layers ?? null,
+        requestPreview: { text: promptFromMessage(policyInput, identity), replyToMessageId: message.reply_to_message?.message_id ?? null },
+        media: inputs.map((input) => ({ messageId: input.messageId, type: input.type, mimeType: input.mimeType })),
+        details: { phase: "intent_and_response" },
+      }) ?? null;
       routed = await dependencies.router.classify({
         text: promptFromMessage(policyInput, identity),
         mediaType: inputs.length > 0 ? "image" : "none",
@@ -291,9 +309,20 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           role: item.senderUserId === ctx.me.id ? "assistant" as const : "user" as const,
           text: item.text ?? item.caption ?? `[${item.contentType}]`,
         })),
-        ...(conversationMessages ? { conversationMessages } : {}),
+        ...(requestContext ? { conversationMessages: requestContext.messages } : {}),
       }, routerKey, fallbackImages);
+      const kind: DebugRequestKind = routed.intent === "chat" ? "chat" : routed.intent === "vision_qa" ? "vision_qa" : "intent_router";
+      dependencies.debug?.finish(debugId, {
+        status: "succeeded",
+        responsePreview: routed,
+        details: { phase: "intent_and_response", routedIntent: routed.intent, fallbackReason: routed.fallbackReason ?? null },
+        kind,
+      });
     } catch (error) {
+      dependencies.debug?.finish(debugId, {
+        status: "failed",
+        errorCode: debugErrorCode(error),
+      });
       await replyTo(ctx, message, error instanceof MediaInputError
         ? mediaError(error, locale)
         : userFacingError(error, dependencies.router.model, locale));
@@ -371,6 +400,7 @@ async function executeMediaIntent(
 ): Promise<void> {
   if (!message.from || !dependencies.mediaStore || !dependencies.botToken) return;
   const locale = resolveBotLocale(message.from.language_code);
+  let debugId: string | null = null;
   try {
     const snapshot = dependencies.settings.getSnapshot
       ? await dependencies.settings.getSnapshot(message.from.id)
@@ -393,11 +423,23 @@ async function executeMediaIntent(
       const apiKey = await dependencies.client.resolveAPIKey(message.from.id, model);
       const activeMedia = inputs.find((input) => input.messageId !== message.message_id &&
         input.messageId !== message.reply_to_message?.message_id) ?? null;
-      const conversationMessages = await buildRequestContext(ctx, message, dependencies, activeMedia, "vision_qa");
-      const response = conversationMessages
+      const requestContext = await buildRequestContext(ctx, message, dependencies, activeMedia, "vision_qa");
+      debugId = dependencies.debug?.start({
+        telegramUserId: message.from.id,
+        chatId: message.chat.id,
+        chatType: message.chat.type,
+        messageId: message.message_id,
+        kind: "vision_qa",
+        model,
+        promptRefs: [promptReference("mia.system")],
+        contextLayers: requestContext?.layers ?? null,
+        requestPreview: { instruction: routed.instruction },
+        media: inputs.map((input) => ({ messageId: input.messageId, type: input.type, mimeType: input.mimeType })),
+      }) ?? null;
+      const response = requestContext
         ? await dependencies.client.chatMessages(apiKey, model, [
           { role: "system", content: MIA_SYSTEM_PROMPT },
-          ...conversationMessages,
+          ...requestContext.messages,
         ])
         : await dependencies.client.vision(
           apiKey,
@@ -405,6 +447,7 @@ async function executeMediaIntent(
           routed.instruction,
           await downloadTelegramImages(ctx.api, dependencies.botToken, inputs),
         );
+      dependencies.debug?.finish(debugId, { status: "succeeded", responsePreview: response });
       await sendConversationResponse(ctx, message, response, dependencies);
       return;
     }
@@ -434,6 +477,7 @@ async function executeMediaIntent(
       }));
     }
   } catch (error) {
+    dependencies.debug?.finish(debugId, { status: "failed", errorCode: debugErrorCode(error) });
     await replyTo(ctx, message, mediaError(error, locale));
   }
 }
@@ -686,6 +730,7 @@ async function handleMediaAdmin(ctx: Context, enabled: boolean, store: MediaStor
 async function runChat(ctx: Context, prompt: string, dependencies: BotDependencies): Promise<void> {
   if (!ctx.from || !ctx.chat) return;
   const locale = resolveBotLocale(ctx.from.language_code);
+  let debugId: string | null = null;
   try {
     await ctx.api.sendChatAction(ctx.chat.id, "typing", ctx.message ? threadOption(ctx.message) : {});
     const selectedModel = dependencies.settings.getPreferences(ctx.from.id).chatModel ?? DEFAULT_MODELS.chat;
@@ -700,16 +745,30 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
       await ctx.reply(botText(locale, "chatModelFallback", { selected: selectedModel, model }));
     }
     if (!ctx.message) return;
-    const conversationMessages = await buildRequestContext(ctx, ctx.message, dependencies, null, null);
-    const response = conversationMessages
+    const requestContext = await buildRequestContext(ctx, ctx.message, dependencies, null, null);
+    debugId = dependencies.debug?.start({
+      telegramUserId: ctx.from.id,
+      chatId: ctx.chat.id,
+      chatType: ctx.chat.type,
+      messageId: ctx.message.message_id,
+      kind: "chat",
+      model,
+      promptRefs: [promptReference("mia.system")],
+      contextLayers: requestContext?.layers ?? null,
+      requestPreview: { text: prompt },
+      media: requestContext?.layers.recentMessages ?? null,
+    }) ?? null;
+    const response = requestContext
       ? await dependencies.client.chatMessages(apiKey, model, [
         { role: "system", content: MIA_SYSTEM_PROMPT },
-        ...conversationMessages,
+        ...requestContext.messages,
       ])
       : await dependencies.client.chat(apiKey, model, prompt);
+    dependencies.debug?.finish(debugId, { status: "succeeded", responsePreview: response });
     const assistantMessageId = await sendConversationResponse(ctx, ctx.message, response, dependencies);
     recordCompletedChatTurn(ctx.message, assistantMessageId, dependencies);
   } catch (error) {
+    dependencies.debug?.finish(debugId, { status: "failed", errorCode: debugErrorCode(error) });
     dependencies.logger.warn({ err: error, telegramUserId: ctx.from.id, updateId: ctx.update.update_id }, "Telegram chat request failed");
     const model = dependencies.settings.getPreferences(ctx.from.id).chatModel ?? DEFAULT_MODELS.chat;
     await ctx.reply(userFacingError(error, model, locale));
@@ -731,7 +790,7 @@ async function buildRequestContext(
   dependencies: BotDependencies,
   activeMedia: MediaInput | null,
   currentTask: string | null,
-) {
+): Promise<{ messages: ReturnType<typeof buildConversationMessages>; layers: DebugContextLayers } | null> {
   if (!message.from || !ctx.me || !dependencies.botToken || !hasContextReader(dependencies.contexts)) return null;
   const context = loadConversationContext({
     store: dependencies.contexts,
@@ -754,7 +813,17 @@ async function buildRequestContext(
   const images = context.mediaInputs.length === 0
     ? []
     : await downloadTelegramImages(ctx.api, dependencies.botToken, context.mediaInputs);
-  return buildConversationMessages(context, images, ctx.me.id);
+  return {
+    messages: buildConversationMessages(context, images, ctx.me.id),
+    layers: debugContextLayers(context),
+  };
+}
+
+function debugErrorCode(error: unknown): string {
+  if (error instanceof ResolverError) return error.code;
+  if (error instanceof MediaInputError) return error.code;
+  if (error instanceof Error && error.name) return error.name.slice(0, 80);
+  return "unknown_error";
 }
 
 function recordCompletedChatTurn(

@@ -19,6 +19,7 @@ const environmentSchema = z.object({
   MIA_PUBLIC_BASE_URL: z.url().optional(),
   MEDIA_WORKER_INTERVAL_MS: z.coerce.number().int().min(1000).max(60000).default(5000),
   MEDIA_RESULT_MAX_BYTES: z.coerce.number().int().min(1_000_000).max(2_000_000_000).default(50_000_000),
+  MIA_DEBUG_ALLOWED_EMAILS: z.string().default("lisa.luoyf@gmail.com"),
 });
 
 export interface AppConfig {
@@ -38,6 +39,7 @@ export interface AppConfig {
   publicBaseUrl: string | null;
   mediaWorkerIntervalMs: number;
   mediaResultMaxBytes: number;
+  debugAllowedEmails: string[];
 }
 
 function withoutTrailingSlash(value: string): string {
@@ -65,5 +67,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     publicBaseUrl: parsed.MIA_PUBLIC_BASE_URL === undefined ? null : withoutTrailingSlash(parsed.MIA_PUBLIC_BASE_URL),
     mediaWorkerIntervalMs: parsed.MEDIA_WORKER_INTERVAL_MS,
     mediaResultMaxBytes: parsed.MEDIA_RESULT_MAX_BYTES,
+    debugAllowedEmails: [...new Set(parsed.MIA_DEBUG_ALLOWED_EMAILS.split(",")
+      .map((email) => email.trim().toLocaleLowerCase()).filter(Boolean))],
   };
 }

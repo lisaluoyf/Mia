@@ -86,6 +86,16 @@ const modelCatalogResponseSchema = z.object({
   }),
 });
 
+const debugIdentitiesResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({
+    identities: z.array(z.object({
+      email: z.string().email(),
+      telegram_user_id: z.string().regex(/^\d+$/),
+    })),
+  }),
+});
+
 export interface ModelCatalog {
   apimasterUserId: number;
   models: ModelOption[];
@@ -205,6 +215,32 @@ export class APIMasterClient {
       throw new ResolverError("service_unavailable", response.status);
     }
     return parsed.data.data.api_key;
+  }
+
+  async resolveDebugTelegramUsers(emails: readonly string[]): Promise<number[]> {
+    if (emails.length === 0) return [];
+    let response: Response;
+    try {
+      response = await this.fetcher(
+        `${this.options.internalBaseUrl}/api/user/internal/mia-debug-identities`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-mia-internal-key": this.options.serviceKey,
+          },
+          body: JSON.stringify({ emails }),
+          signal: AbortSignal.timeout(this.options.timeoutMs),
+        },
+      );
+    } catch {
+      throw new ResolverError("service_unavailable");
+    }
+    if (!response.ok) throw new ResolverError("service_unavailable", response.status);
+    const payload: unknown = await response.json().catch(() => undefined);
+    const parsed = debugIdentitiesResponseSchema.safeParse(payload);
+    if (!parsed.success) throw new ResolverError("service_unavailable", response.status);
+    return parsed.data.data.identities.map((identity) => Number(identity.telegram_user_id));
   }
 
   async listModels(telegramUserId: number): Promise<ModelCatalog> {

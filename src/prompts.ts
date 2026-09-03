@@ -83,3 +83,52 @@ ${input.summary ?? "（无）"}
 最近 10 轮对话（从早到晚）：
 ${input.dialogue}`;
 }
+
+export interface PromptDefinition {
+  id: string;
+  version: number;
+  name: string;
+  purpose: string;
+  text: string;
+}
+
+export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
+  {
+    id: "mia.system",
+    version: 1,
+    name: "Mia System",
+    purpose: "聊天、视觉理解和所有用户请求的基础行为规则",
+    text: MIA_SYSTEM_PROMPT,
+  },
+  {
+    id: "mia.intent-router",
+    version: 1,
+    name: "Intent Router",
+    purpose: "判断聊天、看图、图片生成/编辑和视频生成意图",
+    text: INTENT_ROUTER_SYSTEM_PROMPT,
+  },
+  {
+    id: "mia.context-compaction",
+    version: 1,
+    name: "Context Compaction",
+    purpose: "每 10 轮整理长期记忆与滚动会话摘要",
+    text: CONTEXT_COMPACTION_SYSTEM_PROMPT,
+  },
+  {
+    id: "mia.context-compaction-input",
+    version: 1,
+    name: "Context Compaction Input",
+    purpose: "把已有记忆、已有摘要和最近 10 轮按固定结构交给压缩模型",
+    text: contextCompactionInputPrompt({
+      memories: "{{existing_memories}}",
+      summary: "{{earlier_conversation_summary}}",
+      dialogue: "{{latest_10_turns_oldest_to_newest}}",
+    }),
+  },
+] as const;
+
+export function promptReference(id: PromptDefinition["id"]): { id: string; version: number } {
+  const prompt = PROMPT_LIBRARY.find((item) => item.id === id);
+  if (!prompt) throw new Error(`Unknown prompt: ${id}`);
+  return { id: prompt.id, version: prompt.version };
+}
