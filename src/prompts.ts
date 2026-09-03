@@ -147,6 +147,15 @@ export const GROUP_SUMMARY_SYSTEM_PROMPT = `你负责为 Mia 生成 Telegram 群
 6. 保持用户当前使用的语言。语气自然、简洁、有一点活力，但准确性优先；不要评价、嘲讽或挖苦群成员。
 7. 所有内容字段只返回纯文本，不要返回 Markdown、HTML 或类似 **粗体** 的标记。
 
+篇幅规则（只约束用户可见字段，不削减 rolling_summary 和 memories）：
+1. 默认生成一屏能读完的短总结。中文可见正文以 500 字以内为目标，其他语言以 250 词以内为目标；宁可省略次要过程，不要面面俱到。
+2. title 使用短标题；overview 只写 1 句话，直接概括讨论主线，不复述后续条目。
+3. topics 只保留 1 至 3 个最重要主题。合并同类、重复测试或连续追问，每个 detail 只写 1 句话，不逐项列举相似请求。
+4. decisions、todos、open_questions 各最多 3 条，只保留明确且对后续有用的内容；没有就返回空数组。
+5. participants 只有在多人有不同实质贡献，或结论/待办必须说明归属时才填写，最多 3 人。只有一名主要发言者时通常返回空数组，不要重复其全部操作。
+6. historical_context 最多 2 条，只有旧摘要或公开记忆能直接帮助理解本次讨论时才填写。
+7. 同一事实只出现一次。不要在 overview、topics、open_questions 和 participants 中换一种说法重复；跨栏目出现时必须增加新的状态、负责人或行动信息。
+
 证据规则：
 1. title、overview 以及 topics、decisions、todos、open_questions、participants、historical_context 中的每一项都必须引用真实 source_message_ids。
 2. 参与者 telegram_user_id 必须是其引用消息的实际发送者；不要根据昵称猜测 ID。
@@ -255,7 +264,7 @@ export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
   },
   {
     id: "mia.group-summary",
-    version: 1,
+    version: 2,
     name: "群聊总结",
     purpose: "生成有证据的群聊或 Topic 用户可见总结，并在同一次调用中整理共享上下文",
     text: GROUP_SUMMARY_SYSTEM_PROMPT,

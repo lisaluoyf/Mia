@@ -112,6 +112,9 @@ describe("Mia group summary service", () => {
     expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("问句不是事实");
     expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("其他 Bot 回复不可见");
     expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("不要使用“第 N 轮”");
+    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("中文可见正文以 500 字以内为目标");
+    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("topics 只保留 1 至 3 个最重要主题");
+    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("同一事实只出现一次");
 
     saveMessage(store, 20, 12, 100, "总结回复");
     expect(service.complete(prepared!, 20, [20])).toBe(true);
@@ -164,7 +167,7 @@ describe("Mia group summary service", () => {
     const debugFinish: unknown = debug.finish.mock.calls[0]?.[1];
     expect(debugStart).toMatchObject({
       kind: "group_summary",
-      promptRefs: [{ id: "mia.group-summary", version: 1 }, { id: "mia.group-summary-input", version: 1 }],
+      promptRefs: [{ id: "mia.group-summary", version: 2 }, { id: "mia.group-summary-input", version: 1 }],
       details: { selectedMessageCount: 300, truncated: true },
     });
     expect(debug.finish.mock.calls[0]?.[0]).toBe("summary-debug");
@@ -242,7 +245,7 @@ describe("Mia group summary service", () => {
   });
 
   it("registers the user-visible summary prompts independently from background compaction", () => {
-    expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-summary")).toMatchObject({ version: 1 });
+    expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-summary")).toMatchObject({ version: 2 });
     expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-summary-input")).toMatchObject({ version: 1 });
     expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-context-compaction")).toMatchObject({ version: 1 });
   });

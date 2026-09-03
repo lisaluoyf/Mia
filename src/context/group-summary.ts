@@ -41,12 +41,12 @@ const memorySchema = z.object({
 const groupSummaryResultSchema = z.object({
   title: evidenceTextSchema,
   overview: evidenceTextSchema,
-  topics: z.array(topicSchema).max(30),
-  decisions: z.array(evidenceTextSchema).max(50),
-  todos: z.array(evidenceTextSchema).max(50),
-  open_questions: z.array(evidenceTextSchema).max(50),
-  participants: z.array(participantSchema).max(100),
-  historical_context: z.array(evidenceTextSchema).max(30),
+  topics: z.array(topicSchema).max(3),
+  decisions: z.array(evidenceTextSchema).max(3),
+  todos: z.array(evidenceTextSchema).max(3),
+  open_questions: z.array(evidenceTextSchema).max(3),
+  participants: z.array(participantSchema).max(3),
+  historical_context: z.array(evidenceTextSchema).max(2),
   rolling_summary: z.string().trim().max(12_000),
   memories: z.array(memorySchema).max(100),
 }).strict();
@@ -69,7 +69,7 @@ const GROUP_SUMMARY_JSON_SCHEMA = {
   properties: {
     title: evidenceTextJsonSchema,
     overview: evidenceTextJsonSchema,
-    topics: { type: "array", maxItems: 30, items: {
+    topics: { type: "array", maxItems: 3, items: {
       type: "object", additionalProperties: false, required: ["title", "detail", "source_message_ids"],
       properties: {
         title: { type: "string", minLength: 1, maxLength: 300 },
@@ -77,10 +77,10 @@ const GROUP_SUMMARY_JSON_SCHEMA = {
         source_message_ids: evidenceTextJsonSchema.properties.source_message_ids,
       },
     } },
-    decisions: { type: "array", maxItems: 50, items: evidenceTextJsonSchema },
-    todos: { type: "array", maxItems: 50, items: evidenceTextJsonSchema },
-    open_questions: { type: "array", maxItems: 50, items: evidenceTextJsonSchema },
-    participants: { type: "array", maxItems: 100, items: {
+    decisions: { type: "array", maxItems: 3, items: evidenceTextJsonSchema },
+    todos: { type: "array", maxItems: 3, items: evidenceTextJsonSchema },
+    open_questions: { type: "array", maxItems: 3, items: evidenceTextJsonSchema },
+    participants: { type: "array", maxItems: 3, items: {
       type: "object", additionalProperties: false,
       required: ["telegram_user_id", "name", "contribution", "source_message_ids"],
       properties: {
@@ -90,7 +90,7 @@ const GROUP_SUMMARY_JSON_SCHEMA = {
         source_message_ids: evidenceTextJsonSchema.properties.source_message_ids,
       },
     } },
-    historical_context: { type: "array", maxItems: 30, items: evidenceTextJsonSchema },
+    historical_context: { type: "array", maxItems: 2, items: evidenceTextJsonSchema },
     rolling_summary: { type: "string", maxLength: 12000 },
     memories: { type: "array", maxItems: 100, items: {
       type: "object", additionalProperties: false, required: ["category", "content", "source_message_id"],
