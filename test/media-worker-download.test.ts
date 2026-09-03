@@ -78,6 +78,7 @@ function createWorker(publicBaseUrl: string | null) {
     sendDocument: vi.fn(),
     sendVideo: vi.fn(),
     sendMessage: vi.fn(),
+    deleteMessage: vi.fn().mockResolvedValue(true),
     editMessageText: vi.fn(),
     editMessageReplyMarkup: vi.fn(),
   };

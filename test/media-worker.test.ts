@@ -187,6 +187,7 @@ describe("media worker transient regeneration status", () => {
       message_id: 82,
       photo: [{ file_id: "edited-photo", file_unique_id: "edited-unique", width: 1024, height: 1024 }],
     });
+    const deleteMessage = vi.fn().mockResolvedValue(true);
     const pollImage = vi.fn();
     const worker = new MediaWorker({
       client: {
@@ -207,6 +208,7 @@ describe("media worker transient regeneration status", () => {
       api: {
         getFile: vi.fn().mockResolvedValue({ file_path: "photos/source.png", file_size: source.length }),
         sendPhoto,
+        deleteMessage,
         editMessageText: vi.fn(),
       } as unknown as Api,
       botToken: "123:test",
@@ -221,6 +223,8 @@ describe("media worker transient regeneration status", () => {
 
     expect(pollImage).not.toHaveBeenCalled();
     expect(sendPhoto).toHaveBeenCalledOnce();
+    expect(deleteMessage).toHaveBeenCalledWith(42, 81);
+    expect(sendPhoto.mock.invocationCallOrder[0]).toBeLessThan(deleteMessage.mock.invocationCallOrder[0] ?? 0);
     expect(store.getJobByIdempotencyKey("message:edit-1")).toMatchObject({
       status: "succeeded",
       upstreamTaskId: null,

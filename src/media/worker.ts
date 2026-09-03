@@ -263,6 +263,7 @@ export class MediaWorker {
           await this.options.api.sendMessage(job.chatId, botText(locale, "videoReadyLink", {
             url: `${this.options.publicBaseUrl}/mia/media/download/${token.token}`,
           }), replyOptions(job));
+          await this.clearCompletedStatus(job);
           this.options.store.transitionJob(job.id, [job.status], "succeeded", {
             progress: 100,
             resultUrl: state.resultUrl,
@@ -341,9 +342,7 @@ export class MediaWorker {
         mediaGroupId: null,
       });
     }
-    if (hasEphemeralStatus(job) && job.statusMessageId) {
-      await this.options.api.deleteMessage(job.chatId, job.statusMessageId).catch(() => undefined);
-    }
+    await this.clearCompletedStatus(job);
     this.options.store.transitionJob(job.id, [job.status], "succeeded", {
       statusMessageId: sent.message_id,
       progress: 100,
@@ -391,9 +390,7 @@ export class MediaWorker {
       ...replyOptions(job),
       reply_markup: keyboard,
     });
-    if (hasEphemeralStatus(job) && job.statusMessageId) {
-      await this.options.api.deleteMessage(job.chatId, job.statusMessageId).catch(() => undefined);
-    }
+    await this.clearCompletedStatus(job);
     this.options.store.saveTelegramMedia(job.chatId, job.threadId, {
       position: 0,
       messageId: sent.message_id,
@@ -424,6 +421,11 @@ export class MediaWorker {
       ...replyOptions(job),
       ...(keyboard ? { reply_markup: keyboard } : {}),
     }).catch(() => undefined);
+  }
+
+  private async clearCompletedStatus(job: MediaJob): Promise<void> {
+    if (!job.statusMessageId) return;
+    await this.options.api.deleteMessage(job.chatId, job.statusMessageId).catch(() => undefined);
   }
 
   private async updateStatus(job: MediaJob, text: string): Promise<void> {

@@ -63,6 +63,7 @@ describe("sticker media delivery", () => {
       message_id: 9,
       sticker: { file_id: "sticker-file", file_unique_id: "sticker-unique" },
     });
+    const deleteMessage = vi.fn().mockResolvedValue(true);
     const worker = new MediaWorker({
       client: {
         resolveAPIKey: vi.fn().mockResolvedValue("user-key"),
@@ -83,6 +84,7 @@ describe("sticker media delivery", () => {
         createNewStickerSet,
         getStickerSet,
         sendSticker,
+        deleteMessage,
         editMessageText: vi.fn(),
       } as unknown as Api,
       botToken: "123:test",
@@ -95,11 +97,11 @@ describe("sticker media delivery", () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(generated, {
       headers: { "content-type": "image/jpeg" },
     })));
-    return { worker, createNewStickerSet, getStickerSet, sendSticker, job: claimed.job };
+    return { worker, createNewStickerSet, getStickerSet, sendSticker, deleteMessage, job: claimed.job };
   }
 
   it("creates a sender-owned pack, sends its real sticker, and stores a valid WebP", async () => {
-    const { worker, createNewStickerSet, getStickerSet, sendSticker, job } = await setup();
+    const { worker, createNewStickerSet, getStickerSet, sendSticker, deleteMessage, job } = await setup();
 
     await worker.tick();
 
@@ -115,6 +117,8 @@ describe("sticker media delivery", () => {
     expect(sendSticker).toHaveBeenCalledWith(42, "sticker-file", expect.objectContaining({
       reply_parameters: { message_id: 7, allow_sending_without_reply: true },
     }));
+    expect(deleteMessage).toHaveBeenCalledWith(42, 8);
+    expect(sendSticker.mock.invocationCallOrder[0]).toBeLessThan(deleteMessage.mock.invocationCallOrder[0] ?? 0);
     const replyMarkup = JSON.stringify(sendSticker.mock.calls[0]?.[2]);
     expect(replyMarkup).toContain(`https://t.me/addstickers/${setName}`);
     expect(replyMarkup).toContain(`media:${job.id}:again`);
