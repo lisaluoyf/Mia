@@ -64,7 +64,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 
 | 组件 | 当前基线 | 状态 |
 | --- | --- | --- |
-| Mia | `70c6774` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、媒体能力和开发者 Debug 控制台 |
+| Mia | `2a684df` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、媒体能力、Responses 自动 Web Search 和开发者 Debug 控制台 |
 | APIMaster new-api | `9130c1d` | GHCR 镜像蓝绿部署，提供 Telegram 用户 Key 解析、规范化 Mia 模型目录、产品名和 Debug 身份解析 |
 | APIMaster Web | `7d62618` | Next.js PM2 双实例运行，提供登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
 | Mini App | `/mia/` | 已由 Nginx 公开，Telegram 默认菜单按钮 `Mia` 已配置 |
@@ -285,6 +285,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 | `762c7bd` | `lisaluoyf/Mia` | 参考图改图切换到 APIMaster 网页同款 `/v1/images/edits` 同步链路 |
 | `a124a56` | `lisaluoyf/Mia` | 私聊前 100 轮用户画像引导、25 种语言角色按钮、画像长期记忆和 Debug 审计 |
 | `70c6774` | `lisaluoyf/Mia` | 群聊与 Topic 上下文压缩、公开群记忆、原子水位和管理员清除保护 |
+| `2a684df` | `lisaluoyf/Mia` | 核心意图与文字回复迁移到 Responses、自动 Web Search 和 Debug 搜索审计 |
 
 ## 当前验证状态
 
@@ -306,6 +307,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - Mia 私聊用户画像引导：提交 `a124a56` 已实现并随生产 `70c6774` 发布；只在私聊前 100 个成功轮次内寻找闲聊机会，最多主动询问两次且第二次至少间隔 20 轮。角色、称呼和主要目标写入用户长期记忆；群聊和 Topic 不读取或更新 onboarding 状态。隔离提交通过 93/93 测试、ESLint、前后端 TypeScript、生产构建和 `git diff --check`（2026-09-03）。
 - Mia 群共享上下文：提交 `70c6774` 已独立提交、推送并部署；100/100 全量测试、ESLint、服务端与前端 TypeScript、生产构建和 `git diff --check` 通过；覆盖 50 条消息/12,000 tokens 双阈值、摘要与记忆单次模型调用、原子水位、跨 Topic 来源拦截、群记忆继承、触发者公开发言优先、个人记忆隔离和群清除管理员权限（2026-09-03）。
 - Mia 免费文字聊天：提交 `74dca62` 已从 GitHub 精确 SHA 由生产服务器构建并发布，耗时 8 秒；未绑定或无可用 Token 的用户使用仅限 `gpt-5.4` 的部署凭证完成私聊、群聊、意图路由和上下文整理，媒体任务保持用户 Key 严格门控并提供三类激活入口。118/118 全量测试、Lint、前后端 TypeScript、生产构建和 `git diff --check` 通过；生产 `/health` 正常，PM2 `online` 且 0 次重启，访客 `gpt-5.4` 实际调用 HTTP 200，错误日志为空，服务器保留 3 个 release（2026-09-03）。
+- Mia Responses 与 Web Search：提交 `2a684df` 已从 GitHub 精确 SHA 由生产服务器构建并发布；核心意图判断和最终文字回复改用 `/v1/responses`，由 `gpt-5.4` 通过 `tool_choice: auto` 自主决定是否调用 `web_search`。119/119 全量测试、ESLint、前后端 TypeScript、生产构建和 `git diff --check` 通过；真实 APIMaster strict JSON Schema 请求 HTTP 200 并执行 1 次搜索，完整生产 `IntentRouter` 实测返回北京次日天气。Telegram 回复默认不展示引用来源，查询词、调用次数和隐藏来源保留在 Debug；生产 `/health` 正常，PM2 `online` 且 0 次重启，错误日志为空，APIMaster 只读生产冒烟 19/19 通过，未修改或重启 APIMaster Web 与 new-api（2026-09-03）。
 - Mia `70c6774` 生产验收：服务器从 GitHub 精确 SHA 构建，内部 `/health` 返回 200，PM2 在线且 0 次重启，运行目录与 release 元数据均指向 `70c67745c9ff19d8fe6ea81ce4db3c3a1dbd8e22`；SQLite 完整性为 `ok`，`mia_user_onboarding`、`mia_summaries` 和 `mia_memories` 均存在，新进程错误日志为空。APIMaster Web、new-api、Flask 和静态资源只读冒烟为 19/19 通过，未修改或重启 APIMaster 主服务（2026-09-03）。
 
 ## 下一阶段优先级
