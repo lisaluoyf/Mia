@@ -105,6 +105,13 @@ function mediaFromMessage(message: Message, position = 0): MediaInput | null {
   return null;
 }
 
+function messageText(message: Message | undefined): string | null {
+  if (!message) return null;
+  if ("text" in message) return message.text;
+  if ("caption" in message) return message.caption ?? null;
+  return null;
+}
+
 function captureMessage(message: StorableMessage, contexts: BotDependencies["contexts"]): void {
   const from = message.from;
   if (from) {
@@ -264,6 +271,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   const explicit = parseExplicitCommand(request.text);
   const explicitSummaryPhrase = isExplicitGroupSummaryPhrase(promptFromMessage(policyInput, identity));
   const namedMediaReply = message.reply_to_message !== undefined && /^(?:@?mia)(?:\s|[,，:：])/i.test(request.text.trim());
+  const repliedMessageText = messageText(message.reply_to_message);
   const pending = dependencies.mediaStore.getPendingIntent?.(scopeFor(message)) ?? null;
   const suppliesPendingMedia = pending !== null && request.inputs.length > 0;
   if (!shouldRespond(policyInput, identity) && !explicit && !namedMediaReply && !explicitSummaryPhrase && !suppliesPendingMedia) return;
@@ -402,7 +410,11 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         model: routerCredential.model,
         promptRefs: [promptReference("mia.intent-router")],
         contextLayers: requestContext?.layers ?? null,
-        requestPreview: { text: promptFromMessage(policyInput, identity), replyToMessageId: message.reply_to_message?.message_id ?? null },
+        requestPreview: {
+          currentRequestText: promptFromMessage(policyInput, identity),
+          repliedMessageText,
+          replyToMessageId: message.reply_to_message?.message_id ?? null,
+        },
         media: mediaCandidates.map((candidate) => ({
           messageId: candidate.messageId,
           senderUserId: candidate.senderUserId,
@@ -431,6 +443,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         mediaCount: request.inputs.length,
         replyMediaCount: replyInputs.length,
         replyToMessageId: message.reply_to_message?.message_id ?? null,
+        repliedMessageText,
         activePrivateImage: active !== null,
         allowGroupSummary: message.chat.type !== "private",
         summary,

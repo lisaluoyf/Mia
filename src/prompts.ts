@@ -38,6 +38,8 @@ export const INTENT_ROUTER_SYSTEM_PROMPT = `${MIA_SYSTEM_PROMPT}
 
 规则：
 - 当前消息优先于历史消息；图片选择顺序是当前消息图片、明确回复图片、当前用户近期图片、同一 Topic 其他近期图片。
+- current_request_text 是用户这一次新写的请求；replied_message_text 是被回复消息里的旧文字。回复只表示图片或消息引用关系，不表示旧文字也是本次要求。
+- 生成 instruction 时以 current_request_text 为准。不要把 replied_message_text 或历史消息中的旧风格、表情、动作自动并入 instruction；只有 current_request_text 明确要求“继续”“保持”“和之前一样”等继承关系时才使用旧要求。
 - media_candidates 是服务端允许选择的图片集合。需要图片时，把实际选中的 message_id 按原顺序写入 media_message_ids；不得返回集合之外的 ID。
 - 用户明确回复的图片可以由群内任何成员发送；“这张图、刚才的图、上一张图”等指代只有在候选明确时才选择，多个候选无法消解时降低 confidence。
 - media_source 对应当前消息、回复、私聊活动图片或 context；不需要图片时必须为 none，media_message_ids 必须为空数组。
@@ -224,7 +226,7 @@ export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
   },
   {
     id: "mia.intent-router",
-    version: 6,
+    version: 7,
     name: "意图路由",
     purpose: "实际发送的组合 Prompt：包含 mia.system，并判断意图、实时搜索、闲聊机会和明确画像更新",
     text: INTENT_ROUTER_SYSTEM_PROMPT,

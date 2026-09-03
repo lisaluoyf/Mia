@@ -57,6 +57,7 @@ export interface IntentRouterInput {
   mediaCount: number;
   replyMediaCount: number;
   replyToMessageId?: number | null;
+  repliedMessageText?: string | null;
   activePrivateImage: boolean;
   allowGroupSummary?: boolean;
   summary?: string | null;
@@ -208,7 +209,8 @@ export class IntentRouter {
       sent_at: message.sentAt ?? null,
     }));
     const contextPayload = {
-      text: input.text,
+      current_request_text: input.text,
+      replied_message_text: input.repliedMessageText ?? null,
       media: { type: input.mediaType, count: input.mediaCount },
       reply_media_count: input.replyMediaCount,
       reply_to_message_id: input.replyToMessageId ?? null,
@@ -241,6 +243,8 @@ export class IntentRouter {
       {
         role: "system",
         content: JSON.stringify({ current_request_routing_metadata: {
+          current_request_text: input.text,
+          replied_message_text: input.repliedMessageText ?? null,
           media: { type: input.mediaType, count: input.mediaCount },
           reply_media_count: input.replyMediaCount,
           reply_to_message_id: input.replyToMessageId ?? null,

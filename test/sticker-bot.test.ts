@@ -146,6 +146,55 @@ describe("Telegram sticker intent", () => {
     expect(store?.listJobInputs(job?.id ?? 0)).toHaveLength(1);
   });
 
+  it("passes a replied photo caption separately from the new sticker request", async () => {
+    const { bot, classify } = await setup();
+    const oldCaption = "提取图片里的龙猫，做一个比耶的表情";
+    const currentText = "用这个图片里的龙猫做一个大哭的表情，做成 TG 贴纸";
+    store?.saveTelegramMedia(42, null, {
+      position: 0,
+      messageId: 7,
+      fileId: "photo",
+      fileUniqueId: "photo-unique",
+      type: "photo",
+      mimeType: "image/jpeg",
+      mediaGroupId: null,
+    });
+    classify.mockResolvedValueOnce({
+      intent: "sticker_create", confidence: 0.99, instruction: "把龙猫做成大哭的表情", media_source: "reply",
+      media_message_ids: [7], image_options: { aspect_ratio: "1:1" }, video_options: null,
+      final_response: null, conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+      missingRequired: [],
+    });
+
+    await bot.handleUpdate({
+      update_id: 1006,
+      message: {
+        message_id: 8,
+        date: 1_788_333_700,
+        chat: { id: 42, type: "private", first_name: "Liz" },
+        from: { id: 42, is_bot: false, first_name: "Liz", language_code: "zh-CN" },
+        text: currentText,
+        reply_to_message: {
+          message_id: 7,
+          date: 1_788_333_600,
+          chat: { id: 42, type: "private", first_name: "Liz" },
+          from: { id: 42, is_bot: false, first_name: "Liz", language_code: "zh-CN" },
+          photo: [{ file_id: "photo", file_unique_id: "photo-unique", width: 1024, height: 1024 }],
+          caption: oldCaption,
+        },
+      },
+    } as never);
+
+    expect(classify.mock.calls[0]?.[0]).toMatchObject({
+      text: currentText,
+      repliedMessageText: oldCaption,
+      replyToMessageId: 7,
+      replyMediaCount: 1,
+    });
+    expect(store?.getJobByIdempotencyKey("message:42:8")?.instruction)
+      .toContain("把龙猫做成大哭的表情");
+  });
+
   it("does not create or classify a bare private photo", async () => {
     const { bot, classify, resolveAPIKey, calls } = await setup();
 

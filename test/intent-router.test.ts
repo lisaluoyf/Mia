@@ -95,6 +95,34 @@ describe("Mia intent router", () => {
     expect(JSON.stringify(structuredResponse.mock.calls[0]?.[4])).toContain("sticker_create");
   });
 
+  it("separates the current request from the replied message caption", async () => {
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      intent: "sticker_create", confidence: 0.99, instruction: "把龙猫做成大哭的表情", media_source: "reply",
+      media_message_ids: [7], image_options: { aspect_ratio: "1:1" }, video_options: null,
+      final_response: null, conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 1000 });
+
+    await router.classify({
+      ...base,
+      text: "用这个图片里的龙猫做一个大哭的表情，做成 TG 贴纸",
+      replyToMessageId: 7,
+      repliedMessageText: "提取图片里的龙猫，做一个比耶的表情",
+      replyMediaCount: 1,
+      mediaCandidates: [{
+        messageId: 7, senderUserId: 42, type: "photo", sentAt: "2026-09-03T14:00:00.000Z", source: "reply",
+      }],
+    }, "key");
+
+    const messages = structuredResponse.mock.calls[0]?.[2] as Array<{ content: unknown }>;
+    const metadata = JSON.parse(String(messages[1]?.content)) as {
+      current_request_text: string;
+      replied_message_text: string;
+    };
+    expect(metadata.current_request_text).toBe("用这个图片里的龙猫做一个大哭的表情，做成 TG 贴纸");
+    expect(metadata.replied_message_text).toBe("提取图片里的龙猫，做一个比耶的表情");
+  });
+
   it("returns final chat and vision answers from the same GPT-5.4 call", async () => {
     const structuredResponse = vi.fn().mockResolvedValue(response({
       intent: "vision_qa",
@@ -216,7 +244,7 @@ describe("Mia intent router", () => {
     const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
     expect(basePrompt).toMatchObject({ kind: "base" });
-    expect(routerPrompt).toMatchObject({ version: 6, kind: "composed", includes: ["mia.system"] });
+    expect(routerPrompt).toMatchObject({ version: 7, kind: "composed", includes: ["mia.system"] });
     expect(routerPrompt?.text).toContain(basePrompt?.text ?? "missing");
   });
 });
