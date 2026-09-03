@@ -64,8 +64,9 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 
 | 组件 | 当前基线 | 状态 |
 | --- | --- | --- |
-| Mia | `9fff043` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、媒体能力和群聊消息采集 |
-| APIMaster new-api | `d88afd5` | GHCR 镜像蓝绿部署，提供 Telegram 用户 Key 解析、规范化 Mia 模型目录和产品名 |
+| Mia | `a298ac4` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、媒体能力、群聊消息采集和开发者 Debug 控制台 |
+| APIMaster new-api | `9130c1d` | GHCR 镜像蓝绿部署，提供 Telegram 用户 Key 解析、规范化 Mia 模型目录、产品名和 Debug 身份解析 |
+| APIMaster Web | `7d62618` | Next.js PM2 双实例运行，提供登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
 | Mini App | `/mia/` | 已由 Nginx 公开，Telegram 默认菜单按钮 `Mia` 已配置 |
 | 持久化 | `/var/lib/mia/mia.sqlite` | schema v2，保存用户模型设置与分作用域的会话数据，WAL 模式 |
 
@@ -262,6 +263,10 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 | `9fff043` | `lisaluoyf/Mia` | 五层连续上下文、10 轮长期记忆整理、集中 Prompt、自然语言媒体 Agent 和生产媒体执行链路 |
 | `e2c48f7` | `lisaluoyf/Mia` | GitHub SHA 驱动的服务器构建、依赖缓存、健康回滚和 3 版本保留 |
 | `24d938b` | `lisaluoyf/Mia` | 强制保留刚下线版本作为首选回滚目标 |
+| `033e5e9` | `lisaluoyf/Mia` | 开发者 Debug 控制台、五层上下文快照、长期记忆审计和只读 Prompt Registry |
+| `9130c1d` | `lisaluoyf/new-api` | 通过内部接口按服务端邮箱白名单解析 Debug 开发者与绑定 Telegram ID |
+| `7d62618` | `RomaCredit/apimaster-workspace` | 登录态鉴权、Lisa 白名单、Mia Debug API 代理和页面入口保护 |
+| `a298ac4` | `lisaluoyf/Mia` | 修正生产 Debug API 路由并完成可追溯发布 |
 
 ## 当前验证状态
 
@@ -277,6 +282,8 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - Mia 生产探针：内部 `/health` 返回 200，PM2 在线且 0 次重启；合法 Telegram Mini App 签名可加载 40 个聊天、2 个图片和 1 个具备完整能力元数据的视频模型，当前无显式视觉模型；公开页面、JS/CSS 和头像均返回 200；SQLite 完整性为 `ok`，`mia_completed_turns` 和 `mia_media_jobs` 已创建；新进程无 warning/error（2026-09-02）。
 - Mia GitHub 发版流程：提交 `24d938b` 已由生产服务器从 GitHub 拉取、并行构建并部署，两次完整发布均耗时 15 秒；健康检查和公网 Mini App 冒烟通过，刚下线版本保留为回滚目标，服务器已清理到 3 个 release，磁盘可用空间由约 285 MB 恢复到约 11 GB（2026-09-02）。
 - `new-api` 媒体目录：`go test ./... -count=1` 全量通过，包含显式视觉标签与 `minimax-h3` 能力目录测试（2026-09-02）；目录部分已随 `d88afd5` 提交并部署，Mia 媒体执行链路已随 `9fff043` 部署。
+- Developer Debug Console：Mia 69/69 测试、ESLint、服务端与前端 TypeScript、生产构建和 `git diff --check` 通过；new-api `go test ./controller ./router` 通过。桌面端 Requests/Memory/Prompts、五层展开、Prompt 跳转和 390×844 移动端无横向溢出已完成浏览器验收（2026-09-03）。
+- Debug 三端一致性：Mia 本地、GitHub `main` 和生产 release 均为 `a298ac4`；new-api 均为 `9130c1d`，生产 API 与 worker 运行同一不可变镜像；APIMaster Web 均为 `7d62618`，PM2 两个实例在线。未登录访问 `/mia/debug` 会跳转到 `/login?next=/mia/debug`，未登录 Debug API 返回 401（2026-09-03）。
 
 ## 下一阶段优先级
 
@@ -317,4 +324,8 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] 已增加 `Memory` Tab，展示当前长期记忆、滚动摘要、10 轮进度和压缩历史；暂无压缩历史时明确显示空状态。
 - [x] 已完成本地浏览器验收：桌面 Requests/Memory/Prompts 可用，五层上下文可展开；390×844 移动视口无横向溢出，长文本可换行。
 - [x] 已完成代码校验：Mia 69/69 测试、ESLint、服务端与前端 TypeScript 检查、生产构建和 `git diff --check` 通过；new-api `go test ./controller ./router` 通过。
-- [ ] 尚未完成本次变更的 GitHub 推送、生产部署和真实登录账号验收。
+- [x] Mia、new-api 和 APIMaster Web 的变更均已提交并推送到各自 GitHub `main`，生产运行版本与对应 Git SHA 一致。
+- [x] 生产 Nginx 已通过 `auth_request` 保护 `/mia/debug`，Debug API 明确路由到 APIMaster Web；`nginx -t`、服务重载、健康检查和未登录访问行为验证通过。
+- [x] 生产 Mia 启动时已加载 1 个开发者身份，内部只读 Prompt 接口返回全部 4 个 Prompt；开发者 Telegram ID 当前尚无请求快照属于正常空状态。
+- [ ] 使用 `lisa.luoyf@gmail.com` 的真实 APIMaster 登录会话完成最终页面验收；随后发送一条 Telegram 消息，确认 Requests 出现真实五层上下文快照，并检查 Memory 与 Prompts Tab。
+- [ ] 使用已登录的非 Lisa 账号验证 `/mia/debug` 对外表现为 404；当前服务端白名单与 Nginx 映射已经实现，尚缺真实会话人工验收。
