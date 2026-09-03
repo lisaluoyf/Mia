@@ -4,6 +4,7 @@ import { MIA_SYSTEM_PROMPT } from "../prompts.js";
 import type { ModelOption } from "../settings/types.js";
 
 type Fetcher = typeof fetch;
+const IMAGE_EDIT_TIMEOUT_MS = 180_000;
 
 const resolveResponseSchema = z.object({
   success: z.literal(true),
@@ -464,7 +465,12 @@ export class APIMasterClient {
       body = form;
     }
     const path = images.length === 0 ? "/v1/images/generations/async" : "/v1/images/edits";
-    const response = await this.mediaFetch(path, apiKey, { method: "POST", headers, body });
+    const response = await this.mediaFetch(
+      path,
+      apiKey,
+      { method: "POST", headers, body },
+      images.length > 0 ? Math.max(this.options.timeoutMs, IMAGE_EDIT_TIMEOUT_MS) : this.options.timeoutMs,
+    );
     const payload: unknown = await response.json().catch(() => undefined);
     if (images.length > 0) {
       const parsed = imageEditResponseSchema.safeParse(payload);
@@ -613,13 +619,18 @@ export class APIMasterClient {
     return response;
   }
 
-  private async mediaFetch(path: string, apiKey: string, init: RequestInit = {}): Promise<Response> {
+  private async mediaFetch(
+    path: string,
+    apiKey: string,
+    init: RequestInit = {},
+    timeoutMs = this.options.timeoutMs,
+  ): Promise<Response> {
     let response: Response;
     try {
       response = await this.fetcher(`${this.options.baseUrl}${path}`, {
         ...init,
         headers: init.headers ?? { authorization: `Bearer ${apiKey}` },
-        signal: AbortSignal.timeout(this.options.timeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       throw new MediaAPIError("service_unavailable");

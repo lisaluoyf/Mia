@@ -79,6 +79,22 @@ describe("APIMaster client", () => {
     expect((multipleForm as FormData).getAll("image[]")).toHaveLength(2);
   });
 
+  it("allows synchronous image edits to run for the documented three-minute timeout", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(new AbortController().signal);
+    try {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json({ data: [{ b64_json: "aW1hZ2U=" }] }),
+      );
+      const client = createClient(fetcher);
+      await client.submitImage("key", "gpt-image-2", "edit", "1:1", [{
+        bytes: new Uint8Array([0xff, 0xd8, 0xff]), mimeType: "image/jpeg", filename: "a.jpg",
+      }]);
+      expect(timeout).toHaveBeenCalledWith(180_000);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
   it("submits video parameters and ordered image roles through /v1/videos", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ id: "video-1", status: "queued" }));
     const client = createClient(fetcher);
