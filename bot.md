@@ -234,12 +234,12 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - APIMaster 用户 Key 仅发送给配置的 APIMaster origin，不会随外部媒体结果 URL 转发。
 - 媒体日志禁止记录 Key、Bot Token 下载 URL、媒体正文和完整敏感提示词。
 
-## 通用媒体框架（已部署，待真实 Telegram 验收）
+## 通用媒体框架（已部署；图生图接口修复待发版）
 
 - [x] `new-api` 模型目录向后兼容增加 `supports_vision`、`vision_recommended` 和规范化 `video_capabilities`。
 - [x] 视觉能力只读取精确元数据标签，不按模型名猜测；只有能力元数据完整的视频模型可被 Mia 选择。
 - [x] `minimax-h3` 在 Mia 暴露文生/图生视频、4–15 秒、`768P`、三种画幅及最多 10 张参考图。
-- [x] 图片调用 `POST /v1/images/generations/async`，参考图使用 multipart `images`；图片轮询 `/v1/tasks/:task_id`。
+- [x] 文生图调用 `POST /v1/images/generations/async` 并轮询 `/v1/tasks/:task_id`；参考图改图与 APIMaster 网页保持一致，调用同步 `POST /v1/images/edits`，单图使用 multipart `image`、多图使用 `image[]`，兼容 URL 与 base64 结果（本地完成，待发版）。
 - [x] 视频调用 `POST /v1/videos`，轮询 `/v1/videos/:task_id`，成品读取 `/v1/videos/:task_id/content`。
 - [x] 图片输入限制为最多 10 张、单张 10 MB、原始和预处理后各 30 MB；使用 Sharp 解码、方向修正、缩放，并按透明度输出 PNG/JPEG。
 - [x] 通用 `mia_media_jobs`、输入表、待补充意图、视频草稿、当前私聊图片、群开关、媒体引用和分享/下载令牌已实现。

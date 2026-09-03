@@ -41,7 +41,7 @@ const TERMINAL_STATUSES = ["succeeded", "failed", "expired"] as const;
 const ALLOWED_TRANSITIONS: Readonly<Record<MediaJobStatus, readonly MediaJobStatus[]>> = {
   draft: ["queued", "expired"],
   queued: ["submitting", "failed", "expired"],
-  submitting: ["submitted", "failed", "expired"],
+  submitting: ["submitted", "succeeded", "failed", "expired"],
   submitted: ["in_progress", "succeeded", "failed", "expired"],
   in_progress: ["succeeded", "failed", "expired"],
   succeeded: [],

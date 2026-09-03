@@ -35,21 +35,48 @@ describe("APIMaster client", () => {
     });
   });
 
-  it("submits text images as JSON and reference images as multipart", async () => {
+  it("submits text images asynchronously and reference images through synchronous edits", async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ data: [{ task_id: "img-1", status: "submitted" }] }))
-      .mockResolvedValueOnce(Response.json({ data: [{ task_id: "img-2", status: "submitted" }] }));
+      .mockResolvedValueOnce(Response.json({ data: [{ b64_json: "aW1hZ2U=" }] }))
+      .mockResolvedValueOnce(Response.json({ data: [{ url: "https://cdn.example/edited.png" }] }));
     const client = createClient(fetcher);
-    await client.submitImage("key", "gpt-image-2", "sunset", "16:9");
-    await client.submitImage("key", "gpt-image-2", "brighter", "1:1", [{
+    await expect(client.submitImage("key", "gpt-image-2", "sunset", "16:9")).resolves.toEqual({
+      kind: "task",
+      taskId: "img-1",
+    });
+    await expect(client.submitImage("key", "gpt-image-2", "brighter", "1:1", [{
       bytes: new Uint8Array([0xff, 0xd8, 0xff]), mimeType: "image/jpeg", filename: "a.jpg",
-    }]);
+    }])).resolves.toEqual({
+      kind: "result",
+      state: {
+        status: "succeeded",
+        progress: 100,
+        resultUrl: null,
+        resultBase64: "aW1hZ2U=",
+        errorCode: null,
+      },
+    });
     expect(fetcher.mock.calls[0]?.[0]).toBe("https://apimaster.example/v1/images/generations/async");
     const imageBody = fetcher.mock.calls[0]?.[1]?.body;
     expect(typeof imageBody === "string" ? JSON.parse(imageBody) as unknown : null).toMatchObject({ n: 1, resolution: "1K", size: "16:9" });
     const form = fetcher.mock.calls[1]?.[1]?.body;
+    expect(fetcher.mock.calls[1]?.[0]).toBe("https://apimaster.example/v1/images/edits");
     expect(form).toBeInstanceOf(FormData);
-    expect((form as FormData).getAll("images")).toHaveLength(1);
+    expect((form as FormData).getAll("image")).toHaveLength(1);
+
+    await expect(client.submitImage("key", "gpt-image-2", "combine", "1:1", [{
+      bytes: new Uint8Array([0xff, 0xd8, 0xff]), mimeType: "image/jpeg", filename: "a.jpg",
+    }, {
+      bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]), mimeType: "image/png", filename: "b.png",
+    }])).resolves.toMatchObject({
+      kind: "result",
+      state: { resultUrl: "https://cdn.example/edited.png", resultBase64: null },
+    });
+    const multipleForm = fetcher.mock.calls[2]?.[1]?.body;
+    expect(fetcher.mock.calls[2]?.[0]).toBe("https://apimaster.example/v1/images/edits");
+    expect(multipleForm).toBeInstanceOf(FormData);
+    expect((multipleForm as FormData).getAll("image[]")).toHaveLength(2);
   });
 
   it("submits video parameters and ordered image roles through /v1/videos", async () => {

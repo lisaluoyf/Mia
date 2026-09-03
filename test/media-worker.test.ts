@@ -3,6 +3,7 @@ import type { Api } from "grammy";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import sharp from "sharp";
 
 import type { APIMasterClient } from "../src/clients/apimaster.js";
 import { createLogger } from "../src/logger.js";
@@ -18,6 +19,7 @@ describe("media worker transient regeneration status", () => {
     store = undefined;
     if (resultDirectory) rmSync(resultDirectory, { recursive: true, force: true });
     resultDirectory = undefined;
+    vi.unstubAllGlobals();
   });
 
   function createJob() {
@@ -49,7 +51,7 @@ describe("media worker transient regeneration status", () => {
     const deleteMessage = vi.fn().mockResolvedValue(true);
     const client = {
       resolveAPIKey: vi.fn().mockResolvedValue("user-key"),
-      submitImage: vi.fn().mockResolvedValue("task-2"),
+      submitImage: vi.fn().mockResolvedValue({ kind: "task", taskId: "task-2" }),
       pollImage: vi.fn().mockResolvedValue({
         status: "succeeded",
         progress: 100,
@@ -110,5 +112,80 @@ describe("media worker transient regeneration status", () => {
     });
     expect(sendMessage).not.toHaveBeenCalled();
     expect(store.getJobByIdempotencyKey("callback:again-1")?.status).toBe("failed");
+  });
+
+  it("delivers a synchronous image-edit result without polling", async () => {
+    resultDirectory = mkdtempSync(join(tmpdir(), "mia-worker-results-"));
+    store = new MediaStore(":memory:", { resultDirectory });
+    const claimed = store.claimJob({
+      telegramUserId: 42,
+      chatId: 42,
+      threadId: null,
+      type: "image_edit",
+      idempotencyKey: "message:edit-1",
+      requestMessageId: 80,
+      statusMessageId: 81,
+      model: "gpt-image-2",
+      instruction: "Remove the overlay",
+      options: { aspectRatio: "1:1", locale: "zh-CN" },
+    }, [{
+      position: 0,
+      messageId: 79,
+      fileId: "source-photo",
+      fileUniqueId: "source-unique",
+      type: "photo",
+      mimeType: "image/png",
+      mediaGroupId: null,
+    }]);
+    expect(claimed.outcome).toBe("created");
+    const source = await sharp({
+      create: { width: 2, height: 2, channels: 4, background: { r: 1, g: 2, b: 3, alpha: 1 } },
+    }).png().toBuffer();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(source, {
+      headers: { "content-type": "image/png" },
+    })));
+    const sendPhoto = vi.fn().mockResolvedValue({
+      message_id: 82,
+      photo: [{ file_id: "edited-photo", file_unique_id: "edited-unique", width: 1024, height: 1024 }],
+    });
+    const pollImage = vi.fn();
+    const worker = new MediaWorker({
+      client: {
+        resolveAPIKey: vi.fn().mockResolvedValue("user-key"),
+        submitImage: vi.fn().mockResolvedValue({
+          kind: "result",
+          state: {
+            status: "succeeded",
+            progress: 100,
+            resultUrl: null,
+            resultBase64: source.toString("base64"),
+            errorCode: null,
+          },
+        }),
+        pollImage,
+      } as unknown as APIMasterClient,
+      store,
+      api: {
+        getFile: vi.fn().mockResolvedValue({ file_path: "photos/source.png", file_size: source.length }),
+        sendPhoto,
+        editMessageText: vi.fn(),
+      } as unknown as Api,
+      botToken: "123:test",
+      logger: createLogger("silent"),
+      intervalMs: 1_000,
+      resultMaxBytes: 10_000_000,
+      publicBaseUrl: null,
+    });
+
+    await worker.tick();
+
+    expect(pollImage).not.toHaveBeenCalled();
+    expect(sendPhoto).toHaveBeenCalledOnce();
+    expect(store.getJobByIdempotencyKey("message:edit-1")).toMatchObject({
+      status: "succeeded",
+      upstreamTaskId: null,
+      statusMessageId: 82,
+      resultTelegramFileId: "edited-photo",
+    });
   });
 });

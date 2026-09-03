@@ -147,7 +147,23 @@ export class MediaWorker {
         if (aspectRatio !== "1:1" && aspectRatio !== "16:9" && aspectRatio !== "9:16") {
           throw new Error("invalid_image_aspect_ratio");
         }
-        taskId = await this.options.client.submitImage(apiKey, job.model, job.instruction, aspectRatio, images);
+        const submission = await this.options.client.submitImage(
+          apiKey,
+          job.model,
+          job.instruction,
+          aspectRatio,
+          images,
+        );
+        if (submission.kind === "result") {
+          await this.deliver(claimed, apiKey, submission.state);
+          this.options.debug?.finish(debugId, {
+            status: "succeeded",
+            responsePreview: { status: "succeeded", result: "inline image result" },
+            details: { mediaJobId: job.id, phase: "completed" },
+          });
+          return;
+        }
+        taskId = submission.taskId;
       }
       this.options.store.transitionJob(job.id, ["submitting"], "submitted", { upstreamTaskId: taskId });
       this.options.debug?.finish(debugId, {

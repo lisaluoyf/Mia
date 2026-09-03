@@ -38,6 +38,13 @@ const imageSubmitResponseSchema = z.object({
   data: z.array(z.object({ task_id: z.string().min(1), status: z.string().optional() })).min(1),
 });
 
+const imageEditResponseSchema = z.object({
+  data: z.array(z.object({
+    url: z.string().min(1).optional(),
+    b64_json: z.string().min(1).optional(),
+  }).refine((value) => Boolean(value.url ?? value.b64_json))).min(1),
+});
+
 const imagePollResponseSchema = z.object({
   data: z.object({
     status: z.string(),
@@ -152,6 +159,10 @@ export interface NormalizedTaskStatus {
   resultBase64: string | null;
   errorCode: string | null;
 }
+
+export type ImageSubmitResult =
+  | { kind: "task"; taskId: string }
+  | { kind: "result"; state: NormalizedTaskStatus };
 
 export interface VideoSubmitInput {
   model: string;
@@ -432,7 +443,7 @@ export class APIMasterClient {
     prompt: string,
     aspectRatio: "1:1" | "16:9" | "9:16",
     images: readonly MediaBinary[] = [],
-  ): Promise<string> {
+  ): Promise<ImageSubmitResult> {
     let body: BodyInit;
     let headers: HeadersInit;
     if (images.length === 0) {
@@ -445,20 +456,37 @@ export class APIMasterClient {
       form.set("n", "1");
       form.set("size", aspectRatio);
       form.set("resolution", "1K");
+      const field = images.length === 1 ? "image" : "image[]";
       for (const image of images) {
-        form.append("images", new Blob([Buffer.from(image.bytes)], { type: image.mimeType }), image.filename);
+        form.append(field, new Blob([Buffer.from(image.bytes)], { type: image.mimeType }), image.filename);
       }
       headers = { authorization: `Bearer ${apiKey}` };
       body = form;
     }
-    const response = await this.mediaFetch("/v1/images/generations/async", apiKey, { method: "POST", headers, body });
+    const path = images.length === 0 ? "/v1/images/generations/async" : "/v1/images/edits";
+    const response = await this.mediaFetch(path, apiKey, { method: "POST", headers, body });
     const payload: unknown = await response.json().catch(() => undefined);
+    if (images.length > 0) {
+      const parsed = imageEditResponseSchema.safeParse(payload);
+      const result = parsed.success ? parsed.data.data[0] : undefined;
+      if (!result) throw new MediaAPIError("invalid_submit_response", response.status);
+      return {
+        kind: "result",
+        state: {
+          status: "succeeded",
+          progress: 100,
+          resultUrl: result.url ?? null,
+          resultBase64: result.b64_json ?? null,
+          errorCode: null,
+        },
+      };
+    }
     const parsed = imageSubmitResponseSchema.safeParse(payload);
     const taskId = parsed.success ? parsed.data.data[0]?.task_id : undefined;
     if (taskId === undefined) {
       throw new MediaAPIError("invalid_submit_response", response.status);
     }
-    return taskId;
+    return { kind: "task", taskId };
   }
 
   async pollImage(apiKey: string, model: string, taskId: string): Promise<NormalizedTaskStatus> {
