@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 
 import type { APIMasterClient, ImageSubmitResult, NormalizedTaskStatus } from "../clients/apimaster.js";
 import { MediaAPIError, ResolverError } from "../clients/apimaster.js";
+import { APIMASTER_CONNECT_URL } from "../constants.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { MediaStore } from "./store.js";
 import type { MediaJob } from "./types.js";
@@ -459,7 +460,7 @@ function submissionAccessFailure(error: unknown, locale: string): { text: string
       text: botText(locale, "mediaBindRequired"),
       keyboard: new InlineKeyboard().url(
         botText(locale, "registerAndBindButton"),
-        "https://apimaster.ai/register?next=/console/personal",
+        APIMASTER_CONNECT_URL,
       ),
     };
   }

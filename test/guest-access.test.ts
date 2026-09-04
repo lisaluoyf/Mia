@@ -330,7 +330,7 @@ I can:
     expect(mediaStore.getJobByIdempotencyKey("message:42:8")).toBeNull();
     const sent = calls.find((call) => call.method === "sendMessage");
     expect(sent?.payload.text).toContain("APIMaster 账号");
-    expect(JSON.stringify(sent?.payload.reply_markup)).toContain("register?next=/console/personal");
+    expect(JSON.stringify(sent?.payload.reply_markup)).toContain("https://apimaster.ai/connect/telegram");
   });
 
   it("shows activation immediately for a newly attached guest image", async () => {

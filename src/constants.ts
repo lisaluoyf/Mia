@@ -5,3 +5,5 @@ export const DEFAULT_MODELS = {
 } as const;
 
 export const TELEGRAM_MESSAGE_LIMIT = 4096;
+
+export const APIMASTER_CONNECT_URL = "https://apimaster.ai/connect/telegram";

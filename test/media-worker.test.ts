@@ -6,7 +6,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 
 import type { APIMasterClient } from "../src/clients/apimaster.js";
-import { MediaAPIError } from "../src/clients/apimaster.js";
+import { MediaAPIError, ResolverError } from "../src/clients/apimaster.js";
 import { createLogger } from "../src/logger.js";
 import { MediaStore } from "../src/media/store.js";
 import { MediaWorker } from "../src/media/worker.js";
@@ -182,6 +182,37 @@ describe("media worker transient regeneration status", () => {
       expect.anything(),
     );
     expect(JSON.stringify(editMessageText.mock.calls[0]?.[3])).toContain("https://apimaster.ai/console/wallet");
+  });
+
+  it("shows the one-step connection button when the Telegram account is not bound", async () => {
+    createJob();
+    const editMessageText = vi.fn().mockResolvedValue({});
+    const worker = new MediaWorker({
+      client: {
+        resolveAPIKey: vi.fn().mockRejectedValue(new ResolverError("telegram_not_bound")),
+      } as unknown as APIMasterClient,
+      store,
+      api: { editMessageText, sendMessage: vi.fn() } as unknown as Api,
+      botToken: "123:test",
+      logger: createLogger("silent"),
+      intervalMs: 1_000,
+      resultMaxBytes: 10_000_000,
+      publicBaseUrl: null,
+      botUsername: "MiaAssistantBot",
+    });
+
+    await worker.tick();
+
+    expect(store.getJobByIdempotencyKey("callback:again-1")?.status).toBe("failed");
+    expect(editMessageText).toHaveBeenCalledWith(
+      42,
+      78,
+      expect.stringContaining("APIMaster 账号"),
+      expect.anything(),
+    );
+    expect(JSON.stringify(editMessageText.mock.calls[0]?.[3])).toContain(
+      "https://apimaster.ai/connect/telegram",
+    );
   });
 
   it("delivers a synchronous image-edit result without polling", async () => {
