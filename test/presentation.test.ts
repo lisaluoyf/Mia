@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { miaResponsePlainText, normalizeMiaResponse, type MiaResponse } from "../src/presentation/schema.js";
+import {
+  MIA_RESPONSE_JSON_SCHEMA,
+  miaResponsePlainText,
+  miaResponseSchema,
+  normalizeMiaResponse,
+  type MiaResponse,
+} from "../src/presentation/schema.js";
 import { renderTelegramHtml } from "../src/presentation/telegram-html.js";
 import { renderTelegramRich } from "../src/presentation/telegram-rich.js";
 
@@ -9,6 +15,24 @@ function response(blocks: MiaResponse["blocks"]): MiaResponse {
 }
 
 describe("Mia Telegram presentation", () => {
+  it("does not expose arbitrary prose and block caps to the model", () => {
+    const modelSchema = JSON.stringify(MIA_RESPONSE_JSON_SCHEMA);
+    expect(Object.hasOwn(MIA_RESPONSE_JSON_SCHEMA.properties.blocks, "maxItems")).toBe(false);
+    expect(modelSchema).not.toContain('"maxItems":12');
+    expect(modelSchema).not.toContain('"maxLength":8000');
+    expect(modelSchema).not.toContain('"maxLength":2000');
+
+    expect(miaResponseSchema.safeParse(response(Array.from({ length: 9 }, () => ({
+      type: "paragraph" as const,
+      heading: null,
+      emoji: null,
+      text: "内容".repeat(4_501),
+      items: [],
+      ordered: false,
+      language: null,
+    })))).success).toBe(true);
+  });
+
   it("keeps short conversation replies visually quiet", () => {
     const chunks = renderTelegramHtml(response([{
       type: "paragraph", heading: null, emoji: null, text: "当然，可以。",

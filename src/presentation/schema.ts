@@ -17,15 +17,15 @@ const titleSchema = z.object({
 
 const itemSchema = z.object({
   label: z.string().trim().min(1).max(120).nullable(),
-  text: z.string().trim().min(1).max(2000),
+  text: z.string().trim().min(1),
 }).strict();
 
 const standardBlockSchema = z.object({
   type: z.enum(["paragraph", "list", "facts", "code", "quote", "details"]),
   heading: z.string().trim().min(1).max(160).nullable(),
   emoji: z.string().trim().max(16).nullable(),
-  text: z.string().trim().min(1).max(8000).nullable(),
-  items: z.array(itemSchema).max(12),
+  text: z.string().trim().min(1).nullable(),
+  items: z.array(itemSchema),
   ordered: z.boolean(),
   language: z.string().trim().max(40).nullable(),
 }).strict();
@@ -44,7 +44,7 @@ export const miaResponseBlockSchema = z.discriminatedUnion("type", [standardBloc
 export const miaResponseSchema = z.object({
   version: z.literal(1),
   title: titleSchema.nullable(),
-  blocks: z.array(miaResponseBlockSchema).min(1).max(8),
+  blocks: z.array(miaResponseBlockSchema).min(1),
   actions: z.array(miaActionIdSchema).max(4),
 }).strict();
 
@@ -75,7 +75,6 @@ export const MIA_RESPONSE_JSON_SCHEMA = {
     blocks: {
       type: "array",
       minItems: 1,
-      maxItems: 8,
       items: {
         anyOf: [
           {
@@ -86,17 +85,16 @@ export const MIA_RESPONSE_JSON_SCHEMA = {
               type: { type: "string", enum: ["paragraph", "list", "facts", "code", "quote", "details"] },
               heading: { type: ["string", "null"], maxLength: 160 },
               emoji: { type: ["string", "null"], maxLength: 16 },
-              text: { type: ["string", "null"], maxLength: 8000 },
+              text: { type: ["string", "null"] },
               items: {
                 type: "array",
-                maxItems: 12,
                 items: {
                   type: "object",
                   additionalProperties: false,
                   required: ["label", "text"],
                   properties: {
                     label: { type: ["string", "null"], maxLength: 120 },
-                    text: { type: "string", minLength: 1, maxLength: 2000 },
+                    text: { type: "string", minLength: 1 },
                   },
                 },
               },
