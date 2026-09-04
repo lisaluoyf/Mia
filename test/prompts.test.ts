@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   configurePromptReader,
+  contextCompactionInputPrompt,
+  groupContextCompactionInputPrompt,
   promptTemplate,
   promptText,
   resolvePromptLocale,
@@ -39,5 +41,36 @@ describe("prompt localization", () => {
     });
     expect(template).toContain("Existing long-term memories:");
     expect(template).toContain("Latest 10 turns of dialogue");
+  });
+
+  it("uses locale-specific empty-summary placeholders in localized templates", () => {
+    expect(contextCompactionInputPrompt({ memories: [], summary: null, dialogue: "hello" }, "zh-CN"))
+      .toContain("（无）");
+    expect(contextCompactionInputPrompt({ memories: [], summary: null, dialogue: "hello" }, "en"))
+      .toContain("(none)");
+    expect(contextCompactionInputPrompt({ memories: [], summary: null, dialogue: "hello" }, "ru"))
+      .toContain("(нет)");
+
+    expect(groupContextCompactionInputPrompt(
+      { scope: { type: "group" }, memories: [], summary: null, dialogue: "hello" },
+      "en",
+    )).toContain("(none)");
+    expect(groupContextCompactionInputPrompt(
+      { scope: { type: "group" }, memories: [], summary: null, dialogue: "hello" },
+      "ru",
+    )).toContain("(нет)");
+  });
+
+  it("cleans Russian prompt translations without Chinese residue", () => {
+    const contextPrompt = promptText("mia.context-compaction", "ru");
+    const groupContextInput = promptText("mia.group-context-compaction-input", "ru");
+    const groupSummaryInput = promptText("mia.group-summary-input", "ru");
+
+    expect(contextPrompt).not.toContain("整理");
+    expect(contextPrompt).toContain("скользящего резюме");
+    expect(groupContextInput).not.toContain("watermark summary");
+    expect(groupContextInput).toContain("после границы текущей сводки");
+    expect(groupSummaryInput).not.toContain("locale вывода");
+    expect(groupSummaryInput).toContain("Запрошенный язык вывода");
   });
 });

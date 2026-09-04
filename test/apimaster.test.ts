@@ -155,15 +155,16 @@ describe("APIMaster client", () => {
     const client = createClient(fetcher);
 
     await expect(client.chat("user-api-key", "gpt-5.5", "hello", "ru")).resolves.toBe("privet");
-    const requestBody: unknown = typeof fetcher.mock.calls[0]?.[1]?.body === "string"
-      ? JSON.parse(fetcher.mock.calls[0]?.[1]?.body as string)
+    const rawBody = fetcher.mock.calls[0]?.[1]?.body;
+    const requestBody: unknown = typeof rawBody === "string"
+      ? JSON.parse(rawBody)
       : undefined;
-    expect(requestBody).toMatchObject({
-      messages: [
-        { role: "system", content: expect.stringContaining("Ты Mia") },
-        { role: "user", content: "hello" },
-      ],
-    });
+    const parsedBody = z.object({
+      messages: z.array(z.object({ role: z.string(), content: z.string() })),
+    }).parse(requestBody);
+    expect(parsedBody.messages[0]?.role).toBe("system");
+    expect(parsedBody.messages[0]?.content).toContain("Ты Mia");
+    expect(parsedBody.messages[1]).toEqual({ role: "user", content: "hello" });
     expect(JSON.stringify(requestBody)).not.toContain("产品身份与能力边界");
   });
 
