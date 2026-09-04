@@ -51,7 +51,7 @@ interface BotDependencies {
   client: APIMasterClient;
   chatCredentials?: ChatCredentialProvider;
   logger: Logger;
-  settings: Pick<ModelSettingsService, "getPreferences"> & Partial<Pick<ModelSettingsService, "getSnapshot">>;
+  settings: Pick<ModelSettingsService, "getPreferences"> & Partial<Pick<ModelSettingsService, "getDefaults" | "getSnapshot">>;
   contexts: Pick<ContextStore, "upsertUser" | "upsertChat" | "upsertMember" | "saveMessage"> &
     Partial<Pick<ContextStore,
       "listRecentMessages" | "getLatestSummary" | "clearConversation" | "listMemories" |
@@ -1275,7 +1275,7 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
       dependencies,
       ctx.from.id,
       selectedModel,
-      DEFAULT_MODELS.chat,
+      dependencies.settings.getDefaults?.().chatModel ?? DEFAULT_MODELS.chat,
     );
     const model = credential.model;
     if (credential.source === "user" && !sameModelId(model, selectedModel)) {
@@ -1728,7 +1728,10 @@ async function rejectUnavailableMediaUser(
     if (dependencies.settings.getSnapshot) {
       await dependencies.settings.getSnapshot(message.from.id);
     } else {
-      await dependencies.client.resolveAPIKey(message.from.id, DEFAULT_MODELS.image);
+      await dependencies.client.resolveAPIKey(
+        message.from.id,
+        dependencies.settings.getDefaults?.().imageModel ?? DEFAULT_MODELS.image,
+      );
     }
     return false;
   } catch (error) {

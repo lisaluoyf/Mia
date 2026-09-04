@@ -335,18 +335,18 @@ export function validateIntentRequirements(intent: MediaIntent, input: IntentRou
 export class IntentRouter {
   constructor(
     private readonly client: Pick<APIMasterClient, "structuredResponse">,
-    private readonly options: { model: string; timeoutMs: number; confidenceThreshold?: number },
+    private readonly options: { model: string | (() => string); timeoutMs: number; confidenceThreshold?: number },
   ) {}
 
   get model(): string {
-    return this.options.model;
+    return typeof this.options.model === "function" ? this.options.model() : this.options.model;
   }
 
   async classify(
     input: IntentRouterInput,
     apiKey: string,
     images: readonly MediaBinary[] = [],
-    model = this.options.model,
+    model = this.model,
   ): Promise<RoutedIntent> {
     const mediaPixelsProvided = input.mediaPixelsProvided === true || images.length > 0;
     const recentMessages = (input.recentMessages ?? []).map((message) => ({

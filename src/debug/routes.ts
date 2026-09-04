@@ -60,5 +60,22 @@ export function registerDebugRoutes(app: FastifyInstance, options: { serviceKey:
     if (id === null) return;
     return { success: true, data: options.service.clear(id) };
   });
+  app.get("/internal/debug/model-config", (request, reply) => {
+    if (userId(request, reply) === null) return;
+    return { success: true, data: options.service.modelConfigs() };
+  });
+  app.put("/internal/debug/model-config", (request, reply) => {
+    if (userId(request, reply) === null) return;
+    const body = request.body;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return reply.code(400).send({ success: false, error: "invalid_request" });
+    }
+    const parsed = z.record(z.string(), z.union([z.string().trim().min(1).max(200), z.null()])).safeParse(body);
+    if (!parsed.success) return reply.code(400).send({ success: false, error: "invalid_request" });
+    try {
+      return { success: true, data: options.service.saveModelConfigs(parsed.data) };
+    } catch {
+      return reply.code(422).send({ success: false, error: "invalid_model_config" });
+    }
+  });
 }
-

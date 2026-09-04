@@ -158,7 +158,7 @@ interface GroupSummaryDependencies {
     "applyGroupCompaction" | "countMessagesAfterBefore" | "getChat" | "getLatestSummary" |
     "getMessage" | "getUser" | "listMemories" | "listMessagesBetween" | "listRecentMessagesAfterBefore">;
   logger: Logger;
-  model: string;
+  model: string | (() => string);
   debug?: DebugRecorder;
 }
 
@@ -214,7 +214,7 @@ export class GroupSummaryService {
   constructor(private readonly dependencies: GroupSummaryDependencies) {}
 
   get model(): string {
-    return this.dependencies.model;
+    return typeof this.dependencies.model === "function" ? this.dependencies.model() : this.dependencies.model;
   }
 
   async summarize(input: {
@@ -269,11 +269,12 @@ export class GroupSummaryService {
         dialogue,
       }) },
     ];
+    const configuredModel = this.model;
     const credential = this.dependencies.credentials
-      ? await this.dependencies.credentials.resolve(input.requesterUserId, this.dependencies.model)
+      ? await this.dependencies.credentials.resolve(input.requesterUserId, configuredModel)
       : {
-          apiKey: await this.dependencies.client.resolveAPIKey(input.requesterUserId, this.dependencies.model),
-          model: this.dependencies.model,
+          apiKey: await this.dependencies.client.resolveAPIKey(input.requesterUserId, configuredModel),
+          model: configuredModel,
           source: "user" as const,
           fallbackReason: null,
         };

@@ -29,6 +29,17 @@ describe("guest text-chat credentials", () => {
     });
   });
 
+  it("reads the configured guest model again for every fallback", async () => {
+    let guestModel = "gpt-5.4";
+    const resolver = new ChatCredentialResolver({
+      resolveAPIKey: vi.fn().mockRejectedValue(new ResolverError("telegram_not_bound")),
+    }, { apiKey: "guest-test-key", model: () => guestModel });
+
+    await expect(resolver.resolve(42, "selected-chat")).resolves.toMatchObject({ model: "gpt-5.4" });
+    guestModel = "gpt-5.5";
+    await expect(resolver.resolve(42, "selected-chat")).resolves.toMatchObject({ model: "gpt-5.5" });
+  });
+
   it("preserves the existing user-model fallback before using the guest Token", async () => {
     const resolveAPIKey = vi.fn()
       .mockRejectedValueOnce(new ResolverError("no_usable_api_key"))

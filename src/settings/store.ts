@@ -20,7 +20,10 @@ export interface SavePreferencesInput extends ModelPreferences {
 export class SettingsStore {
   private readonly database: Database.Database;
 
-  constructor(databasePath: string) {
+  constructor(
+    databasePath: string,
+    private readonly defaults: () => ModelPreferences = () => ({ ...DEFAULT_PREFERENCES }),
+  ) {
     if (databasePath !== ":memory:") {
       mkdirSync(dirname(databasePath), { recursive: true });
     }
@@ -67,7 +70,7 @@ export class SettingsStore {
        FROM mia_user_settings WHERE telegram_user_id = ?`,
     ).get(telegramUserId) as SettingsRow | undefined;
     if (!row) {
-      return { ...DEFAULT_PREFERENCES };
+      return { ...this.defaults() };
     }
     return {
       chatModel: row.chat_model,

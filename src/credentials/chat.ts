@@ -17,7 +17,7 @@ export interface ChatCredentialProvider {
 
 interface GuestCredentialOptions {
   apiKey: string;
-  model: string;
+  model: string | (() => string);
 }
 
 export class ChatCredentialResolver implements ChatCredentialProvider {
@@ -63,7 +63,7 @@ export class ChatCredentialResolver implements ChatCredentialProvider {
   private guestCredential(fallbackReason: GuestFallbackReason): ChatCredential {
     return {
       apiKey: this.guest.apiKey,
-      model: this.guest.model,
+      model: typeof this.guest.model === "function" ? this.guest.model() : this.guest.model,
       source: "guest",
       fallbackReason,
     };

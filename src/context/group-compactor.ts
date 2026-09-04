@@ -63,7 +63,7 @@ interface GroupCompactorDependencies {
     "getChat" | "getLatestSummary" | "getMessage" | "getUser" | "listMemories" |
     "listMessagesAfter" | "applyGroupCompaction">;
   logger: Logger;
-  model: string;
+  model: string | (() => string);
   debug?: DebugRecorder;
 }
 
@@ -159,11 +159,14 @@ export class GroupContextCompactor {
             }),
           },
         ];
+        const configuredModel = typeof this.dependencies.model === "function"
+          ? this.dependencies.model()
+          : this.dependencies.model;
         const credential = this.dependencies.credentials
-          ? await this.dependencies.credentials.resolve(payerUserId, this.dependencies.model)
+          ? await this.dependencies.credentials.resolve(payerUserId, configuredModel)
           : {
-              apiKey: await this.dependencies.client.resolveAPIKey(payerUserId, this.dependencies.model),
-              model: this.dependencies.model,
+              apiKey: await this.dependencies.client.resolveAPIKey(payerUserId, configuredModel),
+              model: configuredModel,
               source: "user" as const,
               fallbackReason: null,
             };

@@ -19,6 +19,7 @@ import { DebugService } from "./debug/service.js";
 import { DebugStore } from "./debug/store.js";
 import { OnboardingService } from "./onboarding/service.js";
 import { ChatCredentialResolver } from "./credentials/chat.js";
+import { ModelConfigStore } from "./model-config/store.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -30,6 +31,13 @@ async function main(): Promise<void> {
     timeoutMs: config.requestTimeoutMs,
   });
   const debugStore = new DebugStore(resolve(config.databasePath));
+  const modelConfig = new ModelConfigStore(resolve(config.databasePath), {
+    intent_router: config.miaRouterModel,
+    private_compaction: config.miaContextModel,
+    group_compaction: config.miaContextModel,
+    group_summary: config.miaContextModel,
+    guest_chat: config.miaGuestChatModel,
+  });
   const debug = new DebugRecorder(debugStore);
   const refreshDebugUsers = async (): Promise<void> => {
     try {
@@ -43,18 +51,18 @@ async function main(): Promise<void> {
   await refreshDebugUsers();
   const debugRefreshTimer = setInterval(() => void refreshDebugUsers(), 60 * 60 * 1_000);
   debugRefreshTimer.unref();
-  const store = new SettingsStore(resolve(config.databasePath));
+  const store = new SettingsStore(resolve(config.databasePath), () => modelConfig.userDefaults());
   const contexts = new ContextStore(resolve(config.databasePath));
   const chatCredentials = new ChatCredentialResolver(client, {
     apiKey: config.miaGuestChatApiKey,
-    model: config.miaGuestChatModel,
+    model: () => modelConfig.get("guest_chat") ?? config.miaGuestChatModel,
   });
   const compactor = new ContextCompactor({
     client,
     credentials: chatCredentials,
     store: contexts,
     logger,
-    model: config.miaContextModel,
+    model: () => modelConfig.get("private_compaction") ?? config.miaContextModel,
     debug,
   });
   const groupCompactor = new GroupContextCompactor({
@@ -62,7 +70,7 @@ async function main(): Promise<void> {
     credentials: chatCredentials,
     store: contexts,
     logger,
-    model: config.miaContextModel,
+    model: () => modelConfig.get("group_compaction") ?? config.miaContextModel,
     debug,
   });
   const groupSummary = new GroupSummaryService({
@@ -70,14 +78,14 @@ async function main(): Promise<void> {
     credentials: chatCredentials,
     store: contexts,
     logger,
-    model: config.miaContextModel,
+    model: () => modelConfig.get("group_summary") ?? config.miaContextModel,
     debug,
   });
   const onboarding = new OnboardingService(contexts);
   const mediaStore = new MediaStore(resolve(config.databasePath));
-  const settings = new ModelSettingsService(client, store);
+  const settings = new ModelSettingsService(client, store, () => modelConfig.userDefaults());
   const router = new IntentRouter(client, {
-    model: config.miaRouterModel,
+    model: () => modelConfig.get("intent_router") ?? config.miaRouterModel,
     timeoutMs: config.miaRouterTimeoutMs,
   });
   const bot = createBot(config.telegramBotToken, {
@@ -97,7 +105,9 @@ async function main(): Promise<void> {
     onboarding,
     followUpCredential: {
       apiKey: config.miaGuestChatApiKey,
-      model: config.miaGuestChatModel,
+      get model() {
+        return modelConfig.get("guest_chat") ?? config.miaGuestChatModel;
+      },
     },
   });
   await bot.init();
@@ -125,7 +135,7 @@ async function main(): Promise<void> {
       staticRoot: resolve("dist/web"),
     },
     mediaDownload: { store: mediaStore, client, publicBaseUrl: config.publicBaseUrl },
-    debug: new DebugService(debugStore, contexts),
+    debug: new DebugService(debugStore, contexts, modelConfig),
   });
   let stopping = false;
 
@@ -142,6 +152,7 @@ async function main(): Promise<void> {
     contexts.close();
     mediaStore.close();
     debugStore.close();
+    modelConfig.close();
   };
 
   process.once("SIGINT", () => void stop("SIGINT"));

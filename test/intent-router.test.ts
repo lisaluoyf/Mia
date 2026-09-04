@@ -15,6 +15,23 @@ const noSearch = { callCount: 0, queries: [], sources: [] };
 const response = (data: unknown, webSearch = noSearch) => ({ data, webSearch });
 
 describe("Mia intent router", () => {
+  it("reads the configured router model again for every request", async () => {
+    let configuredModel = "router-a";
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      intent: "chat", confidence: 0.99, instruction: "", media_source: "none",
+      image_options: null, video_options: null, final_response: "Hello",
+      conversation_mode: "casual", onboarding_opportunity: false, profile_updates: null,
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: () => configuredModel, timeoutMs: 1000 });
+
+    await router.classify(base, "key");
+    configuredModel = "router-b";
+    await router.classify(base, "key");
+
+    expect(structuredResponse.mock.calls[0]?.[1]).toBe("router-a");
+    expect(structuredResponse.mock.calls[1]?.[1]).toBe("router-b");
+  });
+
   it("accepts strict structured image output and extracts requirements", async () => {
     const structuredResponse = vi.fn().mockResolvedValue(response({
       intent: "image_generate",

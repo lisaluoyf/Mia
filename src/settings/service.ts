@@ -59,10 +59,22 @@ export class ModelSettingsService {
   constructor(
     private readonly client: APIMasterClient,
     private readonly store: SettingsStore,
+    private readonly defaults: () => ModelPreferences = () => ({ ...DEFAULT_PREFERENCES }),
   ) {}
 
+  getDefaults(): ModelPreferences {
+    return { ...this.defaults() };
+  }
+
   getPreferences(telegramUserId: number): ModelPreferences {
-    return this.store.get(telegramUserId);
+    const stored = this.store.get(telegramUserId);
+    const defaults = this.defaults();
+    return {
+      chatModel: stored.chatModel ?? defaults.chatModel,
+      visionModel: stored.visionModel ?? defaults.visionModel,
+      imageModel: stored.imageModel ?? defaults.imageModel,
+      videoModel: stored.videoModel ?? defaults.videoModel,
+    };
   }
 
   async getSnapshot(telegramUserId: number): Promise<SettingsSnapshot> {
@@ -73,7 +85,7 @@ export class ModelSettingsService {
     for (const capability of ["chat", "vision", "image", "video"] as const) {
       const key = preferenceKey(capability);
       const selected = stored[key];
-      const effective = availableModel(selected, capability, catalog);
+      const effective = availableModel(selected ?? this.defaults()[key], capability, catalog);
       if (selected && (!effective || !sameModelId(selected, effective))) {
         unavailable.push(capability);
       }

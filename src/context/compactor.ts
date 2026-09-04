@@ -47,7 +47,7 @@ interface CompactorDependencies {
     "recordCompletedTurn" | "listPendingCompletedTurns" | "listMessagesBetween" |
     "listMemories" | "getLatestSummary" | "applyPrivateCompaction">;
   logger: Logger;
-  model: string;
+  model: string | (() => string);
   debug?: DebugRecorder;
 }
 
@@ -97,11 +97,14 @@ export class ContextCompactor {
             }),
           },
         ];
+        const configuredModel = typeof this.dependencies.model === "function"
+          ? this.dependencies.model()
+          : this.dependencies.model;
         const credential = this.dependencies.credentials
-          ? await this.dependencies.credentials.resolve(userId, this.dependencies.model)
+          ? await this.dependencies.credentials.resolve(userId, configuredModel)
           : {
-              apiKey: await this.dependencies.client.resolveAPIKey(userId, this.dependencies.model),
-              model: this.dependencies.model,
+              apiKey: await this.dependencies.client.resolveAPIKey(userId, configuredModel),
+              model: configuredModel,
               source: "user" as const,
               fallbackReason: null,
             };

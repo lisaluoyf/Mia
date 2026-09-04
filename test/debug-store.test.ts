@@ -5,6 +5,7 @@ import { DebugService } from "../src/debug/service.js";
 import { DebugStore } from "../src/debug/store.js";
 import { PROMPT_LIBRARY, promptReference } from "../src/prompts.js";
 import { createLogger } from "../src/logger.js";
+import { ModelConfigStore } from "../src/model-config/store.js";
 import { createServer } from "../src/server.js";
 import { ContextStore } from "../src/storage/store.js";
 
@@ -49,6 +50,7 @@ describe("developer debug snapshots", () => {
   it("exposes isolated internal routes, memory state, and the versioned prompt library", async () => {
     const debugStore = new DebugStore(":memory:");
     const contexts = new ContextStore(":memory:");
+    const modelConfig = new ModelConfigStore(":memory:");
     contexts.upsertUser({ telegramUserId: 42, firstName: "Lisa", lastName: null, username: "lisa", languageCode: "en", isBot: false });
     contexts.addMemory({ scope: { type: "user", userId: 42 }, category: "identity", content: "Call the user Roma" });
     const requestId = debugStore.start({ telegramUserId: 42, kind: "chat", model: "grok-4.5" });
@@ -56,7 +58,7 @@ describe("developer debug snapshots", () => {
       logger: createLogger("silent"),
       serviceKey: "test-internal-service-key",
       handleUpdate: vi.fn(),
-      debug: new DebugService(debugStore, contexts),
+      debug: new DebugService(debugStore, contexts, modelConfig),
     });
     const unauthorized = await app.inject({ method: "GET", url: "/internal/debug/requests?telegram_user_id=42" });
     expect(unauthorized.statusCode).toBe(404);
@@ -69,7 +71,28 @@ describe("developer debug snapshots", () => {
     expect(memory.body).toContain("Call the user Roma");
     const prompts = await app.inject({ method: "GET", url: "/internal/debug/prompts?telegram_user_id=42", headers });
     expect(prompts.body).toContain(PROMPT_LIBRARY[0]?.id);
+    const modelConfigs = await app.inject({ method: "GET", url: "/internal/debug/model-config?telegram_user_id=42", headers });
+    const modelPayload = modelConfigs.json<{ success: boolean; data: Array<{ key: string; model: string | null }> }>();
+    expect(modelPayload.success).toBe(true);
+    expect(modelPayload.data.find((item) => item.key === "user_image_default")?.model).toBe("gpt-image-2");
+    expect(modelPayload.data.find((item) => item.key === "intent_router")?.model).toBe("gpt-5.4");
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/internal/debug/model-config?telegram_user_id=42",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { intent_router: "gpt-5.5" },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(modelConfig.get("intent_router")).toBe("gpt-5.5");
+    const invalid = await app.inject({
+      method: "PUT",
+      url: "/internal/debug/model-config?telegram_user_id=42",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { guest_chat: null },
+    });
+    expect(invalid.statusCode).toBe(422);
     await app.close();
+    modelConfig.close();
     contexts.close();
     debugStore.close();
   });

@@ -1,11 +1,13 @@
 import type { ContextStore } from "../storage/store.js";
 import { PROMPT_LIBRARY } from "../prompts.js";
 import type { DebugStore } from "./store.js";
+import type { ModelConfigStore } from "../model-config/store.js";
 
 export class DebugService {
   constructor(
     private readonly debugStore: DebugStore,
     private readonly contexts: Pick<ContextStore, "listMemories" | "getLatestSummary" | "listPendingCompletedTurns">,
+    private readonly modelConfig: ModelConfigStore,
   ) {}
 
   requests(telegramUserId: number) {
@@ -37,5 +39,12 @@ export class DebugService {
   clear(telegramUserId: number) {
     return { cleared: this.debugStore.clear(telegramUserId) };
   }
-}
 
+  modelConfigs() {
+    return this.modelConfig.list();
+  }
+
+  saveModelConfigs(values: Record<string, string | null>) {
+    return this.modelConfig.save(values);
+  }
+}

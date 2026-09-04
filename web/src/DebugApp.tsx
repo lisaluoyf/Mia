@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Braces, ChevronRight, Clock3, Database, FileText, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Activity, AlertCircle, Braces, Check, ChevronRight, Clock3, Database, FileText, RefreshCw, RotateCcw, Save, Search, Trash2 } from "lucide-react";
 
-import { clearDebugRequests, DebugApiError, loadDebugConsole, type DebugMemory, type DebugPrompt, type DebugRequest } from "./debug-api";
+import { clearDebugRequests, DebugApiError, loadDebugConsole, saveDebugModelConfigs, type DebugMemory, type DebugModelConfig, type DebugPrompt, type DebugRequest } from "./debug-api";
 import "./debug.css";
 
-type Tab = "requests" | "memory" | "prompts";
+type Tab = "requests" | "memory" | "prompts" | "models";
 const layerNames: Record<string, string> = {
   systemRules: "1 · 系统规则",
   conversation: "2 · 当前会话",
@@ -138,9 +138,106 @@ function PromptsView({ prompts, selectedId, requests }: { prompts: DebugPrompt[]
   })}</aside><main className="prompt-content">{active ? <><header><div><span className="detail-kicker">{active.id} · v{active.version}</span><h2>{active.name}</h2><p>{active.purpose}</p>{active.includes?.length ? <p>包含基础模块：{active.includes.join("、")}</p> : active.kind === "base" ? <p>基础模块，不会在组合 Prompt 之外重复发送。</p> : null}</div><span className="readonly-badge">只读</span></header><pre className="prompt-source">{active.text}</pre></> : <Empty>暂无已注册的 Prompt</Empty>}</main></div>;
 }
 
+const capabilityNames: Record<DebugModelConfig["capability"], string> = {
+  chat: "文本",
+  vision: "视觉",
+  image: "图片",
+  video: "视频",
+};
+
+function draftValues(configs: DebugModelConfig[]): Record<string, string> {
+  return Object.fromEntries(configs.map((config) => [config.key, config.model ?? ""]));
+}
+
+function ModelConfigsView({ configs, onSaved }: { configs: DebugModelConfig[]; onSaved: (configs: DebugModelConfig[]) => void }) {
+  const [draft, setDraft] = useState<Record<string, string>>(() => draftValues(configs));
+  const [baseline, setBaseline] = useState<Record<string, string>>(() => draftValues(configs));
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const dirty = configs.some((config) => (draft[config.key] ?? "").trim() !== (baseline[config.key] ?? "").trim());
+  const invalid = configs.some((config) => config.capability !== "vision" && (draft[config.key] ?? "").trim() === "");
+
+  useEffect(() => {
+    if (dirty) return;
+    const next = draftValues(configs);
+    setDraft(next);
+    setBaseline(next);
+  }, [configs, dirty]);
+
+  const update = (key: string, value: string) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+    setSaveState("idle");
+  };
+
+  const save = async () => {
+    if (!dirty || invalid || saveState === "saving") return;
+    const values = Object.fromEntries(configs
+      .filter((config) => (draft[config.key] ?? "").trim() !== (baseline[config.key] ?? "").trim())
+      .map((config) => [config.key, (draft[config.key] ?? "").trim() || null]));
+    setSaveState("saving");
+    try {
+      const saved = await saveDebugModelConfigs(values);
+      const next = draftValues(saved);
+      setDraft(next);
+      setBaseline(next);
+      setSaveState("saved");
+      onSaved(saved);
+    } catch {
+      setSaveState("error");
+    }
+  };
+
+  const groups = [
+    { key: "user_default", title: "用户默认", note: "用户未单独选择模型时使用；个人设置仍然优先" },
+    { key: "internal", title: "Mia 内部", note: "路由、记忆和系统任务使用；保存后对新请求生效" },
+  ] as const;
+
+  return <div className="model-config-view">
+    <div className="model-config-toolbar">
+      <p>贴纸生成沿用“图片生成与编辑”的模型。已开始的图片、贴纸和视频任务不会中途换模型。</p>
+      <div className="model-config-actions">
+        {invalid && <span className="save-feedback error"><AlertCircle size={15} />只有视觉模型可以留空</span>}
+        {!invalid && saveState === "saved" && <span className="save-feedback success"><Check size={15} />配置已生效</span>}
+        {saveState === "error" && <span className="save-feedback error"><AlertCircle size={15} />保存失败，请检查模型 ID</span>}
+        <button className="save-model-config" disabled={!dirty || invalid || saveState === "saving"} onClick={() => void save()}>
+          {saveState === "saving" ? <RefreshCw size={16} className="spin" /> : <Save size={16} />}
+          {saveState === "saving" ? "正在保存" : "保存更改"}
+        </button>
+      </div>
+    </div>
+    <div className="model-config-table-wrap">
+      <table className="model-config-table">
+        <thead><tr><th>场景</th><th>能力</th><th>当前模型</th><th>初始默认</th><th><span className="sr-only">操作</span></th></tr></thead>
+        <tbody>{groups.map((group) => <ModelConfigGroupRows key={group.key} group={group} configs={configs.filter((config) => config.group === group.key)} draft={draft} onUpdate={update} />)}</tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+function ModelConfigGroupRows({ group, configs, draft, onUpdate }: {
+  group: { key: DebugModelConfig["group"]; title: string; note: string };
+  configs: DebugModelConfig[];
+  draft: Record<string, string>;
+  onUpdate: (key: string, value: string) => void;
+}) {
+  return <>
+    <tr className="model-group-row"><th colSpan={5}><strong>{group.title}</strong><span>{group.note}</span></th></tr>
+    {configs.map((config) => {
+      const value = draft[config.key] ?? "";
+      const rowInvalid = config.capability !== "vision" && value.trim() === "";
+      return <tr key={config.key} className={rowInvalid ? "invalid" : ""}>
+        <td data-label="场景"><strong>{config.scenario}</strong><span>{config.description}</span><code>{config.key}</code></td>
+        <td data-label="能力"><span className={`capability-badge ${config.capability}`}>{capabilityNames[config.capability]}</span></td>
+        <td data-label="当前模型"><input className="model-config-input" value={value} onChange={(event) => onUpdate(config.key, event.target.value)} placeholder={config.capability === "vision" ? "留空时自动选择" : "输入模型 ID"} aria-label={`${config.scenario}模型`} aria-invalid={rowInvalid} /></td>
+        <td data-label="初始默认"><code className="model-default">{config.defaultModel ?? "自动选择"}</code></td>
+        <td className="model-row-action"><button className="tool-button" onClick={() => onUpdate(config.key, config.defaultModel ?? "")} title="恢复初始默认" aria-label={`${config.scenario}恢复初始默认`}><RotateCcw size={15} /></button></td>
+      </tr>;
+    })}
+  </>;
+}
+
 export function DebugApp() {
   const [tab, setTab] = useState<Tab>("requests");
-  const [data, setData] = useState<{ requests: DebugRequest[]; prompts: DebugPrompt[]; memory: DebugMemory } | null>(null);
+  const [data, setData] = useState<{ requests: DebugRequest[]; prompts: DebugPrompt[]; memory: DebugMemory; modelConfigs: DebugModelConfig[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [promptId, setPromptId] = useState("");
@@ -157,11 +254,11 @@ export function DebugApp() {
   const clear = async () => { if (!confirm("确定清空你的全部 Mia 调试快照吗？此操作无法撤销。")) return; await clearDebugRequests(); await load(); };
   return <div className="debug-shell">
     <header className="debug-topbar"><div className="debug-brand"><img src="/mia/mia-assistant.jpg" alt="" /><div><strong>Mia 调试台</strong><span>开发请求追踪</span></div></div>
-      <nav aria-label="调试视图">{(["requests", "memory", "prompts"] as const).map((item) => <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>{item === "requests" ? "请求记录" : item === "memory" ? "长期记忆" : "Prompt"}</button>)}</nav>
+      <nav aria-label="调试视图">{(["requests", "memory", "prompts", "models"] as const).map((item) => <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>{item === "requests" ? "请求记录" : item === "memory" ? "长期记忆" : item === "prompts" ? "Prompt" : "模型配置"}</button>)}</nav>
       <div className="top-actions"><span className="live-state"><i />实时</span><button className="tool-button" onClick={() => void load()} title="刷新" aria-label="刷新"><RefreshCw size={17} className={refreshing ? "spin" : ""} /></button><button className="tool-button danger" onClick={() => void clear()} title="清空日志" aria-label="清空日志"><Trash2 size={17} /></button></div>
     </header>
-    <div className="debug-page-head"><div><span>私人开发控制台</span><h1>{tab === "requests" ? "模型请求" : tab === "memory" ? "记忆状态" : "Prompt 库"}</h1></div>{data && <div className="page-stat"><Clock3 size={16} /><span>每 10 秒自动刷新</span></div>}</div>
+    <div className="debug-page-head"><div><span>私人开发控制台</span><h1>{tab === "requests" ? "模型请求" : tab === "memory" ? "记忆状态" : tab === "prompts" ? "Prompt 库" : "场景模型"}</h1></div>{data && <div className="page-stat"><Clock3 size={16} /><span>每 10 秒自动刷新</span></div>}</div>
     {error ? <div className="fatal-state"><Activity size={28} /><h2>{error}</h2></div> : !data ? <div className="fatal-state"><RefreshCw className="spin" size={28} /><h2>正在加载调试记录</h2></div> :
-      tab === "requests" ? <RequestsView requests={data.requests} onPrompt={openPrompt} /> : tab === "memory" ? <MemoryView data={data.memory} /> : <PromptsView prompts={data.prompts} selectedId={promptId} requests={data.requests} />}
+      tab === "requests" ? <RequestsView requests={data.requests} onPrompt={openPrompt} /> : tab === "memory" ? <MemoryView data={data.memory} /> : tab === "prompts" ? <PromptsView prompts={data.prompts} selectedId={promptId} requests={data.requests} /> : <ModelConfigsView configs={data.modelConfigs} onSaved={(modelConfigs) => setData((current) => current ? { ...current, modelConfigs } : current)} />}
   </div>;
 }

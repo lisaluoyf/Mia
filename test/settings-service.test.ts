@@ -76,4 +76,32 @@ describe("model ID matching", () => {
       videoModel: "MiniMax-H3",
     }));
   });
+
+  it("uses changed global defaults only when the user has no selected model", () => {
+    const defaults: ModelPreferences = {
+      chatModel: "gpt-5.5",
+      visionModel: null,
+      imageModel: "gpt-image-2",
+      videoModel: "minimax-h3",
+    };
+    const store = { get: vi.fn(() => ({
+      chatModel: null,
+      visionModel: null,
+      imageModel: "user-image-model",
+      videoModel: null,
+    })) } as unknown as SettingsStore;
+    const client = { listModels: vi.fn(() => Promise.resolve(catalog)) } as unknown as APIMasterClient;
+    const current = new ModelSettingsService(client, store, () => ({ ...defaults }));
+
+    expect(current.getPreferences(42)).toEqual({
+      chatModel: "gpt-5.5",
+      visionModel: null,
+      imageModel: "user-image-model",
+      videoModel: "minimax-h3",
+    });
+
+    defaults.chatModel = "grok-4.5";
+    expect(current.getPreferences(42).chatModel).toBe("grok-4.5");
+    expect(current.getPreferences(42).imageModel).toBe("user-image-model");
+  });
 });
