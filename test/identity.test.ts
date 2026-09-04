@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { isMiaIntroductionRequest, miaIntroduction, MIA_PRODUCT_FACTS_PROMPT } from "../src/identity.js";
+import {
+  isMiaIntroductionRequest,
+  miaIntroduction,
+  MIA_PRODUCT_FACTS_PROMPT,
+  resolveIntroductionLocale,
+} from "../src/identity.js";
 import { miaResponsePlainText } from "../src/presentation/schema.js";
 
 describe("Mia identity", () => {
@@ -30,6 +35,14 @@ describe("Mia identity", () => {
 🖼 生成图片、修改图片
 ✨ 生成Telegram 贴纸
 🎬 创作视频`);
+  });
+
+  it("prefers the current introduction request language over the Telegram profile language", () => {
+    expect(resolveIntroductionLocale("who are you", "zh-CN")).toBe("en");
+    expect(resolveIntroductionLocale("What can you do?", "zh-CN")).toBe("en");
+    expect(resolveIntroductionLocale("你是谁？", "en")).toBe("zh-CN");
+    expect(resolveIntroductionLocale("Mia 自我介绍", "en")).toBe("zh-CN");
+    expect(resolveIntroductionLocale("🙂", "zh-CN")).toBe("zh-CN");
   });
 
   it("keeps an explicit product allowlist for non-introduction answers", () => {

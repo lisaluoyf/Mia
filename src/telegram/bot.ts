@@ -14,7 +14,7 @@ import { debugContextLayers } from "../debug/context.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { DebugContextLayers, DebugRequestKind } from "../debug/types.js";
 import { FollowUpCoordinator } from "../follow-up/coordinator.js";
-import { isMiaIntroductionRequest, miaIntroduction } from "../identity.js";
+import { isMiaIntroductionRequest, miaIntroduction, resolveIntroductionLocale } from "../identity.js";
 import {
   mediaIntentSchema,
   type IntentRouter,
@@ -329,8 +329,9 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
 
   const requestedIntroduction = promptFromMessage(policyInput, identity);
   if (!automaticFollowUp && isMiaIntroductionRequest(requestedIntroduction)) {
-    const introduction = miaIntroduction(locale);
-    const panel = miaIntroductionPanel(locale, ctx.me.username, {
+    const introductionLocale = resolveIntroductionLocale(requestedIntroduction, locale);
+    const introduction = miaIntroduction(introductionLocale);
+    const panel = miaIntroductionPanel(introductionLocale, ctx.me.username, {
       privateChat: message.chat.type === "private",
       miniAppUrl: miniAppUrl(dependencies),
     });

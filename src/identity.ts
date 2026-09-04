@@ -27,6 +27,13 @@ export function isMiaIntroductionRequest(text: string): boolean {
   return normalized.length > 0 && INTRODUCTION_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
+/** Prefer the language of the current introduction request over the Telegram profile language. */
+export function resolveIntroductionLocale(text: string, fallback: BotLocale): BotLocale {
+  if (/[\u3400-\u9fff]/u.test(text)) return "zh-CN";
+  if (/[A-Za-z]/u.test(text)) return "en";
+  return fallback;
+}
+
 interface IntroductionCopy {
   headline: string;
   capabilitiesHeading: string;

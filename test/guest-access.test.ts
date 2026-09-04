@@ -192,6 +192,55 @@ describe("Mia guest access", () => {
     });
   });
 
+  it("uses the introduction request language instead of the Telegram profile language", async () => {
+    mediaStore = new MediaStore(":memory:");
+    const classify = vi.fn();
+    const bot = createBot("123:test", {
+      client: {} as APIMasterClient,
+      chatCredentials: { resolve: vi.fn() },
+      logger: createLogger("silent"),
+      settings: { getPreferences: vi.fn() },
+      contexts: contextStubs(),
+      router: { model: "gpt-5.4", classify } as unknown as IntentRouter,
+      mediaStore,
+      botToken: "123:test",
+    });
+    bot.botInfo = botInfo;
+    const calls = installApi(bot);
+
+    await bot.handleUpdate({
+      update_id: 1011,
+      message: {
+        message_id: 18,
+        date: 1_788_333_600,
+        chat: { id: 42, type: "private", first_name: "Guest" },
+        from: { id: 42, is_bot: false, first_name: "Guest", language_code: "zh-CN" },
+        text: "who are you",
+      },
+    } as never);
+
+    expect(classify).not.toHaveBeenCalled();
+    const sent = calls.find((call) => call.method === "sendPhoto");
+    expect(sent?.payload.caption).toBe(`I'm Mia, APIMaster's Telegram AI assistant
+I can:
+💬 Chat and look up current information
+🖼 Generate and edit images
+✨ Create Telegram stickers
+🎬 Create videos`);
+    expect(sent?.payload.reply_markup).toEqual({
+      inline_keyboard: [
+        [
+          { text: "🖼 Generate image", callback_data: "intro_action:image" },
+          { text: "🎬 Generate video", callback_data: "intro_action:video" },
+        ],
+        [
+          { text: "✨ Make sticker", callback_data: "intro_action:sticker" },
+          { text: "⚙️ Model settings", web_app: { url: "https://apimaster.ai/mia/" } },
+        ],
+      ],
+    });
+  });
+
   it("turns an introduction image button into a selective prompt in the same Topic", async () => {
     mediaStore = new MediaStore(":memory:");
     const classify = vi.fn();
