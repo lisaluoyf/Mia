@@ -336,24 +336,34 @@ describe("Mia intent router", () => {
     expect(structuredResponse.mock.calls[0]?.[5]).toBe(45_000);
   });
 
-  it("routes an explicit edit for the awakened user's recent image without a participation call", async () => {
+  it("uses model participation before routing the awakened user's recent image edit", async () => {
     const instruction = "帮我把脸改得看起来没那么像 AI，同时做一个反射效果。另外，现在这个 logo 在屏幕上不太显眼，也请加上反射，让脸看起来更自然。";
-    const structuredResponse = vi.fn().mockResolvedValue(response({
-      intent: "image_edit",
-      should_respond: true,
-      response_to_message_id: 192,
-      confidence: 0.99,
-      instruction,
-      media_source: "context",
-      media_message_ids: [191],
-      image_options: { aspect_ratio: null },
-      video_options: null,
-      reply: null,
-      conversation_mode: "task",
-      onboarding_opportunity: false,
-      profile_updates: null,
-    }));
-    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 30_000 });
+    const structuredChat = vi.fn()
+      .mockResolvedValueOnce({
+        should_respond: true,
+        response_to_message_id: 192,
+        intent_hint: "media_or_summary",
+        needs_web_search: false,
+        confidence: 0.99,
+        reason: "explicit_image_edit_request",
+      })
+      .mockResolvedValueOnce({
+        intent: "image_edit",
+        should_respond: true,
+        response_to_message_id: 192,
+        confidence: 0.99,
+        instruction,
+        media_source: "context",
+        media_message_ids: [191],
+        image_options: { aspect_ratio: null },
+        video_options: null,
+        reply: null,
+        conversation_mode: "task",
+        onboarding_opportunity: false,
+        profile_updates: null,
+      });
+    const structuredResponse = vi.fn();
+    const router = new IntentRouter({ structuredResponse, structuredChat }, { model: "gpt-5.4", timeoutMs: 30_000 });
 
     const result = await router.classify({
       ...base,
@@ -386,17 +396,29 @@ describe("Mia intent router", () => {
       should_respond: true,
       response_to_message_id: 192,
       media_message_ids: [191],
-      participationSource: "heuristic",
-      participationReason: "explicit_media_action_for_recent_user_image",
+      participationSource: "model",
+      participationReason: "explicit_image_edit_request",
     });
-    expect(structuredResponse).toHaveBeenCalledOnce();
-    expect(structuredResponse.mock.calls[0]?.[0]).toBe("public-follow-up-key");
-    expect(structuredResponse.mock.calls[0]?.[3]).toBe("mia_media_intent");
+    expect(structuredResponse).not.toHaveBeenCalled();
+    expect(structuredChat).toHaveBeenCalledTimes(2);
+    expect(structuredChat.mock.calls[0]?.[0]).toBe("public-follow-up-key");
+    expect(structuredChat.mock.calls[0]?.[3]).toBe("mia_follow_up_participation");
+    expect(structuredChat.mock.calls[1]?.[3]).toBe("mia_media_intent");
   });
 
-  it("makes a recent-image correction visible when full media routing fails", async () => {
-    const structuredResponse = vi.fn().mockRejectedValue(new Error("timeout"));
-    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 30_000 });
+  it("makes a model-confirmed image correction visible when full media routing fails", async () => {
+    const structuredChat = vi.fn()
+      .mockResolvedValueOnce({
+        should_respond: true,
+        response_to_message_id: 193,
+        intent_hint: "media_or_summary",
+        needs_web_search: false,
+        confidence: 0.99,
+        reason: "explicit_image_edit_correction",
+      })
+      .mockRejectedValueOnce(new Error("timeout"));
+    const structuredResponse = vi.fn();
+    const router = new IntentRouter({ structuredResponse, structuredChat }, { model: "gpt-5.4", timeoutMs: 30_000 });
 
     const result = await router.classify({
       ...base,
@@ -429,24 +451,27 @@ describe("Mia intent router", () => {
       should_respond: true,
       response_to_message_id: 193,
       fallbackReason: "response_fallback",
-      participationSource: "heuristic",
-      participationReason: "explicit_media_action_for_recent_user_image",
+      participationSource: "model",
+      participationReason: "explicit_image_edit_correction",
     });
     expect(result.reply?.blocks[0]?.text).toContain("图片处理请求");
-    expect(structuredResponse).toHaveBeenCalledOnce();
-    expect(structuredResponse.mock.calls[0]?.[3]).toBe("mia_media_intent");
+    expect(structuredResponse).not.toHaveBeenCalled();
+    expect(structuredChat).toHaveBeenCalledTimes(2);
+    expect(structuredChat.mock.calls[0]?.[3]).toBe("mia_follow_up_participation");
+    expect(structuredChat.mock.calls[1]?.[3]).toBe("mia_media_intent");
   });
 
-  it("does not apply the recent-image shortcut to another group member", async () => {
-    const structuredResponse = vi.fn().mockResolvedValue(response({
+  it("lets model participation keep another group member's image comment silent", async () => {
+    const structuredChat = vi.fn().mockResolvedValue({
       should_respond: false,
       response_to_message_id: null,
       intent_hint: "chat",
       needs_web_search: false,
       confidence: 0.98,
       reason: "another_member_comment",
-    }));
-    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 30_000 });
+    });
+    const structuredResponse = vi.fn();
+    const router = new IntentRouter({ structuredResponse, structuredChat }, { model: "gpt-5.4", timeoutMs: 30_000 });
 
     await router.classify({
       ...base,
@@ -466,8 +491,9 @@ describe("Mia intent router", () => {
       ],
     }, "public-follow-up-key");
 
-    expect(structuredResponse).toHaveBeenCalledOnce();
-    expect(structuredResponse.mock.calls[0]?.[3]).toBe("mia_follow_up_participation");
+    expect(structuredResponse).not.toHaveBeenCalled();
+    expect(structuredChat).toHaveBeenCalledOnce();
+    expect(structuredChat.mock.calls[0]?.[3]).toBe("mia_follow_up_participation");
   });
 
   it("keeps unrelated chat silent after the lightweight public decision", async () => {

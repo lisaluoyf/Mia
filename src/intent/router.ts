@@ -35,43 +35,6 @@ const FOLLOW_UP_DECISION_JSON_SCHEMA = {
 
 type FollowUpDecision = z.infer<typeof followUpDecisionSchema>;
 
-const MAX_RECENT_MEDIA_FOLLOW_UP_MS = 10 * 60 * 1_000;
-
-function isExplicitMediaAction(text: string): boolean {
-  const normalized = text.trim();
-  if (!normalized || Array.from(normalized).length > 1_000) return false;
-  if (/^(?:反色|负片|镜像|翻转|抠图|去背|裁剪|锐化|虚化|去水印|加水印)[!！。.~～]*$/iu.test(normalized)) {
-    return true;
-  }
-  const mediaSubject = /(?:图(?:片)?|照片|画面|人像|头像|脸|五官|皮肤|logo|标志|背景|前景|颜色|色调|光线|反射|倒影|文字|水印|尺寸|比例)/iu;
-  const mediaAction = /(?:帮我|请)?(?:把|将)?[\s\S]{0,80}(?:改|修改|调整|编辑|处理|重绘|重做|修复|优化|美化|增强|移除|去掉|删除|加上|添加|换成|替换|裁剪|抠图|反色|镜像|翻转|虚化|锐化|放大|缩小|变成|做成)/iu;
-  const englishMediaSubject = /\b(?:image|photo|picture|portrait|face|logo|background|foreground|color|reflection|text|watermark)\b/iu;
-  const englishMediaAction = /\b(?:edit|change|adjust|redraw|retouch|remove|add|replace|crop|invert|mirror|flip|blur|sharpen|resize|recolor)\b/iu;
-  return mediaSubject.test(normalized) && mediaAction.test(normalized) ||
-    englishMediaSubject.test(normalized) && englishMediaAction.test(normalized);
-}
-
-function recentUserImageBeforeTarget(
-  recent: readonly RouterContextMessage[],
-  targetIndex: number,
-  target: RouterContextMessage,
-): RouterContextMessage | null {
-  const lowerBound = Math.max(0, targetIndex - 6);
-  for (let index = targetIndex - 1; index >= lowerBound; index -= 1) {
-    const candidate = recent[index];
-    if (!candidate) continue;
-    if (candidate.role === "assistant") return null;
-    if (candidate.senderUserId !== target.senderUserId) return null;
-    if (candidate.contentType !== "photo" && candidate.contentType !== "document") continue;
-    if (candidate.sentAt && target.sentAt) {
-      const ageMs = Date.parse(target.sentAt) - Date.parse(candidate.sentAt);
-      if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > MAX_RECENT_MEDIA_FOLLOW_UP_MS) return null;
-    }
-    return candidate;
-  }
-  return null;
-}
-
 function obviousFollowUpDecision(input: IntentRouterInput): FollowUpDecision | null {
   const batchIds = new Set(input.followUpBatchMessageIds ?? []);
   const recent = input.recentMessages ?? [];
@@ -103,19 +66,6 @@ function obviousFollowUpDecision(input: IntentRouterInput): FollowUpDecision | n
     }
   }
 
-  const recentImage = recentUserImageBeforeTarget(recent, targetIndex, target);
-  const hasUsableRecentImage = recentImage?.messageId !== undefined && (input.mediaCandidates ?? []).some((candidate) =>
-    candidate.messageId === recentImage.messageId && candidate.senderUserId === target.senderUserId);
-  if (isExplicitMediaAction(text) && hasUsableRecentImage) {
-    return {
-      should_respond: true,
-      response_to_message_id: target.messageId,
-      intent_hint: "media_or_summary",
-      needs_web_search: false,
-      confidence: 0.99,
-      reason: "explicit_media_action_for_recent_user_image",
-    };
-  }
   return null;
 }
 
@@ -395,7 +345,7 @@ export function validateIntentRequirements(intent: MediaIntent, input: IntentRou
 
 export class IntentRouter {
   constructor(
-    private readonly client: Pick<APIMasterClient, "structuredResponse">,
+    private readonly client: Pick<APIMasterClient, "structuredResponse"> & Partial<Pick<APIMasterClient, "structuredChat">>,
     private readonly options: { model: string | (() => string); timeoutMs: number; confidenceThreshold?: number },
   ) {}
 
@@ -530,14 +480,13 @@ export class IntentRouter {
             recent_messages: contextPayload.recent_messages,
           }) },
         ];
-        const result = await this.client.structuredResponse(
+        const result = await this.structuredWithoutWebSearch(
           apiKey,
           model,
           decisionMessages,
           "mia_follow_up_participation",
           FOLLOW_UP_DECISION_JSON_SCHEMA,
           Math.min(this.options.timeoutMs, 30_000),
-          { webSearch: false },
         );
         const parsed = followUpDecisionSchema.safeParse(result.data);
         if (!parsed.success) return fallback("invalid_output", false);
@@ -565,7 +514,7 @@ export class IntentRouter {
     }
 
     if (decision.intent_hint === "media_or_summary") {
-      const routed = await this.classifyFull(input, apiKey, model, fullMessages);
+      const routed = await this.classifyFull(input, apiKey, model, fullMessages, false);
       if (routed.should_respond === false) {
         const usesCjk = /[\u3400-\u9fff\uf900-\ufaff]/u.test(input.text);
         return followUpChatResult({
@@ -633,22 +582,49 @@ export class IntentRouter {
     apiKey: string,
     model: string,
     messages: readonly StructuredMessage[],
+    allowWebSearch = true,
   ): Promise<RoutedIntent> {
     try {
-      const result = await this.client.structuredResponse(
-        apiKey,
-        model,
-        messages,
-        "mia_media_intent",
-        ROUTER_SCHEMA,
-        this.options.timeoutMs,
-      );
+      const result = allowWebSearch
+        ? await this.client.structuredResponse(
+          apiKey,
+          model,
+          messages,
+          "mia_media_intent",
+          ROUTER_SCHEMA,
+          this.options.timeoutMs,
+        )
+        : await this.structuredWithoutWebSearch(
+          apiKey,
+          model,
+          messages,
+          "mia_media_intent",
+          ROUTER_SCHEMA,
+          this.options.timeoutMs,
+        );
       const parsed = mediaIntentSchema.safeParse(result.data);
       if (!parsed.success) return fallback("invalid_output", false);
       return this.validatedResult(parsed.data, input, result.webSearch);
     } catch {
       return fallback("router_unavailable", false);
     }
+  }
+
+  private async structuredWithoutWebSearch(
+    apiKey: string,
+    model: string,
+    messages: readonly StructuredMessage[],
+    schemaName: string,
+    schema: object,
+    timeoutMs: number,
+  ): Promise<{ data: unknown; webSearch: WebSearchUsage }> {
+    if (this.client.structuredChat) {
+      return {
+        data: await this.client.structuredChat(apiKey, model, messages, schemaName, schema, timeoutMs),
+        webSearch: { callCount: 0, queries: [], sources: [] },
+      };
+    }
+    return this.client.structuredResponse(apiKey, model, messages, schemaName, schema, timeoutMs, { webSearch: false });
   }
 
   private validatedResult(

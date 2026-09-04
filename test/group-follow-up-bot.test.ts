@@ -223,8 +223,7 @@ describe("Mia group follow-up", () => {
   it("automatically answers 后天呢 after a weather wake-up using only the public follow-up credential", async () => {
     const directReply = reply("北京明天有雨。");
     const followUpReply = reply("北京后天转多云。");
-    const structuredResponse = vi.fn()
-      .mockResolvedValueOnce({
+    const structuredResponse = vi.fn().mockResolvedValueOnce({
         data: {
           intent: "chat",
           should_respond: true,
@@ -288,9 +287,17 @@ describe("Mia group follow-up", () => {
           profile_updates: null,
         },
         webSearch: { callCount: 0, queries: [], sources: [] },
+      });
+    const structuredChat = vi.fn()
+      .mockResolvedValueOnce({
+        should_respond: true,
+        response_to_message_id: 192,
+        intent_hint: "media_or_summary",
+        needs_web_search: false,
+        confidence: 0.99,
+        reason: "explicit_image_edit_request",
       })
       .mockResolvedValueOnce({
-        data: {
           intent: "image_edit",
           should_respond: true,
           response_to_message_id: 192,
@@ -304,11 +311,9 @@ describe("Mia group follow-up", () => {
           conversation_mode: "task",
           onboarding_opportunity: false,
           profile_updates: null,
-        },
-        webSearch: { callCount: 0, queries: [], sources: [] },
       });
     const resolveAPIKey = vi.fn().mockResolvedValue("requester-media-key");
-    const client = { structuredResponse, resolveAPIKey } as unknown as APIMasterClient;
+    const client = { structuredResponse, structuredChat, resolveAPIKey } as unknown as APIMasterClient;
     const router = new IntentRouter(client, { model: "gpt-5.4", timeoutMs: 30_000 });
     const { bot, calls, resolveCredential } = setup(vi.fn(), { router, client });
 
@@ -325,9 +330,12 @@ describe("Mia group follow-up", () => {
     await bot.handleUpdate(update({ updateId: 3, messageId: 192, text: instruction }));
     await vi.advanceTimersByTimeAsync(2_000);
 
-    expect(structuredResponse).toHaveBeenCalledTimes(2);
-    expect(structuredResponse.mock.calls[1]?.[0]).toBe("public-follow-up-key");
-    expect(structuredResponse.mock.calls[1]?.[3]).toBe("mia_media_intent");
+    expect(structuredResponse).toHaveBeenCalledOnce();
+    expect(structuredChat).toHaveBeenCalledTimes(2);
+    expect(structuredChat.mock.calls[0]?.[0]).toBe("public-follow-up-key");
+    expect(structuredChat.mock.calls[0]?.[3]).toBe("mia_follow_up_participation");
+    expect(structuredChat.mock.calls[1]?.[0]).toBe("public-follow-up-key");
+    expect(structuredChat.mock.calls[1]?.[3]).toBe("mia_media_intent");
     expect(resolveCredential).toHaveBeenCalledOnce();
     expect(resolveAPIKey).toHaveBeenCalledOnce();
     const job = mediaStore.getJobByIdempotencyKey("message:-1001:192");

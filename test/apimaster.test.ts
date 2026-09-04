@@ -275,6 +275,63 @@ describe("APIMaster client", () => {
     expect(requestBody).not.toHaveProperty("tool_choice");
   });
 
+  it("uses Chat Completions for GPT-5.4 structured participation decisions", async () => {
+    const decision = {
+      should_respond: false,
+      response_to_message_id: null,
+      intent_hint: "chat",
+      needs_web_search: false,
+      confidence: 0.98,
+      reason: "group_members_are_talking_to_each_other",
+    };
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "should_respond", "response_to_message_id", "intent_hint", "needs_web_search", "confidence", "reason",
+      ],
+      properties: {
+        should_respond: { type: "boolean" },
+        response_to_message_id: { type: ["integer", "null"] },
+        intent_hint: { type: "string", enum: ["chat", "media_or_summary"] },
+        needs_web_search: { type: "boolean" },
+        confidence: { type: "number" },
+        reason: { type: "string" },
+      },
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      choices: [{ message: { content: JSON.stringify(decision) } }],
+    }));
+    const client = createClient(fetcher);
+
+    await expect(client.structuredChat(
+      "public-key",
+      "gpt-5.4",
+      [{ role: "user", content: "群成员之间的闲聊" }],
+      "mia_follow_up_participation",
+      schema,
+      30_000,
+    )).resolves.toEqual(decision);
+
+    const [url, init] = fetcher.mock.calls[0] ?? [];
+    expect(url).toBe("https://apimaster.example/v1/chat/completions");
+    const requestBody: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    expect(requestBody).toEqual({
+      model: "gpt-5.4",
+      messages: [{ role: "user", content: "群成员之间的闲聊" }],
+      stream: false,
+      temperature: 0,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "mia_follow_up_participation",
+          strict: true,
+          schema,
+        },
+      },
+    });
+  });
+
   it("loads the user's model catalog without exposing a key", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       success: true,
