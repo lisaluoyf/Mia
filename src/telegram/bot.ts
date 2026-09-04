@@ -543,6 +543,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       routerDebugId = debugId;
       routed = await dependencies.router.classify({
         text: promptFromMessage(policyInput, identity),
+        locale: message.from.language_code ?? null,
         participationMode: automaticFollowUp ? "selective" : "required",
         followUpBatchMessageIds: request.batch?.map((item) => item.message.message_id) ?? [],
         followUpContext: request.followUpState ? {
@@ -838,7 +839,7 @@ async function executeMediaIntent(
       }) ?? null;
       const response = requestContext
         ? await dependencies.client.chatMessages(apiKey, model, [
-          { role: "system", content: promptText("mia.system") },
+          { role: "system", content: promptText("mia.system", locale) },
           ...requestContext.messages,
         ])
         : await dependencies.client.vision(
@@ -846,6 +847,8 @@ async function executeMediaIntent(
           model,
           routed.instruction,
           await downloadTelegramImages(ctx.api, dependencies.botToken, inputs),
+          [],
+          locale,
         );
       const delivery = await sendConversationResponse(ctx, message, response, dependencies);
       const assistantMessageId = delivery.assistantMessageId;
@@ -1491,10 +1494,10 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
     }) ?? null;
     const response = requestContext
       ? await dependencies.client.chatMessages(credential.apiKey, model, [
-        { role: "system", content: promptText("mia.system") },
+        { role: "system", content: promptText("mia.system", locale) },
         ...requestContext.messages,
       ])
-      : await dependencies.client.chat(credential.apiKey, model, prompt);
+      : await dependencies.client.chat(credential.apiKey, model, prompt, locale);
     const delivery = await sendConversationResponse(ctx, ctx.message, response, dependencies);
     const assistantMessageId = delivery.assistantMessageId;
     dependencies.debug?.finish(debugId, {
@@ -2163,6 +2166,10 @@ export function createBot(token: string, dependencies: BotDependencies): Bot {
     if (!("text" in message) && !("photo" in message) && !("document" in message) &&
         !("sticker" in message) && !("rich_message" in message)) return;
     if (dependencies.mediaStore && !dependencies.mediaStore.claimTelegramUpdate(ctx.update.update_id)) return;
+    const repliedMessage = message.reply_to_message;
+    if (repliedMessage && isStorableMessage(repliedMessage)) {
+      persistMessage(repliedMessage, dependencies);
+    }
     persistMessage(message as StorableMessage, dependencies);
     if ("sticker" in message || "document" in message && !message.document.mime_type?.startsWith("image/")) return;
     const media = mediaFromMessage(message);

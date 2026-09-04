@@ -132,6 +132,7 @@ export interface RouterMediaCandidate {
 
 export interface IntentRouterInput {
   text: string;
+  locale?: string | null;
   participationMode?: "required" | "selective";
   followUpBatchMessageIds?: readonly number[];
   followUpContext?: {
@@ -372,6 +373,7 @@ export class IntentRouter {
     const followUpContext = input.followUpContext ?? null;
     const contextPayload = {
       current_request_text: input.text,
+      default_response_locale: input.locale ?? null,
       replied_message_text: input.repliedMessageText ?? null,
       participation_mode: participationMode,
       follow_up_batch_message_ids: followUpBatchMessageIds,
@@ -401,14 +403,15 @@ export class IntentRouter {
       })),
     ];
     const messages: StructuredMessage[] = input.conversationMessages === undefined ? [
-      { role: "system", content: promptText("mia.intent-router") },
+      { role: "system", content: promptText("mia.intent-router", input.locale) },
       { role: "user", content: userContent },
     ] : [
-      { role: "system", content: promptText("mia.intent-router") },
+      { role: "system", content: promptText("mia.intent-router", input.locale) },
       {
         role: "system",
         content: JSON.stringify({ current_request_routing_metadata: {
           current_request_text: input.text,
+          default_response_locale: input.locale ?? null,
           replied_message_text: input.repliedMessageText ?? null,
           participation_mode: participationMode,
           follow_up_batch_message_ids: followUpBatchMessageIds,
@@ -469,7 +472,7 @@ export class IntentRouter {
     if (!decision) {
       try {
         const decisionMessages: StructuredMessage[] = [
-          { role: "system", content: promptText("mia.follow-up-participation") },
+          { role: "system", content: promptText("mia.follow-up-participation", input.locale) },
           ...fullMessages.filter((message, index) => !(index === 0 && message.role === "system")),
           { role: "user", content: JSON.stringify({
             follow_up_batch_message_ids: batchIds,
@@ -531,7 +534,7 @@ export class IntentRouter {
     }
 
     const answerMessages: StructuredMessage[] = [
-      { role: "system", content: promptText("mia.follow-up-chat") },
+      { role: "system", content: promptText("mia.follow-up-chat", input.locale) },
       ...fullMessages.filter((message, index) => !(index === 0 && message.role === "system")),
       { role: "system", content: JSON.stringify({
         confirmed_follow_up: true,

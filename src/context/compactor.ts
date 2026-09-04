@@ -45,7 +45,7 @@ interface CompactorDependencies {
   credentials?: ChatCredentialProvider;
   store: Pick<ContextStore,
     "recordCompletedTurn" | "listPendingCompletedTurns" | "listMessagesBetween" |
-    "listMemories" | "getLatestSummary" | "applyPrivateCompaction">;
+    "listMemories" | "getLatestSummary" | "applyPrivateCompaction" | "getUser">;
   logger: Logger;
   model: string | (() => string);
   debug?: DebugRecorder;
@@ -86,15 +86,16 @@ export class ContextCompactor {
         );
         const memories = this.dependencies.store.listMemories({ type: "user", userId }, 100);
         const previousSummary = this.dependencies.store.getLatestSummary(scope)?.content ?? null;
+        const locale = this.dependencies.store.getUser(userId)?.languageCode ?? null;
         const prompt: StructuredMessage[] = [
-          { role: "system", content: promptTemplate("mia.context-compaction", {}) },
+          { role: "system", content: promptTemplate("mia.context-compaction", locale, {}) },
           {
             role: "user",
             content: contextCompactionInputPrompt({
               memories: memories.map((item) => ({ category: item.category, content: item.content })),
               summary: previousSummary,
               dialogue: formatCompactionDialogue(messages, userId),
-            }),
+            }, locale),
           },
         ];
         const configuredModel = typeof this.dependencies.model === "function"

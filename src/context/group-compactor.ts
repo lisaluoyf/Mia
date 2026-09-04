@@ -140,6 +140,7 @@ export class GroupContextCompactor {
         if (!first || !last) return;
         const memories = this.dependencies.store.listMemories(scope, 100);
         const chat = this.dependencies.store.getChat(scope.chatId);
+        const locale = this.dependencies.store.getUser(payerUserId)?.languageCode ?? null;
         const scopeMetadata = {
           type: scope.type,
           chat_id: scope.chatId,
@@ -148,7 +149,7 @@ export class GroupContextCompactor {
         };
         const dialogue = formatDialogue(messages, this.dependencies.store);
         const prompt: StructuredMessage[] = [
-          { role: "system", content: promptTemplate("mia.group-context-compaction", {}) },
+          { role: "system", content: promptTemplate("mia.group-context-compaction", locale, {}) },
           {
             role: "user",
             content: groupContextCompactionInputPrompt({
@@ -156,7 +157,7 @@ export class GroupContextCompactor {
               memories: memories.map(memoryPreview),
               summary: previousSummary?.content ?? null,
               dialogue,
-            }),
+            }, locale),
           },
         ];
         const configuredModel = typeof this.dependencies.model === "function"

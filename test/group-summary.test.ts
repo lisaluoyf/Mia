@@ -167,7 +167,7 @@ describe("Mia group summary service", () => {
     const debugFinish: unknown = debug.finish.mock.calls[0]?.[1];
     expect(debugStart).toMatchObject({
       kind: "group_summary",
-      promptRefs: [{ id: "mia.group-summary", version: 5 }, { id: "mia.group-summary-input", version: 1 }],
+      promptRefs: [{ id: "mia.group-summary", version: 6 }, { id: "mia.group-summary-input", version: 2 }],
       details: { selectedMessageCount: 300, truncated: true },
     });
     expect(debug.finish.mock.calls[0]?.[0]).toBe("summary-debug");
@@ -245,9 +245,9 @@ describe("Mia group summary service", () => {
   });
 
   it("registers the user-visible summary prompts independently from background compaction", () => {
-    expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-summary")).toMatchObject({ version: 5 });
-    expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-summary-input")).toMatchObject({ version: 1 });
-    expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-context-compaction")).toMatchObject({ version: 1 });
+    expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-summary")).toMatchObject({ version: 6 });
+    expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-summary-input")).toMatchObject({ version: 2 });
+    expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-context-compaction")).toMatchObject({ version: 2 });
   });
 });
 

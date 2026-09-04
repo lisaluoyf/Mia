@@ -148,6 +148,25 @@ describe("APIMaster client", () => {
     });
   });
 
+  it("uses the locale-specific system prompt for direct chat requests", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ choices: [{ message: { content: "privet" } }] }),
+    );
+    const client = createClient(fetcher);
+
+    await expect(client.chat("user-api-key", "gpt-5.5", "hello", "ru")).resolves.toBe("privet");
+    const requestBody: unknown = typeof fetcher.mock.calls[0]?.[1]?.body === "string"
+      ? JSON.parse(fetcher.mock.calls[0]?.[1]?.body as string)
+      : undefined;
+    expect(requestBody).toMatchObject({
+      messages: [
+        { role: "system", content: expect.stringContaining("Ты Mia") },
+        { role: "user", content: "hello" },
+      ],
+    });
+    expect(JSON.stringify(requestBody)).not.toContain("产品身份与能力边界");
+  });
+
   it("uses Responses for Grok 4.5 and translates messages to input", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       output: [{ type: "message", content: [{ type: "output_text", text: "你好，Grok" }] }],

@@ -255,7 +255,7 @@ export class GroupSummaryService {
     };
     const dialogue = formatDialogue(messages, this.dependencies.store);
     const prompt: StructuredMessage[] = [
-      { role: "system", content: promptTemplate("mia.group-summary", {}) },
+      { role: "system", content: promptTemplate("mia.group-summary", input.locale, {}) },
       { role: "user", content: groupSummaryInputPrompt({
         scope: scopeMetadata,
         locale: input.locale,

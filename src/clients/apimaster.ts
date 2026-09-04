@@ -345,9 +345,9 @@ export class APIMasterClient {
     };
   }
 
-  async chat(apiKey: string, model: string, userMessage: string): Promise<string> {
+  async chat(apiKey: string, model: string, userMessage: string, locale?: string | null): Promise<string> {
     return this.chatMessages(apiKey, model, [
-      { role: "system", content: promptText("mia.system") },
+      { role: "system", content: promptText("mia.system", locale) },
       { role: "user", content: userMessage },
     ]);
   }
@@ -553,6 +553,7 @@ export class APIMasterClient {
     instruction: string,
     images: readonly MediaBinary[],
     context: readonly StructuredMessage[] = [],
+    locale?: string | null,
   ): Promise<string> {
     const content = [
       { type: "text", text: instruction },
@@ -563,7 +564,7 @@ export class APIMasterClient {
     ];
     if (preferResponsesForModel(model)) {
       return this.responsesText(apiKey, model, [
-        { role: "system", content: promptText("mia.system") },
+        { role: "system", content: promptText("mia.system", locale) },
         ...context,
         { role: "user", content },
       ]);
@@ -576,7 +577,7 @@ export class APIMasterClient {
         body: JSON.stringify({
           model,
           messages: [
-            { role: "system", content: promptText("mia.system") },
+            { role: "system", content: promptText("mia.system", locale) },
             ...context,
             { role: "user", content },
           ],
@@ -589,7 +590,7 @@ export class APIMasterClient {
     }
     if (!response.ok && await isResponsesOnlyError(response)) {
       return this.responsesText(apiKey, model, [
-        { role: "system", content: promptText("mia.system") },
+        { role: "system", content: promptText("mia.system", locale) },
         ...context,
         { role: "user", content },
       ]);

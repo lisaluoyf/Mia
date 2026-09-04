@@ -64,6 +64,26 @@ describe("Mia intent router", () => {
     expect(JSON.stringify(messages)).not.toContain("image_url");
   });
 
+  it("uses the locale-specific router prompt when a system language is provided", async () => {
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      intent: "chat", confidence: 0.99, instruction: "", media_source: "none",
+      image_options: null, video_options: null, final_response: "Create it",
+      conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "router-model", timeoutMs: 1000 });
+
+    await router.classify({
+      ...base,
+      text: "Generate a sunset image",
+      locale: "en",
+    }, "user-router-key");
+
+    const messages = structuredResponse.mock.calls[0]?.[2] as Array<{ content: unknown }>;
+    expect(String(messages[0]?.content)).toContain("You are Mia");
+    expect(String(messages[0]?.content)).toContain("default system language for this chat");
+    expect(String(messages[1]?.content)).toContain("\"default_response_locale\":\"en\"");
+  });
+
   it("falls back to chat for timeout, invalid schema, and low confidence", async () => {
     for (const output of [new Error("timeout"), { intent: "hack" }, {
       intent: "video_generate", confidence: 0.2, instruction: "script", media_source: "none",
@@ -627,11 +647,11 @@ describe("Mia intent router", () => {
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
     const participationPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.follow-up-participation");
     const followUpPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.follow-up-chat");
-    expect(basePrompt).toMatchObject({ version: 6, kind: "base" });
-    expect(basePrompt?.text).toContain("开门见山，优先给出结论");
+    expect(basePrompt).toMatchObject({ version: 7, kind: "base" });
+    expect(basePrompt?.text).toContain("默认使用用户在当前 Telegram 会话中的系统语言回答");
     expect(basePrompt?.text).toContain("默认不超过 200 字或 3 个要点");
     expect(routerPrompt).toMatchObject({
-      version: 15,
+      version: 16,
       kind: "composed",
       includes: ["mia.system"],
     });
@@ -639,13 +659,13 @@ describe("Mia intent router", () => {
     expect(routerPrompt?.text).not.toContain("信息较多时");
     expect(routerPrompt?.text).not.toContain("list 用于并列重点");
     expect(routerPrompt?.text).toContain("不得把段落正文放进 paragraph.items");
-    expect(participationPrompt).toMatchObject({ version: 3 });
+    expect(participationPrompt).toMatchObject({ version: 4 });
     expect(participationPrompt?.text).toContain("只有存在这类证据时才允许 should_respond=true");
     expect(participationPrompt?.text).toContain("包含附件或描述附件，都不能单独构成介入理由");
     expect(participationPrompt?.text).toContain("不要从图片、视频、文件的存在或其文字描述推断");
     expect(participationPrompt?.text).not.toContain("简单附和或感谢、表情式回复");
     expect(followUpPrompt).toMatchObject({
-      version: 9,
+      version: 10,
       kind: "composed",
       includes: ["mia.system"],
     });
