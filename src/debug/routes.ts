@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
-import type { DebugService } from "./service.js";
+import { InvalidModelConfigError, ModelCatalogUnavailableError, type DebugService } from "./service.js";
 
 const userQuery = z.object({ telegram_user_id: z.coerce.number().int().positive() });
 const requestParams = z.object({ id: z.string().uuid() });
@@ -60,12 +60,21 @@ export function registerDebugRoutes(app: FastifyInstance, options: { serviceKey:
     if (id === null) return;
     return { success: true, data: options.service.clear(id) };
   });
-  app.get("/internal/debug/model-config", (request, reply) => {
-    if (userId(request, reply) === null) return;
-    return { success: true, data: options.service.modelConfigs() };
+  app.get("/internal/debug/model-config", async (request, reply) => {
+    const id = userId(request, reply);
+    if (id === null) return;
+    try {
+      return { success: true, data: await options.service.modelConfigs(id) };
+    } catch (error) {
+      if (error instanceof ModelCatalogUnavailableError) {
+        return reply.code(503).send({ success: false, error: "model_catalog_unavailable" });
+      }
+      throw error;
+    }
   });
-  app.put("/internal/debug/model-config", (request, reply) => {
-    if (userId(request, reply) === null) return;
+  app.put("/internal/debug/model-config", async (request, reply) => {
+    const id = userId(request, reply);
+    if (id === null) return;
     const body = request.body;
     if (typeof body !== "object" || body === null || Array.isArray(body)) {
       return reply.code(400).send({ success: false, error: "invalid_request" });
@@ -73,9 +82,15 @@ export function registerDebugRoutes(app: FastifyInstance, options: { serviceKey:
     const parsed = z.record(z.string(), z.union([z.string().trim().min(1).max(200), z.null()])).safeParse(body);
     if (!parsed.success) return reply.code(400).send({ success: false, error: "invalid_request" });
     try {
-      return { success: true, data: options.service.saveModelConfigs(parsed.data) };
-    } catch {
-      return reply.code(422).send({ success: false, error: "invalid_model_config" });
+      return { success: true, data: await options.service.saveModelConfigs(id, parsed.data) };
+    } catch (error) {
+      if (error instanceof ModelCatalogUnavailableError) {
+        return reply.code(503).send({ success: false, error: "model_catalog_unavailable" });
+      }
+      if (error instanceof InvalidModelConfigError) {
+        return reply.code(422).send({ success: false, error: "invalid_model_config" });
+      }
+      throw error;
     }
   });
 }

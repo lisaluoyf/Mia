@@ -2,12 +2,35 @@ import type { ContextStore } from "../storage/store.js";
 import { PROMPT_LIBRARY } from "../prompts.js";
 import type { DebugStore } from "./store.js";
 import type { ModelConfigStore } from "../model-config/store.js";
+import { MODEL_CONFIG_DEFINITIONS, type ModelConfigEntry } from "../model-config/types.js";
+import type { APIMasterClient } from "../clients/apimaster.js";
+import type { ModelOption } from "../settings/types.js";
+
+export class ModelCatalogUnavailableError extends Error {
+  constructor() {
+    super("Model catalog is unavailable");
+    this.name = "ModelCatalogUnavailableError";
+  }
+}
+
+export class InvalidModelConfigError extends Error {
+  constructor() {
+    super("Invalid model configuration");
+    this.name = "InvalidModelConfigError";
+  }
+}
+
+export interface DebugModelConfigState {
+  configs: ModelConfigEntry[];
+  models: ModelOption[];
+}
 
 export class DebugService {
   constructor(
     private readonly debugStore: DebugStore,
     private readonly contexts: Pick<ContextStore, "listMemories" | "getLatestSummary" | "listPendingCompletedTurns">,
     private readonly modelConfig: ModelConfigStore,
+    private readonly client: Pick<APIMasterClient, "listModels">,
   ) {}
 
   requests(telegramUserId: number) {
@@ -40,11 +63,46 @@ export class DebugService {
     return { cleared: this.debugStore.clear(telegramUserId) };
   }
 
-  modelConfigs() {
-    return this.modelConfig.list();
+  async modelConfigs(telegramUserId: number): Promise<DebugModelConfigState> {
+    try {
+      const catalog = await this.client.listModels(telegramUserId);
+      return { configs: this.modelConfig.list(), models: catalog.models };
+    } catch {
+      throw new ModelCatalogUnavailableError();
+    }
   }
 
-  saveModelConfigs(values: Record<string, string | null>) {
-    return this.modelConfig.save(values);
+  async saveModelConfigs(telegramUserId: number, values: Record<string, string | null>): Promise<DebugModelConfigState> {
+    let models: ModelOption[];
+    try {
+      models = (await this.client.listModels(telegramUserId)).models;
+    } catch {
+      throw new ModelCatalogUnavailableError();
+    }
+
+    const definitions = new Map(MODEL_CONFIG_DEFINITIONS.map((definition) => [definition.key, definition]));
+    const normalized: Record<string, string | null> = {};
+    for (const [key, requested] of Object.entries(values)) {
+      const definition = definitions.get(key as (typeof MODEL_CONFIG_DEFINITIONS)[number]["key"]);
+      if (!definition || (requested === null && definition.capability !== "vision")) {
+        throw new InvalidModelConfigError();
+      }
+      if (requested === null) {
+        normalized[key] = null;
+        continue;
+      }
+      const model = models.find((candidate) => candidate.id.toLowerCase() === requested.toLowerCase());
+      const valid = model && (
+        definition.capability === "vision"
+          ? model.capability === "chat" && model.supportsVision
+          : definition.capability === "video"
+            ? model.capability === "video" && model.videoCapabilities !== undefined
+            : model.capability === definition.capability
+      );
+      if (!valid) throw new InvalidModelConfigError();
+      normalized[key] = model.id;
+    }
+
+    return { configs: this.modelConfig.save(normalized), models };
   }
 }

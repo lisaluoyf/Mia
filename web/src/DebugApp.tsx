@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import { Activity, AlertCircle, Braces, Check, ChevronRight, Clock3, Database, FileText, RefreshCw, RotateCcw, Save, Search, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Activity, AlertCircle, Braces, Check, ChevronDown, ChevronRight, Clock3, Database, FileText, RefreshCw, Save, Search, Trash2 } from "lucide-react";
 
-import { clearDebugRequests, DebugApiError, loadDebugConsole, saveDebugModelConfigs, type DebugMemory, type DebugModelConfig, type DebugPrompt, type DebugRequest } from "./debug-api";
+import { clearDebugRequests, DebugApiError, loadDebugConsole, saveDebugModelConfigs, type DebugMemory, type DebugModelConfig, type DebugModelConfigState, type DebugModelOption, type DebugPrompt, type DebugRequest } from "./debug-api";
 import "./debug.css";
 
 type Tab = "requests" | "memory" | "prompts" | "models";
@@ -149,7 +149,8 @@ function draftValues(configs: DebugModelConfig[]): Record<string, string> {
   return Object.fromEntries(configs.map((config) => [config.key, config.model ?? ""]));
 }
 
-function ModelConfigsView({ configs, onSaved }: { configs: DebugModelConfig[]; onSaved: (configs: DebugModelConfig[]) => void }) {
+function ModelConfigsView({ state, onSaved }: { state: DebugModelConfigState; onSaved: (state: DebugModelConfigState) => void }) {
+  const { configs, models } = state;
   const [draft, setDraft] = useState<Record<string, string>>(() => draftValues(configs));
   const [baseline, setBaseline] = useState<Record<string, string>>(() => draftValues(configs));
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -176,7 +177,7 @@ function ModelConfigsView({ configs, onSaved }: { configs: DebugModelConfig[]; o
     setSaveState("saving");
     try {
       const saved = await saveDebugModelConfigs(values);
-      const next = draftValues(saved);
+      const next = draftValues(saved.configs);
       setDraft(next);
       setBaseline(next);
       setSaveState("saved");
@@ -206,30 +207,76 @@ function ModelConfigsView({ configs, onSaved }: { configs: DebugModelConfig[]; o
     </div>
     <div className="model-config-table-wrap">
       <table className="model-config-table">
-        <thead><tr><th>场景</th><th>能力</th><th>当前模型</th><th>初始默认</th><th><span className="sr-only">操作</span></th></tr></thead>
-        <tbody>{groups.map((group) => <ModelConfigGroupRows key={group.key} group={group} configs={configs.filter((config) => config.group === group.key)} draft={draft} onUpdate={update} />)}</tbody>
+        <thead><tr><th>场景</th><th>能力</th><th>默认模型</th></tr></thead>
+        <tbody>{groups.map((group) => <ModelConfigGroupRows key={group.key} group={group} configs={configs.filter((config) => config.group === group.key)} models={models} draft={draft} onUpdate={update} />)}</tbody>
       </table>
     </div>
   </div>;
 }
 
-function ModelConfigGroupRows({ group, configs, draft, onUpdate }: {
+function ModelPicker({ config, models, value, onChange }: { config: DebugModelConfig; models: DebugModelOption[]; value: string; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const root = useRef<HTMLDivElement>(null);
+  const candidates = useMemo(() => models.filter((model) => (
+    config.capability === "vision"
+      ? model.capability === "chat" && model.supportsVision
+      : config.capability === "video"
+        ? model.capability === "video" && model.videoCapabilities !== undefined
+        : model.capability === config.capability
+  )).sort((left, right) => Number(right.recommended) - Number(left.recommended) || left.displayName.localeCompare(right.displayName)), [config.capability, models]);
+  const selected = candidates.find((model) => model.id.toLowerCase() === value.toLowerCase());
+  const unavailable = value !== "" && !selected;
+  const normalizedQuery = query.trim().toLowerCase();
+  const visible = candidates.filter((model) => `${model.displayName} ${model.vendor} ${model.id}`.toLowerCase().includes(normalizedQuery));
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
+
+  const choose = (next: string) => { onChange(next); setOpen(false); setQuery(""); };
+  return <div className={`model-picker ${open ? "open" : ""}`} ref={root}>
+    <button type="button" className="model-picker-trigger" onClick={() => setOpen((current) => !current)} aria-expanded={open}>
+      <span className="model-picker-value">
+        <strong>{value === "" ? "自动选择" : (selected?.displayName ?? value)}</strong>
+        {value !== "" && <small>{selected ? `${selected.vendor} · ${selected.id}` : "当前不可用"}</small>}
+      </span>
+      {unavailable && <AlertCircle className="model-unavailable-icon" size={16} />}
+      <ChevronDown className="model-picker-chevron" size={17} />
+    </button>
+    {open && <div className="model-picker-menu">
+      <label className="model-picker-search"><Search size={16} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、厂商或模型 ID" aria-label="搜索模型" /></label>
+      <div className="model-picker-options">
+        {config.capability === "vision" && normalizedQuery === "" && <button type="button" className="model-option" onClick={() => choose("")}><span><strong>自动选择</strong><small>优先使用推荐的视觉模型</small></span>{value === "" && <Check size={16} />}</button>}
+        {visible.map((model) => <button type="button" className="model-option" key={model.id} onClick={() => choose(model.id)}>
+          <span><strong>{model.displayName}{(model.recommended || (config.capability === "vision" && model.visionRecommended)) && <em>推荐</em>}</strong><small>{model.vendor} · {model.id}</small></span>
+          {model.id.toLowerCase() === value.toLowerCase() && <Check size={16} />}
+        </button>)}
+        {visible.length === 0 && normalizedQuery !== "" && <p className="model-picker-empty">没有匹配的模型</p>}
+      </div>
+    </div>}
+  </div>;
+}
+
+function ModelConfigGroupRows({ group, configs, models, draft, onUpdate }: {
   group: { key: DebugModelConfig["group"]; title: string; note: string };
   configs: DebugModelConfig[];
+  models: DebugModelOption[];
   draft: Record<string, string>;
   onUpdate: (key: string, value: string) => void;
 }) {
   return <>
-    <tr className="model-group-row"><th colSpan={5}><strong>{group.title}</strong><span>{group.note}</span></th></tr>
+    <tr className="model-group-row"><th colSpan={3}><strong>{group.title}</strong><span>{group.note}</span></th></tr>
     {configs.map((config) => {
       const value = draft[config.key] ?? "";
       const rowInvalid = config.capability !== "vision" && value.trim() === "";
       return <tr key={config.key} className={rowInvalid ? "invalid" : ""}>
         <td data-label="场景"><strong>{config.scenario}</strong><span>{config.description}</span><code>{config.key}</code></td>
         <td data-label="能力"><span className={`capability-badge ${config.capability}`}>{capabilityNames[config.capability]}</span></td>
-        <td data-label="当前模型"><input className="model-config-input" value={value} onChange={(event) => onUpdate(config.key, event.target.value)} placeholder={config.capability === "vision" ? "留空时自动选择" : "输入模型 ID"} aria-label={`${config.scenario}模型`} aria-invalid={rowInvalid} /></td>
-        <td data-label="初始默认"><code className="model-default">{config.defaultModel ?? "自动选择"}</code></td>
-        <td className="model-row-action"><button className="tool-button" onClick={() => onUpdate(config.key, config.defaultModel ?? "")} title="恢复初始默认" aria-label={`${config.scenario}恢复初始默认`}><RotateCcw size={15} /></button></td>
+        <td data-label="默认模型"><ModelPicker config={config} models={models} value={value} onChange={(next) => onUpdate(config.key, next)} /></td>
       </tr>;
     })}
   </>;
@@ -237,7 +284,7 @@ function ModelConfigGroupRows({ group, configs, draft, onUpdate }: {
 
 export function DebugApp() {
   const [tab, setTab] = useState<Tab>("requests");
-  const [data, setData] = useState<{ requests: DebugRequest[]; prompts: DebugPrompt[]; memory: DebugMemory; modelConfigs: DebugModelConfig[] } | null>(null);
+  const [data, setData] = useState<{ requests: DebugRequest[]; prompts: DebugPrompt[]; memory: DebugMemory; modelConfig: DebugModelConfigState } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [promptId, setPromptId] = useState("");
@@ -259,6 +306,6 @@ export function DebugApp() {
     </header>
     <div className="debug-page-head"><div><span>私人开发控制台</span><h1>{tab === "requests" ? "模型请求" : tab === "memory" ? "记忆状态" : tab === "prompts" ? "Prompt 库" : "场景模型"}</h1></div>{data && <div className="page-stat"><Clock3 size={16} /><span>每 10 秒自动刷新</span></div>}</div>
     {error ? <div className="fatal-state"><Activity size={28} /><h2>{error}</h2></div> : !data ? <div className="fatal-state"><RefreshCw className="spin" size={28} /><h2>正在加载调试记录</h2></div> :
-      tab === "requests" ? <RequestsView requests={data.requests} onPrompt={openPrompt} /> : tab === "memory" ? <MemoryView data={data.memory} /> : tab === "prompts" ? <PromptsView prompts={data.prompts} selectedId={promptId} requests={data.requests} /> : <ModelConfigsView configs={data.modelConfigs} onSaved={(modelConfigs) => setData((current) => current ? { ...current, modelConfigs } : current)} />}
+      tab === "requests" ? <RequestsView requests={data.requests} onPrompt={openPrompt} /> : tab === "memory" ? <MemoryView data={data.memory} /> : tab === "prompts" ? <PromptsView prompts={data.prompts} selectedId={promptId} requests={data.requests} /> : <ModelConfigsView state={data.modelConfig} onSaved={(modelConfig) => setData((current) => current ? { ...current, modelConfig } : current)} />}
   </div>;
 }

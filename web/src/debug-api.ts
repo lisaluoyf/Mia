@@ -48,6 +48,20 @@ export interface DebugModelConfig {
   model: string | null;
   updatedAt: string | null;
 }
+export interface DebugModelOption {
+  id: string;
+  displayName: string;
+  vendor: string;
+  capability: "chat" | "image" | "video";
+  recommended: boolean;
+  supportsVision: boolean;
+  visionRecommended: boolean;
+  videoCapabilities?: unknown;
+}
+export interface DebugModelConfigState {
+  configs: DebugModelConfig[];
+  models: DebugModelOption[];
+}
 
 export class DebugApiError extends Error {
   constructor(public status: number, public code: string) { super(code); }
@@ -100,7 +114,7 @@ function previewData() {
     summary: { content: "用户已确认 Mia 的五层上下文与每 10 轮长期记忆整理规则。", throughMessageId: 170, createdAt: new Date().toISOString() },
     pendingTurns: 7, batchSize: 10, lastCompaction: null, history: [],
   };
-  const modelConfigs: DebugModelConfig[] = [
+  const configs: DebugModelConfig[] = [
     { key: "user_chat_default", group: "user_default", scenario: "普通聊天", description: "用户没有单独选择时的 Chat 默认模型", capability: "chat", defaultModel: "grok-4.5", model: "grok-4.5", updatedAt: null },
     { key: "user_vision_default", group: "user_default", scenario: "图片理解", description: "用户没有单独选择时的 Vision 默认模型；留空表示自动选择", capability: "vision", defaultModel: null, model: null, updatedAt: null },
     { key: "user_image_default", group: "user_default", scenario: "图片生成与编辑", description: "贴纸也复用此图片模型", capability: "image", defaultModel: "gpt-image-2", model: "gpt-image-2", updatedAt: null },
@@ -111,25 +125,34 @@ function previewData() {
     { key: "group_summary", group: "internal", scenario: "群聊总结", description: "响应用户主动发起的群聊总结", capability: "chat", defaultModel: "gpt-5.4", model: "gpt-5.4", updatedAt: null },
     { key: "guest_chat", group: "internal", scenario: "访客聊天与无 Key 回退", description: "使用 Mia 的受限访客 Token", capability: "chat", defaultModel: "gpt-5.4", model: "gpt-5.4", updatedAt: null },
   ];
-  return { requests: previewRequests, prompts, memory, modelConfigs };
+  const models: DebugModelOption[] = [
+    { id: "gpt-5.4", displayName: "GPT-5.4", vendor: "OpenAI", capability: "chat", recommended: true, supportsVision: true, visionRecommended: true },
+    { id: "grok-4.5", displayName: "Grok 4.5", vendor: "xAI", capability: "chat", recommended: false, supportsVision: true, visionRecommended: false },
+    { id: "claude-sonnet-4.6", displayName: "Claude Sonnet 4.6", vendor: "Anthropic", capability: "chat", recommended: false, supportsVision: true, visionRecommended: false },
+    { id: "deepseek-v3.2", displayName: "DeepSeek V3.2", vendor: "DeepSeek", capability: "chat", recommended: false, supportsVision: false, visionRecommended: false },
+    { id: "gpt-image-2", displayName: "GPT Image 2", vendor: "OpenAI", capability: "image", recommended: true, supportsVision: false, visionRecommended: false },
+    { id: "gemini-3-pro-image-preview", displayName: "Gemini 3 Pro Image", vendor: "Google", capability: "image", recommended: false, supportsVision: false, visionRecommended: false },
+    { id: "minimax-h3", displayName: "MiniMax H3", vendor: "MiniMax", capability: "video", recommended: true, supportsVision: false, visionRecommended: false, videoCapabilities: {} },
+  ];
+  return { requests: previewRequests, prompts, memory, modelConfig: { configs, models } };
 }
 
-export async function loadDebugConsole(): Promise<{ requests: DebugRequest[]; prompts: DebugPrompt[]; memory: DebugMemory; modelConfigs: DebugModelConfig[] }> {
+export async function loadDebugConsole(): Promise<{ requests: DebugRequest[]; prompts: DebugPrompt[]; memory: DebugMemory; modelConfig: DebugModelConfigState }> {
   const isLocalPreview = ["127.0.0.1", "localhost"].includes(location.hostname) && new URLSearchParams(location.search).get("preview") === "1";
   if (isLocalPreview) return previewData();
-  const [requests, prompts, memory, modelConfigs] = await Promise.all([
+  const [requests, prompts, memory, modelConfig] = await Promise.all([
     request<DebugRequest[]>("requests"), request<DebugPrompt[]>("prompts"), request<DebugMemory>("memory"),
-    request<DebugModelConfig[]>("model-config"),
+    request<DebugModelConfigState>("model-config"),
   ]);
-  return { requests, prompts, memory, modelConfigs };
+  return { requests, prompts, memory, modelConfig };
 }
 
 export async function clearDebugRequests(): Promise<void> {
   await request<{ cleared: number }>("requests", { method: "DELETE" });
 }
 
-export async function saveDebugModelConfigs(values: Record<string, string | null>): Promise<DebugModelConfig[]> {
-  return request<DebugModelConfig[]>("model-config", {
+export async function saveDebugModelConfigs(values: Record<string, string | null>): Promise<DebugModelConfigState> {
+  return request<DebugModelConfigState>("model-config", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(values),

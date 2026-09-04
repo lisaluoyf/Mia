@@ -135,7 +135,7 @@ async function main(): Promise<void> {
       staticRoot: resolve("dist/web"),
     },
     mediaDownload: { store: mediaStore, client, publicBaseUrl: config.publicBaseUrl },
-    debug: new DebugService(debugStore, contexts, modelConfig),
+    debug: new DebugService(debugStore, contexts, modelConfig, client),
   });
   let stopping = false;
 
