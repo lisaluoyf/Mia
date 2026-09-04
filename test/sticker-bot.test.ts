@@ -146,6 +146,24 @@ describe("Telegram sticker intent", () => {
     expect(store?.listJobInputs(job?.id ?? 0)).toHaveLength(1);
   });
 
+  it("uses /sticker as a deterministic shortcut without calling the router", async () => {
+    const { bot, classify, resolveAPIKey } = await setup();
+
+    await bot.handleUpdate(update(42, "/sticker", 1007) as never);
+
+    const job = store?.getJobByIdempotencyKey("message:42:7");
+    expect(classify).not.toHaveBeenCalled();
+    expect(resolveAPIKey).toHaveBeenCalledWith(42, "gpt-image-2");
+    expect(job).toMatchObject({
+      telegramUserId: 42,
+      chatId: 42,
+      type: "image_edit",
+      status: "queued",
+      options: { aspectRatio: "1:1", outputMode: "telegram_sticker", stickerTitle: "Liz | Mia" },
+    });
+    expect(job?.instruction).toContain("one polished Telegram sticker");
+  });
+
   it("passes a replied photo caption separately from the new sticker request", async () => {
     const { bot, classify } = await setup();
     const oldCaption = "提取图片里的龙猫，做一个比耶的表情";

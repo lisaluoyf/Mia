@@ -135,7 +135,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] 基础错误提示。
 - [x] 通用五类意图路由：`chat`、`image_generate`、`image_edit`、`vision_qa`、`video_generate`。
 - [x] 免费用户的媒体意图在付费任务创建前拦截，并按未绑定、无 Token、余额不足显示注册绑定、创建 Token 或充值入口。
-- [x] `/image`、`/vision`、`/video` 确定性入口；自然语言优先使用触发者自己的 APIMaster Key 调用 `gpt-5.4`，仅未绑定或无可用 Token 时使用免费文字凭证。
+- [x] Telegram 斜杠面板注册 `/image`、`/video`、`/sticker`、`/new`、`/summary`；`/image`、`/vision`、`/video`、`/sticker` 为确定性入口，自然语言优先使用触发者自己的 APIMaster Key 调用 `gpt-5.4`，仅未绑定或无可用 Token 时使用免费文字凭证。
 - [x] 已绑定用户的 `chat` 和自然语言 `vision_qa` 可由同一次 `gpt-5.4` 调用返回最终文字；免费用户的所有视觉、图片和视频意图会在媒体调用前拦截。
 - [x] 图片、图片文档和相册持久化；私聊当前图片保留 30 分钟。
 - [x] 文生图、多图改图、看图问答和文生/图生视频执行框架。

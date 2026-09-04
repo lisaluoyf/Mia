@@ -11,6 +11,7 @@ import { ContextCompactor } from "./context/compactor.js";
 import { GroupContextCompactor } from "./context/group-compactor.js";
 import { GroupSummaryService } from "./context/group-summary.js";
 import { createBot } from "./telegram/bot.js";
+import { botCommands } from "./telegram/commands.js";
 import { IntentRouter } from "./intent/router.js";
 import { MediaStore } from "./media/store.js";
 import { MediaWorker } from "./media/worker.js";
@@ -111,6 +112,12 @@ async function main(): Promise<void> {
     },
   });
   await bot.init();
+  try {
+    await bot.api.setMyCommands(botCommands("en"));
+    await bot.api.setMyCommands(botCommands("zh"), { language_code: "zh" });
+  } catch (error) {
+    logger.warn({ err: error }, "Mia Telegram commands could not be configured");
+  }
   const worker = new MediaWorker({
     client,
     store: mediaStore,

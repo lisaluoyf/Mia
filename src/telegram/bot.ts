@@ -399,6 +399,11 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       ...directIntent(inputs.length > 0 ? "image_edit" : "image_generate", image.instruction, inputs.length > 0 ? "message" : "none"),
       image_options: { aspect_ratio: image.aspectRatio },
     };
+  } else if (explicit?.command === "sticker") {
+    routed = {
+      ...directIntent("sticker_create", explicit.instruction, inputs.length > 0 ? "message" : "none"),
+      missingRequired: inputs.length > 0 ? [] : ["image"],
+    };
   } else if (explicit?.command === "vision") {
     routed = directIntent("vision_qa", explicit.instruction, inputs.length > 0 ? "message" : "none");
   } else if (explicit?.command === "video") {
@@ -1651,7 +1656,7 @@ function directIntent(intent: PendingMediaIntent, instruction: string, mediaSour
 }
 
 function parseExplicitCommand(text: string): { command: string; instruction: string } | null {
-  const match = /^\/(image|vision|video|summary|new|forget|media_on|media_off)(?:@\w+)?(?:\s+([\s\S]*))?$/i.exec(text.trim());
+  const match = /^\/(image|vision|video|sticker|summary|new|forget|media_on|media_off)(?:@\w+)?(?:\s+([\s\S]*))?$/i.exec(text.trim());
   return match ? { command: match[1]?.toLowerCase() ?? "", instruction: match[2]?.trim() ?? "" } : null;
 }
 

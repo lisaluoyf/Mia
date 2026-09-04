@@ -13,6 +13,8 @@ editing, understanding, and video generation always require the user's own Key.
 - `/image`, `/vision`, and `/video` bypass the classifier. Natural-language requests
 use `gpt-5.4`; only `telegram_not_bound` and `no_usable_api_key` fall back to the
 guest text credential. Guest media intents stop at an account activation prompt.
+- Telegram's slash menu exposes `/image`, `/video`, `/sticker`, `/new`, and
+  `/summary`; `/sticker` is a deterministic private-chat shortcut.
 - Videos always require a 10-minute confirmation draft before the paid request.
 - Image and video generation share a three-job per-user concurrency limit.
 - APIMaster owns accounts, Keys, quota checks, and model routing.
