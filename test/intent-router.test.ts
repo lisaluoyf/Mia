@@ -626,11 +626,11 @@ describe("Mia intent router", () => {
     const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
     const followUpPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.follow-up-chat");
-    expect(basePrompt).toMatchObject({ version: 4, kind: "base" });
-    expect(basePrompt?.text).toContain("直接、简洁地回答当前问题；用户明确要求详细时再展开");
-    expect(basePrompt?.text).not.toContain("默认不超过 200 字或 3 个要点");
+    expect(basePrompt).toMatchObject({ version: 5, kind: "base" });
+    expect(basePrompt?.text).toContain("开门见山，优先给出结论");
+    expect(basePrompt?.text).toContain("默认不超过 200 字或 3 个要点");
     expect(routerPrompt).toMatchObject({
-      version: 13,
+      version: 14,
       kind: "composed",
       includes: ["mia.system"],
     });
@@ -639,7 +639,7 @@ describe("Mia intent router", () => {
     expect(routerPrompt?.text).not.toContain("list 用于并列重点");
     expect(routerPrompt?.text).toContain("不得把段落正文放进 paragraph.items");
     expect(followUpPrompt).toMatchObject({
-      version: 7,
+      version: 8,
       kind: "composed",
       includes: ["mia.system"],
     });
