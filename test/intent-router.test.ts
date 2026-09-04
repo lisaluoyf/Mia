@@ -622,30 +622,27 @@ describe("Mia intent router", () => {
     });
   });
 
-  it("registers shared base modules in each composed chat prompt", () => {
+  it("registers the concise base prompt in each composed chat prompt", () => {
     const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
-    const presentationPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.presentation-style");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
     const followUpPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.follow-up-chat");
-    expect(basePrompt).toMatchObject({ version: 3, kind: "base" });
-    expect(basePrompt?.text).toContain("开门见山，优先给出结论");
-    expect(basePrompt?.text).toContain("优先使用列表，每项尽量简短");
-    expect(basePrompt?.text).toContain("普通咨询默认不超过 200 字或 3 个要点");
-    expect(presentationPrompt).toMatchObject({ version: 1, kind: "base" });
+    expect(basePrompt).toMatchObject({ version: 4, kind: "base" });
+    expect(basePrompt?.text).toContain("直接、简洁地回答当前问题；用户明确要求详细时再展开");
+    expect(basePrompt?.text).not.toContain("默认不超过 200 字或 3 个要点");
     expect(routerPrompt).toMatchObject({
-      version: 12,
+      version: 13,
       kind: "composed",
-      includes: ["mia.system", "mia.presentation-style"],
+      includes: ["mia.system"],
     });
     expect(routerPrompt?.text).toContain(basePrompt?.text ?? "missing");
-    expect(routerPrompt?.text).toContain(presentationPrompt?.text ?? "missing");
-    expect(routerPrompt?.text).toContain("一张核心表格 + 重点观察 + 一句建议");
+    expect(routerPrompt?.text).not.toContain("信息较多时");
+    expect(routerPrompt?.text).not.toContain("list 用于并列重点");
     expect(routerPrompt?.text).toContain("不得把段落正文放进 paragraph.items");
     expect(followUpPrompt).toMatchObject({
-      version: 6,
+      version: 7,
       kind: "composed",
-      includes: ["mia.system", "mia.presentation-style"],
+      includes: ["mia.system"],
     });
-    expect(followUpPrompt?.text).toContain(presentationPrompt?.text ?? "missing");
+    expect(followUpPrompt?.text).toContain(basePrompt?.text ?? "missing");
   });
 });
