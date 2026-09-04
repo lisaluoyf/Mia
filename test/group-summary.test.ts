@@ -109,13 +109,12 @@ describe("Mia group summary service", () => {
     expect(request).toContain("只读继承");
     expect(request).not.toContain("绝不能进入群聊的私聊记忆");
     expect(request).not.toContain("绝不能进入 Topic 的 General 摘要");
-    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("问句不是事实");
-    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("其他 Bot 回复不可见");
-    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("不要使用“第 N 轮”");
-    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("中文可见正文以 500 字以内为目标");
-    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("topics 只保留 1 至 5 个最重要进展");
-    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("同一事实只出现一次");
-    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("overview 放在用户可见总结的最后");
+    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("以最简洁的方式总结输入中真实存在的群消息");
+    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("区分疑问、提议、结论和待办");
+    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("同步返回完整的 rolling_summary 和群公开长期记忆");
+    expect(GROUP_SUMMARY_SYSTEM_PROMPT).toContain("所有总结项和记忆必须引用真实 source_message_ids");
+    expect(GROUP_SUMMARY_SYSTEM_PROMPT).not.toContain("中文可见正文以 500 字以内为目标");
+    expect(GROUP_SUMMARY_SYSTEM_PROMPT).not.toContain("topics 只保留 1 至 5 个最重要进展");
 
     saveMessage(store, 20, 12, 100, "总结回复");
     expect(service.complete(prepared!, 20, [20])).toBe(true);
@@ -168,7 +167,7 @@ describe("Mia group summary service", () => {
     const debugFinish: unknown = debug.finish.mock.calls[0]?.[1];
     expect(debugStart).toMatchObject({
       kind: "group_summary",
-      promptRefs: [{ id: "mia.group-summary", version: 3 }, { id: "mia.group-summary-input", version: 1 }],
+      promptRefs: [{ id: "mia.group-summary", version: 4 }, { id: "mia.group-summary-input", version: 1 }],
       details: { selectedMessageCount: 300, truncated: true },
     });
     expect(debug.finish.mock.calls[0]?.[0]).toBe("summary-debug");
@@ -246,7 +245,7 @@ describe("Mia group summary service", () => {
   });
 
   it("registers the user-visible summary prompts independently from background compaction", () => {
-    expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-summary")).toMatchObject({ version: 3 });
+    expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-summary")).toMatchObject({ version: 4 });
     expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-summary-input")).toMatchObject({ version: 1 });
     expect(PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.group-context-compaction")).toMatchObject({ version: 1 });
   });
