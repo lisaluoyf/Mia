@@ -627,12 +627,13 @@ describe("Mia intent router", () => {
     const presentationPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.presentation-style");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
     const followUpPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.follow-up-chat");
-    expect(basePrompt).toMatchObject({ version: 2, kind: "base" });
+    expect(basePrompt).toMatchObject({ version: 3, kind: "base" });
     expect(basePrompt?.text).toContain("开门见山，优先给出结论");
     expect(basePrompt?.text).toContain("优先使用列表，每项尽量简短");
+    expect(basePrompt?.text).toContain("普通咨询默认不超过 200 字或 3 个要点");
     expect(presentationPrompt).toMatchObject({ version: 1, kind: "base" });
     expect(routerPrompt).toMatchObject({
-      version: 11,
+      version: 12,
       kind: "composed",
       includes: ["mia.system", "mia.presentation-style"],
     });
@@ -641,7 +642,7 @@ describe("Mia intent router", () => {
     expect(routerPrompt?.text).toContain("一张核心表格 + 重点观察 + 一句建议");
     expect(routerPrompt?.text).toContain("不得把段落正文放进 paragraph.items");
     expect(followUpPrompt).toMatchObject({
-      version: 5,
+      version: 6,
       kind: "composed",
       includes: ["mia.system", "mia.presentation-style"],
     });
