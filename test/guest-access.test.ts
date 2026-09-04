@@ -172,15 +172,10 @@ describe("Mia guest access", () => {
     expect(sent?.payload.message_thread_id).toBe(12);
     expect(sent?.payload.photo).toBe("https://apimaster.ai/mia/mia-introduction.png");
     expect(sent?.payload.caption).toBe(`我是 Mia，APIMaster 的 Telegram AI 助理
-
 我能：
-
 💬 对话和查询实时信息
-
 🖼 生成图片、修改图片
-
 ✨ 生成Telegram 贴纸
-
 🎬 创作视频`);
     expect(sent?.payload.caption).not.toContain("●");
     expect(sent?.payload.reply_markup).toEqual({

@@ -76,7 +76,7 @@ export function miaIntroduction(locale: BotLocale): MiaResponse {
         type: "paragraph",
         heading: null,
         emoji: null,
-        text: [copy.headline, copy.capabilitiesHeading, ...copy.capabilities].join("\n\n"),
+        text: [copy.headline, copy.capabilitiesHeading, ...copy.capabilities].join("\n"),
         items: [],
         ordered: false,
         language: null,
