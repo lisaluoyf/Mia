@@ -4,7 +4,7 @@ import type { Logger } from "pino";
 import type { APIMasterClient, StructuredMessage } from "../clients/apimaster.js";
 import type { ChatCredentialProvider } from "../credentials/chat.js";
 import type { DebugRecorder } from "../debug/recorder.js";
-import { CONTEXT_COMPACTION_SYSTEM_PROMPT, contextCompactionInputPrompt, promptReference } from "../prompts.js";
+import { contextCompactionInputPrompt, promptReference, promptTemplate } from "../prompts.js";
 import type { ContextStore } from "../storage/store.js";
 import { CONTEXT_TURN_BATCH_SIZE, formatCompactionDialogue } from "./conversation.js";
 
@@ -87,7 +87,7 @@ export class ContextCompactor {
         const memories = this.dependencies.store.listMemories({ type: "user", userId }, 100);
         const previousSummary = this.dependencies.store.getLatestSummary(scope)?.content ?? null;
         const prompt: StructuredMessage[] = [
-          { role: "system", content: CONTEXT_COMPACTION_SYSTEM_PROMPT },
+          { role: "system", content: promptTemplate("mia.context-compaction", {}) },
           {
             role: "user",
             content: contextCompactionInputPrompt({

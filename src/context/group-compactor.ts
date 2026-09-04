@@ -5,9 +5,9 @@ import type { APIMasterClient, StructuredMessage } from "../clients/apimaster.js
 import type { ChatCredentialProvider } from "../credentials/chat.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import {
-  GROUP_CONTEXT_COMPACTION_SYSTEM_PROMPT,
   groupContextCompactionInputPrompt,
   promptReference,
+  promptTemplate,
 } from "../prompts.js";
 import type { ContextStore } from "../storage/store.js";
 import type { ConversationScope, MemoryRecord, StoredMessage } from "../storage/types.js";
@@ -148,7 +148,7 @@ export class GroupContextCompactor {
         };
         const dialogue = formatDialogue(messages, this.dependencies.store);
         const prompt: StructuredMessage[] = [
-          { role: "system", content: GROUP_CONTEXT_COMPACTION_SYSTEM_PROMPT },
+          { role: "system", content: promptTemplate("mia.group-context-compaction", {}) },
           {
             role: "user",
             content: groupContextCompactionInputPrompt({

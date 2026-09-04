@@ -3,9 +3,7 @@ import { z } from "zod";
 import type { APIMasterClient, MediaBinary, StructuredMessage, WebSearchUsage } from "../clients/apimaster.js";
 import { MIA_RESPONSE_JSON_SCHEMA, miaResponseFromText, miaResponseSchema } from "../presentation/schema.js";
 import {
-  FOLLOW_UP_CHAT_SYSTEM_PROMPT,
-  FOLLOW_UP_PARTICIPATION_SYSTEM_PROMPT,
-  INTENT_ROUTER_SYSTEM_PROMPT,
+  promptText,
 } from "../prompts.js";
 
 const followUpDecisionSchema = z.object({
@@ -403,10 +401,10 @@ export class IntentRouter {
       })),
     ];
     const messages: StructuredMessage[] = input.conversationMessages === undefined ? [
-      { role: "system", content: INTENT_ROUTER_SYSTEM_PROMPT },
+      { role: "system", content: promptText("mia.intent-router") },
       { role: "user", content: userContent },
     ] : [
-      { role: "system", content: INTENT_ROUTER_SYSTEM_PROMPT },
+      { role: "system", content: promptText("mia.intent-router") },
       {
         role: "system",
         content: JSON.stringify({ current_request_routing_metadata: {
@@ -471,7 +469,7 @@ export class IntentRouter {
     if (!decision) {
       try {
         const decisionMessages: StructuredMessage[] = [
-          { role: "system", content: FOLLOW_UP_PARTICIPATION_SYSTEM_PROMPT },
+          { role: "system", content: promptText("mia.follow-up-participation") },
           ...fullMessages.filter((message, index) => !(index === 0 && message.role === "system")),
           { role: "user", content: JSON.stringify({
             follow_up_batch_message_ids: batchIds,
@@ -533,7 +531,7 @@ export class IntentRouter {
     }
 
     const answerMessages: StructuredMessage[] = [
-      { role: "system", content: FOLLOW_UP_CHAT_SYSTEM_PROMPT },
+      { role: "system", content: promptText("mia.follow-up-chat") },
       ...fullMessages.filter((message, index) => !(index === 0 && message.role === "system")),
       { role: "system", content: JSON.stringify({
         confirmed_follow_up: true,

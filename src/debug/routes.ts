@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import { InvalidModelConfigError, ModelCatalogUnavailableError, type DebugService } from "./service.js";
+import { InvalidPromptTextError } from "../prompt-config/store.js";
 
 const userQuery = z.object({ telegram_user_id: z.coerce.number().int().positive() });
 const requestParams = z.object({ id: z.string().uuid() });
@@ -54,6 +55,23 @@ export function registerDebugRoutes(app: FastifyInstance, options: { serviceKey:
     const id = userId(request, reply);
     if (id === null) return;
     return { success: true, data: options.service.prompts() };
+  });
+  app.put("/internal/debug/prompts/:id", { bodyLimit: 128 * 1024 }, (request, reply) => {
+    const id = userId(request, reply);
+    if (id === null) return;
+    const params = request.params as { id?: string };
+    const body = request.body;
+    const text = typeof body === "object" && body !== null && !Array.isArray(body)
+      ? (body as Record<string, unknown>).text
+      : undefined;
+    try {
+      return { success: true, data: options.service.savePrompt(params.id ?? "", text) };
+    } catch (error) {
+      if (error instanceof InvalidPromptTextError) {
+        return reply.code(error.message === "Unknown Prompt" ? 404 : 422).send({ success: false, error: "invalid_prompt" });
+      }
+      throw error;
+    }
   });
   app.delete("/internal/debug/requests", (request, reply) => {
     const id = userId(request, reply);

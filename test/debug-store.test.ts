@@ -8,6 +8,7 @@ import { createLogger } from "../src/logger.js";
 import { ModelConfigStore } from "../src/model-config/store.js";
 import { createServer } from "../src/server.js";
 import { ContextStore } from "../src/storage/store.js";
+import { PromptConfigStore } from "../src/prompt-config/store.js";
 
 const modelCatalog = {
   apimasterUserId: 9,
@@ -71,6 +72,7 @@ describe("developer debug snapshots", () => {
     const debugStore = new DebugStore(":memory:");
     const contexts = new ContextStore(":memory:");
     const modelConfig = new ModelConfigStore(":memory:");
+    const promptConfigs = new PromptConfigStore(":memory:");
     const listModels = vi.fn(() => Promise.resolve(modelCatalog));
     contexts.upsertUser({ telegramUserId: 42, firstName: "Lisa", lastName: null, username: "lisa", languageCode: "en", isBot: false });
     contexts.addMemory({ scope: { type: "user", userId: 42 }, category: "identity", content: "Call the user Roma" });
@@ -79,7 +81,7 @@ describe("developer debug snapshots", () => {
       logger: createLogger("silent"),
       serviceKey: "test-internal-service-key",
       handleUpdate: vi.fn(),
-      debug: new DebugService(debugStore, contexts, modelConfig, { listModels }),
+      debug: new DebugService(debugStore, contexts, modelConfig, { listModels }, promptConfigs),
     });
     const unauthorized = await app.inject({ method: "GET", url: "/internal/debug/requests?telegram_user_id=42" });
     expect(unauthorized.statusCode).toBe(404);
@@ -92,6 +94,21 @@ describe("developer debug snapshots", () => {
     expect(memory.body).toContain("Call the user Roma");
     const prompts = await app.inject({ method: "GET", url: "/internal/debug/prompts?telegram_user_id=42", headers });
     expect(prompts.body).toContain(PROMPT_LIBRARY[0]?.id);
+    const savedPrompt = await app.inject({
+      method: "PUT",
+      url: "/internal/debug/prompts/mia.follow-up-participation?telegram_user_id=42",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { text: "只判断是否需要 Mia 回复。" },
+    });
+    expect(savedPrompt.statusCode).toBe(200);
+    expect(promptConfigs.get("mia.follow-up-participation")).toBe("只判断是否需要 Mia 回复。");
+    const emptyPrompt = await app.inject({
+      method: "PUT",
+      url: "/internal/debug/prompts/mia.follow-up-participation?telegram_user_id=42",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { text: "  " },
+    });
+    expect(emptyPrompt.statusCode).toBe(422);
     const modelConfigs = await app.inject({ method: "GET", url: "/internal/debug/model-config?telegram_user_id=42", headers });
     const modelPayload = modelConfigs.json<{ success: boolean; data: { configs: Array<{ key: string; model: string | null }>; models: Array<{ id: string }> } }>();
     expect(modelPayload.success).toBe(true);
@@ -151,6 +168,7 @@ describe("developer debug snapshots", () => {
     expect(invalid.statusCode).toBe(422);
     await app.close();
     modelConfig.close();
+    promptConfigs.close();
     contexts.close();
     debugStore.close();
   });

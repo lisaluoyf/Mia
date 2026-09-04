@@ -5,6 +5,7 @@ import type { ModelConfigStore } from "../model-config/store.js";
 import { MODEL_CONFIG_DEFINITIONS, type ModelConfigEntry } from "../model-config/types.js";
 import type { APIMasterClient } from "../clients/apimaster.js";
 import type { ModelOption } from "../settings/types.js";
+import type { PromptConfigStore } from "../prompt-config/store.js";
 
 export class ModelCatalogUnavailableError extends Error {
   constructor() {
@@ -31,6 +32,7 @@ export class DebugService {
     private readonly contexts: Pick<ContextStore, "listMemories" | "getLatestSummary" | "listPendingCompletedTurns">,
     private readonly modelConfig: ModelConfigStore,
     private readonly client: Pick<APIMasterClient, "listModels">,
+    private readonly promptConfigs?: PromptConfigStore,
   ) {}
 
   requests(telegramUserId: number) {
@@ -56,7 +58,12 @@ export class DebugService {
   }
 
   prompts() {
-    return PROMPT_LIBRARY;
+    return this.promptConfigs?.list() ?? PROMPT_LIBRARY;
+  }
+
+  savePrompt(id: string, text: unknown) {
+    if (!this.promptConfigs) throw new Error("Prompt configuration is unavailable");
+    return this.promptConfigs.save(id, text);
   }
 
   clear(telegramUserId: number) {

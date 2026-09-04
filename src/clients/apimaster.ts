@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { MIA_SYSTEM_PROMPT } from "../prompts.js";
+import { promptText } from "../prompts.js";
 import type { ModelOption } from "../settings/types.js";
 
 type Fetcher = typeof fetch;
@@ -347,7 +347,7 @@ export class APIMasterClient {
 
   async chat(apiKey: string, model: string, userMessage: string): Promise<string> {
     return this.chatMessages(apiKey, model, [
-      { role: "system", content: MIA_SYSTEM_PROMPT },
+      { role: "system", content: promptText("mia.system") },
       { role: "user", content: userMessage },
     ]);
   }
@@ -563,7 +563,7 @@ export class APIMasterClient {
     ];
     if (preferResponsesForModel(model)) {
       return this.responsesText(apiKey, model, [
-        { role: "system", content: MIA_SYSTEM_PROMPT },
+        { role: "system", content: promptText("mia.system") },
         ...context,
         { role: "user", content },
       ]);
@@ -576,7 +576,7 @@ export class APIMasterClient {
         body: JSON.stringify({
           model,
           messages: [
-            { role: "system", content: MIA_SYSTEM_PROMPT },
+            { role: "system", content: promptText("mia.system") },
             ...context,
             { role: "user", content },
           ],
@@ -589,7 +589,7 @@ export class APIMasterClient {
     }
     if (!response.ok && await isResponsesOnlyError(response)) {
       return this.responsesText(apiKey, model, [
-        { role: "system", content: MIA_SYSTEM_PROMPT },
+        { role: "system", content: promptText("mia.system") },
         ...context,
         { role: "user", content },
       ]);

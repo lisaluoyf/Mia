@@ -36,7 +36,7 @@ import { onboardingMissingFields, type OnboardingEligibility, type OnboardingSer
 import { sameModelId, type ModelSettingsService, type SettingsSnapshot } from "../settings/service.js";
 import type { ContextStore } from "../storage/store.js";
 import type { ConversationScope, GroupConversationScope, GroupFollowUpState } from "../storage/types.js";
-import { MIA_SYSTEM_PROMPT, promptReference } from "../prompts.js";
+import { promptReference, promptText } from "../prompts.js";
 import { richMessagePlainText } from "../presentation/rich-message-text.js";
 import { miaResponseFromText, miaResponsePlainText, type MiaResponse } from "../presentation/schema.js";
 import { renderTelegramRich, type TelegramRichPresentationChunk } from "../presentation/telegram-rich.js";
@@ -837,7 +837,7 @@ async function executeMediaIntent(
       }) ?? null;
       const response = requestContext
         ? await dependencies.client.chatMessages(apiKey, model, [
-          { role: "system", content: MIA_SYSTEM_PROMPT },
+          { role: "system", content: promptText("mia.system") },
           ...requestContext.messages,
         ])
         : await dependencies.client.vision(
@@ -1488,7 +1488,7 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
     }) ?? null;
     const response = requestContext
       ? await dependencies.client.chatMessages(credential.apiKey, model, [
-        { role: "system", content: MIA_SYSTEM_PROMPT },
+        { role: "system", content: promptText("mia.system") },
         ...requestContext.messages,
       ])
       : await dependencies.client.chat(credential.apiKey, model, prompt);

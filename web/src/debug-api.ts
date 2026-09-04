@@ -151,6 +151,14 @@ export async function clearDebugRequests(): Promise<void> {
   await request<{ cleared: number }>("requests", { method: "DELETE" });
 }
 
+export async function saveDebugPrompt(id: string, text: string): Promise<DebugPrompt> {
+  return request<DebugPrompt>(`prompts/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+}
+
 export async function saveDebugModelConfigs(values: Record<string, string | null>): Promise<DebugModelConfigState> {
   return request<DebugModelConfigState>("model-config", {
     method: "PUT",

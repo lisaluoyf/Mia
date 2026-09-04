@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertCircle, Braces, Check, ChevronDown, ChevronRight, Clock3, Database, FileText, RefreshCw, Save, Search, Trash2 } from "lucide-react";
 
-import { clearDebugRequests, DebugApiError, loadDebugConsole, saveDebugModelConfigs, type DebugMemory, type DebugModelConfig, type DebugModelConfigState, type DebugModelOption, type DebugPrompt, type DebugRequest } from "./debug-api";
+import { clearDebugRequests, DebugApiError, loadDebugConsole, saveDebugModelConfigs, saveDebugPrompt, type DebugMemory, type DebugModelConfig, type DebugModelConfigState, type DebugModelOption, type DebugPrompt, type DebugRequest } from "./debug-api";
 import "./debug.css";
 
 type Tab = "requests" | "memory" | "prompts" | "models";
@@ -128,14 +128,25 @@ function MemoryView({ data }: { data: DebugMemory }) {
   </div>;
 }
 
-function PromptsView({ prompts, selectedId, requests }: { prompts: DebugPrompt[]; selectedId: string; requests: DebugRequest[] }) {
+function PromptsView({ prompts, selectedId, requests, onSaved }: { prompts: DebugPrompt[]; selectedId: string; requests: DebugRequest[]; onSaved: (prompt: DebugPrompt) => void }) {
   const [activeId, setActiveId] = useState(selectedId || prompts[0]?.id || "");
   useEffect(() => { if (selectedId) setActiveId(selectedId); }, [selectedId]);
   const active = prompts.find((item) => item.id === activeId) ?? prompts[0];
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  useEffect(() => { setDraft(active?.text ?? ""); setFeedback(null); }, [active?.id]);
+  const save = async () => {
+    if (!active || !draft.trim() || saving) return;
+    setSaving(true); setFeedback(null);
+    try { onSaved(await saveDebugPrompt(active.id, draft)); setFeedback("已保存，立即生效"); }
+    catch (error) { setFeedback(error instanceof DebugApiError && error.status === 422 ? "内容格式不合适" : "保存失败，请稍后重试"); }
+    finally { setSaving(false); }
+  };
   return <div className="prompt-layout"><aside className="prompt-list">{prompts.map((prompt) => {
     const uses = requests.filter((request) => request.promptRefs.some((ref) => ref.id === prompt.id && ref.version === prompt.version)).length;
     return <button key={prompt.id} className={prompt.id === active?.id ? "active" : ""} onClick={() => setActiveId(prompt.id)}><Braces size={18} /><span><strong>{prompt.name}</strong><small>{prompt.id} · v{prompt.version}</small></span><em>{uses}</em></button>;
-  })}</aside><main className="prompt-content">{active ? <><header><div><span className="detail-kicker">{active.id} · v{active.version}</span><h2>{active.name}</h2><p>{active.purpose}</p>{active.includes?.length ? <p>包含基础模块：{active.includes.join("、")}</p> : active.kind === "base" ? <p>基础模块，不会在组合 Prompt 之外重复发送。</p> : null}</div><span className="readonly-badge">只读</span></header><pre className="prompt-source">{active.text}</pre></> : <Empty>暂无已注册的 Prompt</Empty>}</main></div>;
+  })}</aside><main className="prompt-content">{active ? <><header><div><span className="detail-kicker">{active.id} · v{active.version}</span><h2>{active.name}</h2><p>{active.purpose}</p>{active.includes?.length ? <p>包含基础模块：{active.includes.join("、")}</p> : active.kind === "base" ? <p>基础模块，不会在组合 Prompt 之外重复发送。</p> : null}</div><span className="readonly-badge">可编辑</span></header><textarea className="prompt-editor" value={draft} onChange={(event) => setDraft(event.target.value)} spellCheck={false} /><div className="prompt-editor-actions"><span className={feedback === "保存失败，请稍后重试" || feedback === "内容格式不合适" ? "save-feedback error" : "save-feedback success"}>{feedback ?? "保存后立即生效"}</span><button className="save-model-config" type="button" disabled={saving || !draft.trim()} onClick={() => void save()}><Save size={15} />{saving ? "保存中" : "保存 Prompt"}</button></div></> : <Empty>暂无已注册的 Prompt</Empty>}</main></div>;
 }
 
 const capabilityNames: Record<DebugModelConfig["capability"], string> = {
@@ -306,6 +317,6 @@ export function DebugApp() {
     </header>
     <div className="debug-page-head"><div><span>私人开发控制台</span><h1>{tab === "requests" ? "模型请求" : tab === "memory" ? "记忆状态" : tab === "prompts" ? "Prompt 库" : "场景模型"}</h1></div>{data && <div className="page-stat"><Clock3 size={16} /><span>每 10 秒自动刷新</span></div>}</div>
     {error ? <div className="fatal-state"><Activity size={28} /><h2>{error}</h2></div> : !data ? <div className="fatal-state"><RefreshCw className="spin" size={28} /><h2>正在加载调试记录</h2></div> :
-      tab === "requests" ? <RequestsView requests={data.requests} onPrompt={openPrompt} /> : tab === "memory" ? <MemoryView data={data.memory} /> : tab === "prompts" ? <PromptsView prompts={data.prompts} selectedId={promptId} requests={data.requests} /> : <ModelConfigsView state={data.modelConfig} onSaved={(modelConfig) => setData((current) => current ? { ...current, modelConfig } : current)} />}
+      tab === "requests" ? <RequestsView requests={data.requests} onPrompt={openPrompt} /> : tab === "memory" ? <MemoryView data={data.memory} /> : tab === "prompts" ? <PromptsView prompts={data.prompts} selectedId={promptId} requests={data.requests} onSaved={(prompt) => setData((current) => current ? { ...current, prompts: current.prompts.map((item) => item.id === prompt.id ? prompt : item) } : current)} /> : <ModelConfigsView state={data.modelConfig} onSaved={(modelConfig) => setData((current) => current ? { ...current, modelConfig } : current)} />}
   </div>;
 }

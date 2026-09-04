@@ -13,6 +13,8 @@ import { GroupSummaryService } from "./context/group-summary.js";
 import { createBot } from "./telegram/bot.js";
 import { botCommands } from "./telegram/commands.js";
 import { IntentRouter } from "./intent/router.js";
+import { configurePromptReader } from "./prompts.js";
+import { PromptConfigStore } from "./prompt-config/store.js";
 import { MediaStore } from "./media/store.js";
 import { MediaWorker } from "./media/worker.js";
 import { DebugRecorder } from "./debug/recorder.js";
@@ -32,6 +34,8 @@ async function main(): Promise<void> {
     timeoutMs: config.requestTimeoutMs,
   });
   const debugStore = new DebugStore(resolve(config.databasePath));
+  const promptConfigs = new PromptConfigStore(resolve(config.databasePath));
+  configurePromptReader(promptConfigs);
   const modelConfig = new ModelConfigStore(resolve(config.databasePath), {
     intent_router: config.miaRouterModel,
     private_compaction: config.miaContextModel,
@@ -143,7 +147,7 @@ async function main(): Promise<void> {
       staticRoot: resolve("dist/web"),
     },
     mediaDownload: { store: mediaStore, client, publicBaseUrl: config.publicBaseUrl },
-    debug: new DebugService(debugStore, contexts, modelConfig, client),
+    debug: new DebugService(debugStore, contexts, modelConfig, client, promptConfigs),
   });
   let stopping = false;
 
@@ -160,6 +164,8 @@ async function main(): Promise<void> {
     contexts.close();
     mediaStore.close();
     debugStore.close();
+    configurePromptReader(null);
+    promptConfigs.close();
     modelConfig.close();
   };
 

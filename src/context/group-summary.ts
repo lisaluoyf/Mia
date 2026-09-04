@@ -5,9 +5,9 @@ import type { APIMasterClient, StructuredMessage } from "../clients/apimaster.js
 import type { ChatCredentialProvider } from "../credentials/chat.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import {
-  GROUP_SUMMARY_SYSTEM_PROMPT,
   groupSummaryInputPrompt,
   promptReference,
+  promptTemplate,
 } from "../prompts.js";
 import type { ContextStore } from "../storage/store.js";
 import type { ConversationScope, MemoryRecord, StoredMessage } from "../storage/types.js";
@@ -255,7 +255,7 @@ export class GroupSummaryService {
     };
     const dialogue = formatDialogue(messages, this.dependencies.store);
     const prompt: StructuredMessage[] = [
-      { role: "system", content: GROUP_SUMMARY_SYSTEM_PROMPT },
+      { role: "system", content: promptTemplate("mia.group-summary", {}) },
       { role: "user", content: groupSummaryInputPrompt({
         scope: scopeMetadata,
         locale: input.locale,
