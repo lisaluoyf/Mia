@@ -157,7 +157,8 @@ describe("APIMaster client", () => {
     await expect(client.chat("user-api-key", "grok-4.5", "hello")).resolves.toBe("你好，Grok");
     const [url, init] = fetcher.mock.calls[0] ?? [];
     expect(url).toBe("https://apimaster.example/v1/responses");
-    expect(JSON.parse(String(init?.body))).toMatchObject({
+    const requestBody: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    expect(requestBody).toMatchObject({
       model: "grok-4.5",
       instructions: MIA_SYSTEM_PROMPT,
       input: [{ role: "user", content: "hello" }],

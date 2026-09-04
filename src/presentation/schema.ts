@@ -103,13 +103,23 @@ function cleanInline(value: string): string {
 export function normalizeMiaResponse(value: MiaResponse): MiaResponse {
   const blocks = value.blocks.flatMap((block): MiaResponseBlock[] => {
     const heading = block.heading ? cleanInline(block.heading) : null;
-    const text = block.text ? cleanInline(block.text) : null;
     const items = block.items
       .map((item) => ({ label: item.label ? cleanInline(item.label) : null, text: cleanInline(item.text) }))
       .filter((item) => item.text.length > 0);
+    const recoveredText = items
+      .map((item) => item.label ? `${item.label}：${item.text}` : item.text)
+      .join("\n");
+    const text = block.text ? cleanInline(block.text)
+      : block.type === "paragraph" && recoveredText ? recoveredText
+        : null;
     if ((block.type === "paragraph" || block.type === "code") && !text) return [];
     if ((block.type === "list" || block.type === "facts") && items.length === 0) return [];
-    return [{ ...block, heading, text, items }];
+    return [{
+      ...block,
+      heading,
+      text,
+      items: block.type === "paragraph" || block.type === "code" ? [] : items,
+    }];
   });
   return {
     version: 1,

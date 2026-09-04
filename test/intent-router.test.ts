@@ -466,7 +466,8 @@ describe("Mia intent router", () => {
     const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
     expect(basePrompt).toMatchObject({ kind: "base" });
-    expect(routerPrompt).toMatchObject({ version: 7, kind: "composed", includes: ["mia.system"] });
+    expect(routerPrompt).toMatchObject({ version: 8, kind: "composed", includes: ["mia.system"] });
     expect(routerPrompt?.text).toContain(basePrompt?.text ?? "missing");
+    expect(routerPrompt?.text).toContain("不得把段落正文放进 paragraph.items");
   });
 });
