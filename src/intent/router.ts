@@ -35,6 +35,43 @@ const FOLLOW_UP_DECISION_JSON_SCHEMA = {
 
 type FollowUpDecision = z.infer<typeof followUpDecisionSchema>;
 
+const MAX_RECENT_MEDIA_FOLLOW_UP_MS = 10 * 60 * 1_000;
+
+function isExplicitMediaAction(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized || Array.from(normalized).length > 1_000) return false;
+  if (/^(?:反色|负片|镜像|翻转|抠图|去背|裁剪|锐化|虚化|去水印|加水印)[!！。.~～]*$/iu.test(normalized)) {
+    return true;
+  }
+  const mediaSubject = /(?:图(?:片)?|照片|画面|人像|头像|脸|五官|皮肤|logo|标志|背景|前景|颜色|色调|光线|反射|倒影|文字|水印|尺寸|比例)/iu;
+  const mediaAction = /(?:帮我|请)?(?:把|将)?[\s\S]{0,80}(?:改|修改|调整|编辑|处理|重绘|重做|修复|优化|美化|增强|移除|去掉|删除|加上|添加|换成|替换|裁剪|抠图|反色|镜像|翻转|虚化|锐化|放大|缩小|变成|做成)/iu;
+  const englishMediaSubject = /\b(?:image|photo|picture|portrait|face|logo|background|foreground|color|reflection|text|watermark)\b/iu;
+  const englishMediaAction = /\b(?:edit|change|adjust|redraw|retouch|remove|add|replace|crop|invert|mirror|flip|blur|sharpen|resize|recolor)\b/iu;
+  return mediaSubject.test(normalized) && mediaAction.test(normalized) ||
+    englishMediaSubject.test(normalized) && englishMediaAction.test(normalized);
+}
+
+function recentUserImageBeforeTarget(
+  recent: readonly RouterContextMessage[],
+  targetIndex: number,
+  target: RouterContextMessage,
+): RouterContextMessage | null {
+  const lowerBound = Math.max(0, targetIndex - 6);
+  for (let index = targetIndex - 1; index >= lowerBound; index -= 1) {
+    const candidate = recent[index];
+    if (!candidate) continue;
+    if (candidate.role === "assistant") return null;
+    if (candidate.senderUserId !== target.senderUserId) return null;
+    if (candidate.contentType !== "photo" && candidate.contentType !== "document") continue;
+    if (candidate.sentAt && target.sentAt) {
+      const ageMs = Date.parse(target.sentAt) - Date.parse(candidate.sentAt);
+      if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > MAX_RECENT_MEDIA_FOLLOW_UP_MS) return null;
+    }
+    return candidate;
+  }
+  return null;
+}
+
 function obviousFollowUpDecision(input: IntentRouterInput): FollowUpDecision | null {
   const batchIds = new Set(input.followUpBatchMessageIds ?? []);
   const recent = input.recentMessages ?? [];
@@ -43,27 +80,43 @@ function obviousFollowUpDecision(input: IntentRouterInput): FollowUpDecision | n
   if (!target?.messageId || target.role !== "user") return null;
   const targetIndex = recent.lastIndexOf(target);
   const previous = targetIndex > 0 ? recent[targetIndex - 1] : undefined;
-  if (previous?.role !== "assistant") return null;
   const awakenedBy = input.followUpContext?.awakenedByUserId ?? null;
   if (awakenedBy !== null && target.senderUserId !== awakenedBy) return null;
 
   const text = target.text.trim();
-  if (!text || Array.from(text).length > 80 || /^(?:好|好的|行|可以|收到|谢谢|感谢|嗯|哦|ok|okay)[!！。.~～]*$/iu.test(text)) {
+  if (!text || /^(?:好|好的|行|可以|收到|谢谢|感谢|嗯|哦|ok|okay)[!！。.~～]*$/iu.test(text)) {
     return null;
   }
-  const explicitContinuation = /^(?:那|那么|然后|接着|继续|再|还|也|改成|换成|补充|上面|刚才|前面|这个|那个|它)/u.test(text);
-  const ellipticalQuestion = Array.from(text).length <= 40 &&
-    /(?:呢|吗|么|如何|怎样|怎么样|怎么办|多少|几(?:点|天|个|次)|哪(?:里|个|天)|什么)(?:[?？!！。.]*)$/u.test(text);
-  if (!explicitContinuation && !ellipticalQuestion) return null;
+  if (previous?.role === "assistant" && Array.from(text).length <= 80) {
+    const explicitContinuation = /^(?:那|那么|然后|接着|继续|再|还|也|改成|换成|补充|上面|刚才|前面|这个|那个|它)/u.test(text);
+    const ellipticalQuestion = Array.from(text).length <= 40 &&
+      /(?:呢|吗|么|如何|怎样|怎么样|怎么办|多少|几(?:点|天|个|次)|哪(?:里|个|天)|什么)(?:[?？!！。.]*)$/u.test(text);
+    if (explicitContinuation || ellipticalQuestion) {
+      return {
+        should_respond: true,
+        response_to_message_id: target.messageId,
+        intent_hint: "chat",
+        needs_web_search: /天气|气温|下雨|新闻|价格|比分|比赛|政策|今天|明天|后天|最新|现在|目前/u.test(`${previous.text}\n${text}`),
+        confidence: 0.99,
+        reason: "obvious_continuation_of_immediately_previous_mia_reply",
+      };
+    }
+  }
 
-  return {
-    should_respond: true,
-    response_to_message_id: target.messageId,
-    intent_hint: "chat",
-    needs_web_search: /天气|气温|下雨|新闻|价格|比分|比赛|政策|今天|明天|后天|最新|现在|目前/u.test(`${previous.text}\n${text}`),
-    confidence: 0.99,
-    reason: "obvious_continuation_of_immediately_previous_mia_reply",
-  };
+  const recentImage = recentUserImageBeforeTarget(recent, targetIndex, target);
+  const hasUsableRecentImage = recentImage?.messageId !== undefined && (input.mediaCandidates ?? []).some((candidate) =>
+    candidate.messageId === recentImage.messageId && candidate.senderUserId === target.senderUserId);
+  if (isExplicitMediaAction(text) && hasUsableRecentImage) {
+    return {
+      should_respond: true,
+      response_to_message_id: target.messageId,
+      intent_hint: "media_or_summary",
+      needs_web_search: false,
+      confidence: 0.99,
+      reason: "explicit_media_action_for_recent_user_image",
+    };
+  }
+  return null;
 }
 
 function withLegacyReply(value: unknown): unknown {
@@ -163,6 +216,7 @@ export interface RoutedIntent extends MediaIntent {
   missingRequired: string[];
   fallbackReason?: "low_confidence" | "router_unavailable" | "invalid_output" | "response_fallback";
   participationSource?: "heuristic" | "model";
+  participationReason?: string;
   webSearch?: WebSearchUsage;
 }
 
@@ -263,7 +317,11 @@ function fallback(
   };
 }
 
-function observation(confidence: number, participationSource?: RoutedIntent["participationSource"]): RoutedIntent {
+function observation(
+  confidence: number,
+  participationSource?: RoutedIntent["participationSource"],
+  participationReason?: string,
+): RoutedIntent {
   return {
     intent: "chat",
     should_respond: false,
@@ -281,6 +339,7 @@ function observation(confidence: number, participationSource?: RoutedIntent["par
     profile_updates: null,
     missingRequired: [],
     ...(participationSource ? { participationSource } : {}),
+    ...(participationReason ? { participationReason } : {}),
   };
 }
 
@@ -292,6 +351,7 @@ function followUpChatResult(input: {
   webSearch?: WebSearchUsage;
   responseFallback?: boolean;
   participationSource: NonNullable<RoutedIntent["participationSource"]>;
+  participationReason: string;
 }): RoutedIntent {
   return {
     intent: "chat",
@@ -310,6 +370,7 @@ function followUpChatResult(input: {
     profile_updates: null,
     missingRequired: [],
     participationSource: input.participationSource,
+    participationReason: input.participationReason,
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
     ...(input.responseFallback ? { fallbackReason: "response_fallback" as const } : {}),
   };
@@ -491,7 +552,7 @@ export class IntentRouter {
     const validTarget = targetMessageId !== null && batchIds.includes(targetMessageId);
     if (!decision.should_respond) {
       return decision.response_to_message_id === null
-        ? observation(decision.confidence, participationSource)
+        ? observation(decision.confidence, participationSource, decision.reason)
         : fallback("invalid_output", false);
     }
     if (!validTarget) return fallback("invalid_output", false);
@@ -504,7 +565,22 @@ export class IntentRouter {
     }
 
     if (decision.intent_hint === "media_or_summary") {
-      return { ...await this.classifyFull(input, apiKey, model, fullMessages), participationSource };
+      const routed = await this.classifyFull(input, apiKey, model, fullMessages);
+      if (routed.should_respond === false) {
+        const usesCjk = /[\u3400-\u9fff\uf900-\ufaff]/u.test(input.text);
+        return followUpChatResult({
+          targetMessageId,
+          confidence: decision.confidence,
+          instruction: input.text,
+          reply: miaResponseFromText(usesCjk
+            ? "我看到了你的图片处理请求，但这次没有成功解析。请稍后再发一次。"
+            : "I saw your image request, but could not parse it this time. Please try again shortly."),
+          participationSource,
+          participationReason: decision.reason,
+          responseFallback: true,
+        });
+      }
+      return { ...routed, participationSource, participationReason: decision.reason };
     }
 
     const answerMessages: StructuredMessage[] = [
@@ -533,6 +609,7 @@ export class IntentRouter {
         instruction: input.text,
         reply: reply.data,
         participationSource,
+        participationReason: decision.reason,
         webSearch: result.webSearch,
       });
     } catch {
@@ -545,6 +622,7 @@ export class IntentRouter {
           ? "我看到了，这是在继续问我。不过公共模型这次响应失败了，请稍后再试一下。"
           : "I saw that this follows up on my answer, but the public model failed to respond this time. Please try again shortly."),
         participationSource,
+        participationReason: decision.reason,
         responseFallback: true,
       });
     }

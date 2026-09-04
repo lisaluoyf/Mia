@@ -541,6 +541,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           selectedMediaMessageIds: routed.media_message_ids ?? [],
           fallbackReason: routed.fallbackReason ?? null,
           participationSource: routed.participationSource ?? null,
+          participationReason: routed.participationReason ?? null,
           webSearch: routed.webSearch ?? { callCount: 0, queries: [], sources: [] },
           onboarding: onboardingDebugDetails(onboardingEligibility, routed, false),
         },

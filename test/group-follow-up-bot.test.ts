@@ -268,6 +268,86 @@ describe("Mia group follow-up", () => {
     expect(calls.filter((call) => call.method === "sendChatAction")).toHaveLength(2);
   });
 
+  it("routes the awakened user's recent image edit with the public router and requester media key", async () => {
+    const instruction = "帮我把脸改得看起来没那么像 AI，同时做一个反射效果。另外，现在这个 logo 在屏幕上不太显眼，也请加上反射，让脸看起来更自然。";
+    const structuredResponse = vi.fn()
+      .mockResolvedValueOnce({
+        data: {
+          intent: "chat",
+          should_respond: true,
+          response_to_message_id: null,
+          confidence: 0.99,
+          instruction: "能生图吗？",
+          media_source: "none",
+          media_message_ids: [],
+          image_options: null,
+          video_options: null,
+          reply: reply("可以，发一张参考图和修改要求。"),
+          conversation_mode: "task",
+          onboarding_opportunity: false,
+          profile_updates: null,
+        },
+        webSearch: { callCount: 0, queries: [], sources: [] },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          intent: "image_edit",
+          should_respond: true,
+          response_to_message_id: 192,
+          confidence: 0.99,
+          instruction,
+          media_source: "context",
+          media_message_ids: [191],
+          image_options: { aspect_ratio: null },
+          video_options: null,
+          reply: null,
+          conversation_mode: "task",
+          onboarding_opportunity: false,
+          profile_updates: null,
+        },
+        webSearch: { callCount: 0, queries: [], sources: [] },
+      });
+    const resolveAPIKey = vi.fn().mockResolvedValue("requester-media-key");
+    const client = { structuredResponse, resolveAPIKey } as unknown as APIMasterClient;
+    const router = new IntentRouter(client, { model: "gpt-5.4", timeoutMs: 30_000 });
+    const { bot, calls, resolveCredential } = setup(vi.fn(), { router, client });
+
+    vi.setSystemTime(new Date("2026-09-04T04:23:18.000Z"));
+    await bot.handleUpdate(update({
+      updateId: 1,
+      messageId: 189,
+      text: "@MiaAssistantBot 能生图吗？",
+      mention: true,
+    }));
+    vi.setSystemTime(new Date("2026-09-04T04:24:28.000Z"));
+    await bot.handleUpdate(update({ updateId: 2, messageId: 191, photo: true }));
+    vi.setSystemTime(new Date("2026-09-04T04:24:49.000Z"));
+    await bot.handleUpdate(update({ updateId: 3, messageId: 192, text: instruction }));
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(structuredResponse).toHaveBeenCalledTimes(2);
+    expect(structuredResponse.mock.calls[1]?.[0]).toBe("public-follow-up-key");
+    expect(structuredResponse.mock.calls[1]?.[3]).toBe("mia_media_intent");
+    expect(resolveCredential).toHaveBeenCalledOnce();
+    expect(resolveAPIKey).toHaveBeenCalledOnce();
+    const job = mediaStore.getJobByIdempotencyKey("message:-1001:192");
+    expect(job).toMatchObject({
+      telegramUserId: 42,
+      type: "image_edit",
+      instruction,
+      status: "queued",
+    });
+    expect(job && mediaStore.listJobInputs(job.id)).toMatchObject([{
+      messageId: 191,
+      fileId: "photo-191",
+    }]);
+    expect(calls.filter((call) => call.method === "sendMessage")).toHaveLength(2);
+    expect(contexts.getActiveGroupFollowUp(
+      { type: "group", chatId: -1001 },
+      new Date("2026-09-04T04:34:50.999Z"),
+    )).not.toBeNull();
+  });
+
   it("isolates topics, wakes on direct reply, and ignores pure images while evaluating captions", async () => {
     const classify = vi.fn()
       .mockResolvedValueOnce(routed({ text: "已唤醒。" }))

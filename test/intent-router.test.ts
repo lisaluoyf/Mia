@@ -336,6 +336,140 @@ describe("Mia intent router", () => {
     expect(structuredResponse.mock.calls[0]?.[5]).toBe(45_000);
   });
 
+  it("routes an explicit edit for the awakened user's recent image without a participation call", async () => {
+    const instruction = "帮我把脸改得看起来没那么像 AI，同时做一个反射效果。另外，现在这个 logo 在屏幕上不太显眼，也请加上反射，让脸看起来更自然。";
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      intent: "image_edit",
+      should_respond: true,
+      response_to_message_id: 192,
+      confidence: 0.99,
+      instruction,
+      media_source: "context",
+      media_message_ids: [191],
+      image_options: { aspect_ratio: null },
+      video_options: null,
+      reply: null,
+      conversation_mode: "task",
+      onboarding_opportunity: false,
+      profile_updates: null,
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 30_000 });
+
+    const result = await router.classify({
+      ...base,
+      text: `[message_id=192 sender_user_id=42]\n${instruction}`,
+      participationMode: "selective",
+      followUpBatchMessageIds: [192],
+      followUpContext: {
+        scopeType: "group",
+        chatId: -1001964722014,
+        threadId: null,
+        awakenedByUserId: 42,
+        lastHandledAt: "2026-09-04T04:23:46.408Z",
+      },
+      recentMessages: [
+        { role: "assistant", messageId: 190, senderUserId: 100, text: "可以，发一张参考图。", sentAt: "2026-09-04T04:23:46.408Z" },
+        { role: "user", messageId: 191, senderUserId: 42, text: "[photo]", contentType: "photo", sentAt: "2026-09-04T04:24:28.000Z" },
+        { role: "user", messageId: 192, senderUserId: 42, text: instruction, contentType: "text", sentAt: "2026-09-04T04:24:49.000Z" },
+      ],
+      mediaCandidates: [{
+        messageId: 191,
+        senderUserId: 42,
+        type: "photo",
+        sentAt: "2026-09-04T04:24:28.000Z",
+        source: "current_user_recent",
+      }],
+    }, "public-follow-up-key");
+
+    expect(result).toMatchObject({
+      intent: "image_edit",
+      should_respond: true,
+      response_to_message_id: 192,
+      media_message_ids: [191],
+      participationSource: "heuristic",
+      participationReason: "explicit_media_action_for_recent_user_image",
+    });
+    expect(structuredResponse).toHaveBeenCalledOnce();
+    expect(structuredResponse.mock.calls[0]?.[0]).toBe("public-follow-up-key");
+    expect(structuredResponse.mock.calls[0]?.[3]).toBe("mia_media_intent");
+  });
+
+  it("makes a recent-image correction visible when full media routing fails", async () => {
+    const structuredResponse = vi.fn().mockRejectedValue(new Error("timeout"));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 30_000 });
+
+    const result = await router.classify({
+      ...base,
+      text: "[message_id=193 sender_user_id=42]\n反色",
+      participationMode: "selective",
+      followUpBatchMessageIds: [193],
+      followUpContext: {
+        scopeType: "group",
+        chatId: -1001964722014,
+        threadId: null,
+        awakenedByUserId: 42,
+        lastHandledAt: "2026-09-04T04:23:46.408Z",
+      },
+      recentMessages: [
+        { role: "user", messageId: 191, senderUserId: 42, text: "[photo]", contentType: "photo", sentAt: "2026-09-04T04:24:28.000Z" },
+        { role: "user", messageId: 192, senderUserId: 42, text: "把脸修自然一点", contentType: "text", sentAt: "2026-09-04T04:24:49.000Z" },
+        { role: "user", messageId: 193, senderUserId: 42, text: "反色", contentType: "text", sentAt: "2026-09-04T04:24:56.000Z" },
+      ],
+      mediaCandidates: [{
+        messageId: 191,
+        senderUserId: 42,
+        type: "photo",
+        sentAt: "2026-09-04T04:24:28.000Z",
+        source: "current_user_recent",
+      }],
+    }, "public-follow-up-key");
+
+    expect(result).toMatchObject({
+      intent: "chat",
+      should_respond: true,
+      response_to_message_id: 193,
+      fallbackReason: "response_fallback",
+      participationSource: "heuristic",
+      participationReason: "explicit_media_action_for_recent_user_image",
+    });
+    expect(result.reply?.blocks[0]?.text).toContain("图片处理请求");
+    expect(structuredResponse).toHaveBeenCalledOnce();
+    expect(structuredResponse.mock.calls[0]?.[3]).toBe("mia_media_intent");
+  });
+
+  it("does not apply the recent-image shortcut to another group member", async () => {
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      should_respond: false,
+      response_to_message_id: null,
+      intent_hint: "chat",
+      needs_web_search: false,
+      confidence: 0.98,
+      reason: "another_member_comment",
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 30_000 });
+
+    await router.classify({
+      ...base,
+      text: "[message_id=193 sender_user_id=43]\n把这张图反色",
+      participationMode: "selective",
+      followUpBatchMessageIds: [193],
+      followUpContext: {
+        scopeType: "group",
+        chatId: -1001964722014,
+        threadId: null,
+        awakenedByUserId: 42,
+        lastHandledAt: "2026-09-04T04:23:46.408Z",
+      },
+      recentMessages: [
+        { role: "user", messageId: 191, senderUserId: 43, text: "[photo]", contentType: "photo", sentAt: "2026-09-04T04:24:28.000Z" },
+        { role: "user", messageId: 193, senderUserId: 43, text: "把这张图反色", contentType: "text", sentAt: "2026-09-04T04:24:56.000Z" },
+      ],
+    }, "public-follow-up-key");
+
+    expect(structuredResponse).toHaveBeenCalledOnce();
+    expect(structuredResponse.mock.calls[0]?.[3]).toBe("mia_follow_up_participation");
+  });
+
   it("keeps unrelated chat silent after the lightweight public decision", async () => {
     const structuredResponse = vi.fn().mockResolvedValue(response({
       should_respond: false,
