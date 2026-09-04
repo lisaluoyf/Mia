@@ -170,7 +170,7 @@ describe("Mia guest access", () => {
     expect(classify).not.toHaveBeenCalled();
     const sent = calls.find((call) => call.method === "sendPhoto");
     expect(sent?.payload.message_thread_id).toBe(12);
-    expect(sent?.payload.photo).toBe("https://apimaster.ai/mia/mia-introduction.png");
+    expect(sent?.payload.photo).toBe("https://apimaster.ai/mia/mia-introduction.png?v=1f3375c-banner");
     expect(sent?.payload.caption).toBe(`我是 Mia，APIMaster 的 Telegram AI 助理
 我能：
 💬 对话和查询实时信息

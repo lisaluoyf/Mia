@@ -990,7 +990,9 @@ function miniAppUrl(dependencies: BotDependencies): string {
 }
 
 function introductionImageUrl(dependencies: BotDependencies): string {
-  return new URL("mia-introduction.png", miniAppUrl(dependencies)).toString();
+  const imageUrl = new URL("mia-introduction.png", miniAppUrl(dependencies));
+  imageUrl.searchParams.set("v", "1f3375c-banner");
+  return imageUrl.toString();
 }
 
 function persistContextOnly(message: StorableMessage, dependencies: BotDependencies): boolean {
