@@ -36,16 +36,19 @@ import { sameModelId, type ModelSettingsService, type SettingsSnapshot } from ".
 import type { ContextStore } from "../storage/store.js";
 import type { ConversationScope, GroupConversationScope, GroupFollowUpState } from "../storage/types.js";
 import { MIA_SYSTEM_PROMPT, promptReference } from "../prompts.js";
+import { richMessagePlainText } from "../presentation/rich-message-text.js";
 import { miaResponseFromText, type MiaResponse } from "../presentation/schema.js";
-import { renderTelegramHtml } from "../presentation/telegram-html.js";
+import { renderTelegramRich, type TelegramRichPresentationChunk } from "../presentation/telegram-rich.js";
 import { stickerPrompt, stickerSetTitle } from "../stickers/service.js";
 import { botText, mediaJobLocale, resolveBotLocale, type BotLocale } from "./localization.js";
 import { groupSummaryPresentation } from "./group-summary-html.js";
 import { userFacingError } from "./messages.js";
 import { promptFromMessage, shouldRespond } from "./policy.js";
+import { sendTelegramRichText } from "./send-rich-text.js";
 
 type TextContext = Filter<Context, "message:text">;
-type StorableMessage = Message.TextMessage | Message.PhotoMessage | Message.DocumentMessage | Message.StickerMessage;
+type StorableMessage = Message.TextMessage | Message.PhotoMessage | Message.DocumentMessage |
+  Message.StickerMessage | Message.RichMessageMessage;
 
 interface BotDependencies {
   client: APIMasterClient;
@@ -130,6 +133,7 @@ function messageText(message: Message | undefined): string | null {
   if (!message) return null;
   if ("text" in message) return message.text;
   if ("caption" in message) return message.caption ?? null;
+  if ("rich_message" in message) return richMessagePlainText(message.rich_message.blocks);
   return null;
 }
 
@@ -157,7 +161,9 @@ function captureMessage(message: StorableMessage, contexts: BotDependencies["con
     contexts.upsertMember({ chatId: message.chat.id, telegramUserId: from.id, status: null });
   }
   const media = mediaFromMessage(message);
-  const contentType = media?.type ?? ("sticker" in message ? "sticker" : "document" in message ? "document" : "text");
+  const contentType = media?.type ?? ("sticker" in message ? "sticker" : "rich_message" in message
+    ? "rich_message" : "document" in message ? "document" : "text");
+  const richText = "rich_message" in message ? richMessagePlainText(message.rich_message.blocks) : null;
   contexts.saveMessage({
     chatId: message.chat.id,
     messageId: message.message_id,
@@ -166,10 +172,11 @@ function captureMessage(message: StorableMessage, contexts: BotDependencies["con
     senderChatId: message.sender_chat?.id ?? null,
     replyToMessageId: message.reply_to_message?.message_id ?? null,
     contentType,
-    text: "text" in message ? message.text : null,
+    text: "text" in message ? message.text : richText,
     caption: "caption" in message ? message.caption ?? null : null,
     entitiesJson: "entities" in message && message.entities ? JSON.stringify(message.entities) :
-      "caption_entities" in message && message.caption_entities ? JSON.stringify(message.caption_entities) : null,
+      "caption_entities" in message && message.caption_entities ? JSON.stringify(message.caption_entities) :
+        "rich_message" in message ? JSON.stringify(message.rich_message.blocks) : null,
     mediaFileId: media?.fileId ?? null,
     mediaUniqueId: media?.fileUniqueId ?? null,
     sentAt: new Date(message.date * 1000).toISOString(),
@@ -618,7 +625,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   if (routed.intent === "chat") {
     const response = routed.reply ?? routed.final_response;
     if (response) {
-      const assistantMessageId = await sendConversationResponse(ctx, message, response, dependencies);
+      const delivery = await sendConversationResponse(ctx, message, response, dependencies);
+      const assistantMessageId = delivery.assistantMessageId;
       recordCompletedChatTurn(message, assistantMessageId, dependencies);
       if (assistantMessageId !== null) recordSuccessfulGroupTrigger(message, dependencies);
       if (assistantMessageId !== null && message.chat.type === "private" && dependencies.onboarding && routed.profile_updates) {
@@ -639,6 +647,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           fallbackReason: routed.fallbackReason ?? null,
           webSearch: routed.webSearch ?? { callCount: 0, queries: [], sources: [] },
           onboarding: onboardingDebugDetails(onboardingEligibility, routed, triggered),
+          presentation: delivery.presentation,
         },
       });
       if (assistantMessageId !== null) request.onIntervention?.();
@@ -654,7 +663,19 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   }
   const visionResponse = routed.reply ?? routed.final_response;
   if (routed.intent === "vision_qa" && visionResponse) {
-    const assistantMessageId = await sendConversationResponse(ctx, message, visionResponse, dependencies);
+    const delivery = await sendConversationResponse(ctx, message, visionResponse, dependencies);
+    const assistantMessageId = delivery.assistantMessageId;
+    dependencies.debug?.finish(routerDebugId, {
+      status: "succeeded",
+      responsePreview: routed,
+      details: {
+        phase: "intent_and_response",
+        routedIntent: routed.intent,
+        fallbackReason: routed.fallbackReason ?? null,
+        webSearch: routed.webSearch ?? { callCount: 0, queries: [], sources: [] },
+        presentation: delivery.presentation,
+      },
+    });
     if (assistantMessageId !== null) recordSuccessfulGroupTrigger(message, dependencies);
     if (assistantMessageId !== null) request.onIntervention?.();
     return;
@@ -767,8 +788,13 @@ async function executeMediaIntent(
           routed.instruction,
           await downloadTelegramImages(ctx.api, dependencies.botToken, inputs),
         );
-      dependencies.debug?.finish(debugId, { status: "succeeded", responsePreview: response });
-      const assistantMessageId = await sendConversationResponse(ctx, message, response, dependencies);
+      const delivery = await sendConversationResponse(ctx, message, response, dependencies);
+      const assistantMessageId = delivery.assistantMessageId;
+      dependencies.debug?.finish(debugId, {
+        status: "succeeded",
+        responsePreview: response,
+        details: { presentation: delivery.presentation },
+      });
       if (assistantMessageId !== null) recordSuccessfulGroupTrigger(message, dependencies);
       return assistantMessageId !== null || handled;
     }
@@ -783,7 +809,7 @@ async function executeMediaIntent(
     const model = snapshot?.settings.imageModel ?? dependencies.settings.getPreferences(message.from.id).imageModel ?? DEFAULT_MODELS.image;
     await dependencies.client.resolveAPIKey(message.from.id, model);
     if (dependencies.mediaStore.getJobByIdempotencyKey(requestKey(message))) return handled;
-    const status = await replyTo(ctx, message, botText(locale, "stillProcessing", { progress: "" }));
+    const status = await replyPlainTo(ctx, message, botText(locale, "stillProcessing", { progress: "" }));
     handled = true;
     const claim = dependencies.mediaStore.claimJob({
       ...scopeFor(message),
@@ -859,7 +885,7 @@ async function createVideoDraft(
     },
   }, inputs);
   if (draft.status !== "draft" || draft.statusMessageId !== null) return false;
-  const sent = await replyTo(ctx, message, videoDraftText(draft), { reply_markup: draftKeyboard(draft) });
+  const sent = await replyPlainTo(ctx, message, videoDraftText(draft), { reply_markup: draftKeyboard(draft) });
   dependencies.mediaStore.updateDraft(draft.id, draft.options, sent.message_id);
   return true;
 }
@@ -929,7 +955,7 @@ async function handleImageActionCallback(ctx: Context, dependencies: BotDependen
   const promptText = botText(locale, action === "analyze" ? "analyzeImagePrompt" : action === "edit" ? "editImagePrompt" : "animateImagePrompt");
   await ctx.answerCallbackQuery();
   await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, { reply_markup: { inline_keyboard: [] } });
-  const prompt = await ctx.api.sendMessage(message.chat.id, promptText, {
+  const prompt = await sendRichText(ctx, message.chat.id, promptText, {
     ...threadOptionFromCallbackMessage(message),
     reply_parameters: { message_id: sourceMessageId, allow_sending_without_reply: true },
     reply_markup: { force_reply: true, selective: true },
@@ -1000,7 +1026,7 @@ async function handleOnboardingCallback(ctx: Context, dependencies: BotDependenc
     }
     await ctx.answerCallbackQuery();
     await editCallbackMessage(ctx, copy.roleSaved);
-    const sent = await ctx.api.sendMessage(message.chat.id, copy.customPrompt);
+    const sent = await sendRichText(ctx, message.chat.id, copy.customPrompt);
     persistMessage(sent, dependencies);
     return;
   }
@@ -1017,7 +1043,7 @@ async function handleOnboardingCallback(ctx: Context, dependencies: BotDependenc
   await editCallbackMessage(ctx, `${copy.roleSaved} ${copy.roles[roleId]}`);
   const missing = onboardingMissingFields(result.state);
   if (missing.length > 0) {
-    const sent = await ctx.api.sendMessage(message.chat.id, onboardingMissingPrompt(query.from.language_code, missing));
+    const sent = await sendRichText(ctx, message.chat.id, onboardingMissingPrompt(query.from.language_code, missing));
     persistMessage(sent, dependencies);
   }
 }
@@ -1234,7 +1260,7 @@ async function downloadResult(ctx: Context, job: MediaJob, dependencies: BotDepe
     try {
       await ctx.api.sendDocument(job.chatId, new InputFile(local.bytes, local.filename), threadOptionFromJob(job));
     } catch {
-      await ctx.api.sendMessage(job.chatId, botText(locale, "downloadUnavailable"), threadOptionFromJob(job));
+      await sendRichText(ctx, job.chatId, botText(locale, "downloadUnavailable"), threadOptionFromJob(job));
     }
     return;
   }
@@ -1248,7 +1274,7 @@ async function downloadResult(ctx: Context, job: MediaJob, dependencies: BotDepe
     const media = await dependencies.client.getContent(apiKey, resultUrl, dependencies.resultMaxBytes);
     await ctx.api.sendDocument(job.chatId, new InputFile(media.bytes, media.filename), threadOptionFromJob(job));
   } catch {
-    await ctx.api.sendMessage(job.chatId, botText(locale, "downloadUnavailable"), threadOptionFromJob(job));
+    await sendRichText(ctx, job.chatId, botText(locale, "downloadUnavailable"), threadOptionFromJob(job));
   }
 }
 
@@ -1313,8 +1339,17 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
         ...requestContext.messages,
       ])
       : await dependencies.client.chat(credential.apiKey, model, prompt);
-    dependencies.debug?.finish(debugId, { status: "succeeded", responsePreview: response });
-    const assistantMessageId = await sendConversationResponse(ctx, ctx.message, response, dependencies);
+    const delivery = await sendConversationResponse(ctx, ctx.message, response, dependencies);
+    const assistantMessageId = delivery.assistantMessageId;
+    dependencies.debug?.finish(debugId, {
+      status: "succeeded",
+      responsePreview: response,
+      details: {
+        credentialSource: credential.source,
+        credentialFallbackReason: credential.fallbackReason,
+        presentation: delivery.presentation,
+      },
+    });
     recordCompletedChatTurn(ctx.message, assistantMessageId, dependencies);
     recordSuccessfulGroupTrigger(ctx.message, dependencies);
   } catch (error) {
@@ -1487,12 +1522,16 @@ async function handleGroupSummary(
   let lastMessageId: number | null = null;
   const summaryMessageIds: number[] = [];
   let allPersisted = true;
+  const deliveries: TelegramPresentationDelivery[] = [];
   try {
-    for (const chunk of renderTelegramHtml(groupSummaryPresentation(prepared.content, locale))) {
-      const sent = await sendTelegramPresentationChunk(ctx, message, chunk);
-      allPersisted = persistMessage(sent, dependencies) && allPersisted;
-      lastMessageId = sent.message_id;
-      summaryMessageIds.push(sent.message_id);
+    for (const chunk of renderTelegramRich(groupSummaryPresentation(prepared.content, locale))) {
+      const delivery = await sendTelegramPresentationChunk(ctx, message, chunk);
+      deliveries.push(delivery);
+      for (const sent of delivery.messages) {
+        allPersisted = persistMessage(sent, dependencies) && allPersisted;
+        lastMessageId = sent.message_id;
+        summaryMessageIds.push(sent.message_id);
+      }
     }
   } catch (error) {
     dependencies.groupSummary.failDelivery(prepared);
@@ -1502,7 +1541,19 @@ async function handleGroupSummary(
     dependencies.groupSummary.failDelivery(prepared);
     return;
   }
-  dependencies.groupSummary.complete(prepared, lastMessageId, summaryMessageIds);
+  dependencies.groupSummary.complete(prepared, lastMessageId, summaryMessageIds, presentationDebug(deliveries));
+}
+
+interface TelegramPresentationDelivery {
+  messages: StorableMessage[];
+  mode: "rich_message" | "html" | "plain_text" | "mixed";
+  fallbackReasons: string[];
+  richBlocks: unknown;
+}
+
+interface ConversationDelivery {
+  assistantMessageId: number | null;
+  presentation: ReturnType<typeof presentationDebug>;
 }
 
 async function sendConversationResponse(
@@ -1510,27 +1561,64 @@ async function sendConversationResponse(
   message: Message,
   response: string | MiaResponse,
   dependencies: BotDependencies,
-): Promise<number | null> {
+): Promise<ConversationDelivery> {
   let lastMessageId: number | null = null;
   let allPersisted = true;
+  const deliveries: TelegramPresentationDelivery[] = [];
   const presentation = typeof response === "string" ? miaResponseFromText(response) : response;
-  for (const chunk of renderTelegramHtml(presentation)) {
-    const sent = await sendTelegramPresentationChunk(ctx, message, chunk);
-    allPersisted = persistMessage(sent, dependencies) && allPersisted;
-    lastMessageId = sent.message_id;
+  for (const chunk of renderTelegramRich(presentation)) {
+    const delivery = await sendTelegramPresentationChunk(ctx, message, chunk);
+    deliveries.push(delivery);
+    for (const sent of delivery.messages) {
+      allPersisted = persistMessage(sent, dependencies) && allPersisted;
+      lastMessageId = sent.message_id;
+    }
   }
-  return allPersisted ? lastMessageId : null;
+  return {
+    assistantMessageId: allPersisted ? lastMessageId : null,
+    presentation: presentationDebug(deliveries),
+  };
+}
+
+function presentationDebug(deliveries: readonly TelegramPresentationDelivery[]) {
+  const modes = [...new Set(deliveries.map((delivery) => delivery.mode))];
+  return {
+    deliveryMode: modes.length === 1 ? modes[0] : "mixed",
+    chunkCount: deliveries.reduce((sum, delivery) => sum + delivery.messages.length, 0),
+    richMessages: deliveries.map((delivery) => ({ blocks: delivery.richBlocks })),
+    fallbackReasons: [...new Set(deliveries.flatMap((delivery) => delivery.fallbackReasons))],
+  };
 }
 
 export async function sendTelegramPresentationChunk(
   ctx: Context,
   message: Message,
-  chunk: { html: string; plainText: string },
-) {
+  chunk: TelegramRichPresentationChunk,
+): Promise<TelegramPresentationDelivery> {
   try {
-    return await replyTo(ctx, message, chunk.html, { parse_mode: "HTML" });
+    const sent = await ctx.api.sendRichMessage(message.chat.id, chunk.richMessage, replyOptions(message));
+    if (!isStorableMessage(sent)) throw new Error("invalid_rich_message_response");
+    return { messages: [sent], mode: "rich_message", fallbackReasons: [], richBlocks: chunk.richBlocks };
   } catch {
-    return replyTo(ctx, message, chunk.plainText);
+    const messages: StorableMessage[] = [];
+    const modes = new Set<"html" | "plain_text">();
+    const fallbackReasons = ["send_rich_message_failed"];
+    for (const fallback of chunk.htmlFallback) {
+      try {
+        const sent = await replyPlainTo(ctx, message, fallback.html, { parse_mode: "HTML" });
+        if (!isStorableMessage(sent)) throw new Error("invalid_html_message_response");
+        messages.push(sent);
+        modes.add("html");
+      } catch {
+        fallbackReasons.push("send_html_message_failed");
+        const sent = await replyPlainTo(ctx, message, fallback.plainText);
+        if (!isStorableMessage(sent)) throw new Error("invalid_plain_message_response");
+        messages.push(sent);
+        modes.add("plain_text");
+      }
+    }
+    const mode = modes.size === 1 ? [...modes][0] ?? "plain_text" : "mixed";
+    return { messages, mode, fallbackReasons, richBlocks: chunk.richBlocks };
   }
 }
 
@@ -1695,12 +1783,36 @@ function threadOptionFromCallbackMessage(message: Message) {
   return message.message_thread_id === undefined ? {} : { message_thread_id: message.message_thread_id };
 }
 
-function replyTo(ctx: Context, message: Message, text: string, extra: Record<string, unknown> = {}) {
-  return ctx.api.sendMessage(message.chat.id, text, {
+function replyOptions(message: Message, extra: Record<string, unknown> = {}) {
+  return {
     ...threadOption(message),
     reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
     ...extra,
+  };
+}
+
+function isStorableMessage(value: unknown): value is StorableMessage {
+  return typeof value === "object" && value !== null && "message_id" in value &&
+    typeof value.message_id === "number";
+}
+
+function replyPlainTo(ctx: Context, message: Message, text: string, extra: Record<string, unknown> = {}) {
+  return ctx.api.sendMessage(message.chat.id, text, {
+    ...replyOptions(message, extra),
   });
+}
+
+async function replyTo(ctx: Context, message: Message, text: string, extra: Record<string, unknown> = {}) {
+  return sendRichText(ctx, message.chat.id, text, replyOptions(message, extra));
+}
+
+async function sendRichText(
+  ctx: Context,
+  chatId: number,
+  text: string,
+  extra: Record<string, unknown> = {},
+): Promise<StorableMessage> {
+  return sendTelegramRichText(ctx.api, chatId, text, extra);
 }
 
 function clarification(field: string, locale: BotLocale): string {
@@ -1877,7 +1989,8 @@ export function createBot(token: string, dependencies: BotDependencies): Bot {
   });
   bot.on("message", async (ctx) => {
     const message = ctx.message;
-    if (!("text" in message) && !("photo" in message) && !("document" in message) && !("sticker" in message)) return;
+    if (!("text" in message) && !("photo" in message) && !("document" in message) &&
+        !("sticker" in message) && !("rich_message" in message)) return;
     if (dependencies.mediaStore && !dependencies.mediaStore.claimTelegramUpdate(ctx.update.update_id)) return;
     persistMessage(message as StorableMessage, dependencies);
     if ("sticker" in message || "document" in message && !message.document.mime_type?.startsWith("image/")) return;
@@ -1903,7 +2016,8 @@ export function createBot(token: string, dependencies: BotDependencies): Bot {
   });
   bot.on("edited_message", (ctx) => {
     const message = ctx.editedMessage;
-    if (!("text" in message) && !("photo" in message) && !("document" in message) && !("sticker" in message)) return;
+    if (!("text" in message) && !("photo" in message) && !("document" in message) &&
+        !("sticker" in message) && !("rich_message" in message)) return;
     persistMessage(message as StorableMessage, dependencies);
   });
   bot.on("callback_query:data", (ctx) => {

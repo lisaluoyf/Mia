@@ -20,8 +20,8 @@ const itemSchema = z.object({
   text: z.string().trim().min(1).max(2000),
 }).strict();
 
-export const miaResponseBlockSchema = z.object({
-  type: z.enum(["paragraph", "list", "facts", "code"]),
+const standardBlockSchema = z.object({
+  type: z.enum(["paragraph", "list", "facts", "code", "quote", "details"]),
   heading: z.string().trim().min(1).max(160).nullable(),
   emoji: z.string().trim().max(16).nullable(),
   text: z.string().trim().min(1).max(8000).nullable(),
@@ -29,6 +29,17 @@ export const miaResponseBlockSchema = z.object({
   ordered: z.boolean(),
   language: z.string().trim().max(40).nullable(),
 }).strict();
+
+const tableBlockSchema = z.object({
+  type: z.literal("table"),
+  heading: z.string().trim().min(1).max(160).nullable(),
+  emoji: z.string().trim().max(16).nullable(),
+  columns: z.array(z.string().trim().min(1).max(120)).min(2).max(8),
+  rows: z.array(z.array(z.string().trim().max(1000)).min(2).max(8)).min(1).max(20),
+  compact: z.boolean(),
+}).strict();
+
+export const miaResponseBlockSchema = z.discriminatedUnion("type", [standardBlockSchema, tableBlockSchema]);
 
 export const miaResponseSchema = z.object({
   version: z.literal(1),
@@ -66,30 +77,56 @@ export const MIA_RESPONSE_JSON_SCHEMA = {
       minItems: 1,
       maxItems: 8,
       items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["type", "heading", "emoji", "text", "items", "ordered", "language"],
-        properties: {
-          type: { type: "string", enum: ["paragraph", "list", "facts", "code"] },
-          heading: { type: ["string", "null"], maxLength: 160 },
-          emoji: { type: ["string", "null"], maxLength: 16 },
-          text: { type: ["string", "null"], maxLength: 8000 },
-          items: {
-            type: "array",
-            maxItems: 12,
-            items: {
-              type: "object",
-              additionalProperties: false,
-              required: ["label", "text"],
-              properties: {
-                label: { type: ["string", "null"], maxLength: 120 },
-                text: { type: "string", minLength: 1, maxLength: 2000 },
+        anyOf: [
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["type", "heading", "emoji", "text", "items", "ordered", "language"],
+            properties: {
+              type: { type: "string", enum: ["paragraph", "list", "facts", "code", "quote", "details"] },
+              heading: { type: ["string", "null"], maxLength: 160 },
+              emoji: { type: ["string", "null"], maxLength: 16 },
+              text: { type: ["string", "null"], maxLength: 8000 },
+              items: {
+                type: "array",
+                maxItems: 12,
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["label", "text"],
+                  properties: {
+                    label: { type: ["string", "null"], maxLength: 120 },
+                    text: { type: "string", minLength: 1, maxLength: 2000 },
+                  },
+                },
               },
+              ordered: { type: "boolean" },
+              language: { type: ["string", "null"], maxLength: 40 },
             },
           },
-          ordered: { type: "boolean" },
-          language: { type: ["string", "null"], maxLength: 40 },
-        },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["type", "heading", "emoji", "columns", "rows", "compact"],
+            properties: {
+              type: { type: "string", enum: ["table"] },
+              heading: { type: ["string", "null"], maxLength: 160 },
+              emoji: { type: ["string", "null"], maxLength: 16 },
+              columns: {
+                type: "array", minItems: 2, maxItems: 8,
+                items: { type: "string", minLength: 1, maxLength: 120 },
+              },
+              rows: {
+                type: "array", minItems: 1, maxItems: 20,
+                items: {
+                  type: "array", minItems: 2, maxItems: 8,
+                  items: { type: "string", maxLength: 1000 },
+                },
+              },
+              compact: { type: "boolean" },
+            },
+          },
+        ],
       },
     },
     actions: { type: "array", maxItems: 4, items: { type: "string", enum: miaActionIdSchema.options } },
@@ -102,6 +139,20 @@ function cleanInline(value: string): string {
 
 export function normalizeMiaResponse(value: MiaResponse): MiaResponse {
   const blocks = value.blocks.flatMap((block): MiaResponseBlock[] => {
+    if (block.type === "table") {
+      const columns = block.columns.map(cleanInline).filter(Boolean);
+      if (columns.length < 2) return [];
+      const rows = block.rows
+        .map((row) => columns.map((_, index) => cleanInline(row[index] ?? "")))
+        .filter((row) => row.some(Boolean));
+      if (rows.length === 0) return [];
+      return [{
+        ...block,
+        heading: block.heading ? cleanInline(block.heading) : null,
+        columns,
+        rows,
+      }];
+    }
     const heading = block.heading ? cleanInline(block.heading) : null;
     const items = block.items
       .map((item) => ({ label: item.label ? cleanInline(item.label) : null, text: cleanInline(item.text) }))
@@ -112,13 +163,13 @@ export function normalizeMiaResponse(value: MiaResponse): MiaResponse {
     const text = block.text ? cleanInline(block.text)
       : block.type === "paragraph" && recoveredText ? recoveredText
         : null;
-    if ((block.type === "paragraph" || block.type === "code") && !text) return [];
+    if ((block.type === "paragraph" || block.type === "code" || block.type === "quote" || block.type === "details") && !text) return [];
     if ((block.type === "list" || block.type === "facts") && items.length === 0) return [];
     return [{
       ...block,
       heading,
       text,
-      items: block.type === "paragraph" || block.type === "code" ? [] : items,
+      items: block.type === "list" || block.type === "facts" ? items : [],
     }];
   });
   return {
@@ -155,6 +206,12 @@ export function miaResponsePlainText(value: MiaResponse): string {
   for (const block of response.blocks) {
     const lines: string[] = [];
     if (block.heading) lines.push([block.emoji, block.heading].filter(Boolean).join(" "));
+    if (block.type === "table") {
+      lines.push(block.columns.join(" | "));
+      for (const row of block.rows) lines.push(row.join(" | "));
+      parts.push(lines.join("\n"));
+      continue;
+    }
     if (block.text) lines.push(block.text);
     block.items.forEach((item, index) => {
       const prefix = block.type === "list" ? (block.ordered ? `${index + 1}.` : "●") : "";

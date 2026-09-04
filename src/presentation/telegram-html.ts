@@ -28,10 +28,22 @@ function blockAtoms(response: MiaResponse): Array<{ html: string; plainText: str
         plainText: [block.emoji, block.heading].filter(Boolean).join(" "),
       });
     }
-    if (block.type === "paragraph" && block.text) {
+    if (block.type === "table") {
+      const header = block.columns.join(" | ");
+      const separator = block.columns.map(() => "---").join(" | ");
+      const rows = block.rows.map((row) => row.join(" | "));
+      lines.push({
+        html: `<pre>${escapeHtml([header, separator, ...rows].join("\n"))}</pre>`,
+        plainText: [header, ...rows].join("\n"),
+      });
+    } else if (block.type === "paragraph" && block.text) {
       lines.push({ html: escapeHtml(block.text), plainText: block.text });
     } else if (block.type === "code" && block.text) {
       lines.push({ html: `<pre><code>${escapeHtml(block.text)}</code></pre>`, plainText: block.text });
+    } else if (block.type === "quote" && block.text) {
+      lines.push({ html: `<blockquote>${escapeHtml(block.text)}</blockquote>`, plainText: block.text });
+    } else if (block.type === "details" && block.text) {
+      lines.push({ html: escapeHtml(block.text), plainText: block.text });
     } else if (block.type === "list") {
       block.items.forEach((item, index) => {
         const marker = block.ordered ? `${index + 1}.` : "●";
@@ -40,12 +52,17 @@ function blockAtoms(response: MiaResponse): Array<{ html: string; plainText: str
         lines.push({ html, plainText });
       });
     } else if (block.type === "facts") {
+      const factLines: Array<{ html: string; plainText: string }> = [];
       block.items.forEach((item) => {
         const label = item.label ?? "";
-        lines.push({
+        factLines.push({
           html: label ? `<b>${escapeHtml(label)}：</b> ${escapeHtml(item.text)}` : escapeHtml(item.text),
           plainText: label ? `${label}：${item.text}` : item.text,
         });
+      });
+      lines.push({
+        html: `<blockquote>${factLines.map((line) => line.html).join("\n")}</blockquote>`,
+        plainText: factLines.map((line) => line.plainText).join("\n"),
       });
     }
     if (lines.length > 0) {

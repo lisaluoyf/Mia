@@ -43,7 +43,7 @@ function installApi(bot: ReturnType<typeof createBot>) {
   bot.api.config.use((_previous, method, payload) => {
     const safe = payload as unknown as Record<string, unknown>;
     calls.push({ method, payload: safe });
-    if (method === "sendMessage") {
+    if (method === "sendMessage" || method === "sendRichMessage") {
       nextMessageId += 1;
       return Promise.resolve({ ok: true, result: {
         message_id: nextMessageId,
@@ -53,7 +53,9 @@ function installApi(bot: ReturnType<typeof createBot>) {
           ? { id: Number(safe.chat_id), type: "supergroup", title: "Bot 玩家", is_forum: true }
           : { id: Number(safe.chat_id), type: "private", first_name: "Alen" },
         from: botInfo,
-        text: typeof safe.text === "string" ? safe.text : "",
+        ...(method === "sendRichMessage"
+          ? { rich_message: safe.rich_message }
+          : { text: typeof safe.text === "string" ? safe.text : "" }),
       } } as never);
     }
     return Promise.resolve({ ok: true, result: true } as never);
@@ -113,16 +115,22 @@ describe("Telegram group summary entry points", () => {
       currentMessageId: 18,
       locale: "zh-CN",
     });
-    const sent = calls.find((call) => call.method === "sendMessage");
+    const sent = calls.find((call) => call.method === "sendRichMessage");
     expect(sent?.payload).toMatchObject({
       chat_id: -1001,
       message_thread_id: 12,
-      parse_mode: "HTML",
       reply_parameters: { message_id: 18, allow_sending_without_reply: true },
     });
-    expect(String(sent?.payload.text)).toContain("<b>本周讨论</b>");
+    const richMessage = sent?.payload.rich_message as {
+      blocks?: Array<{ type?: unknown; text?: unknown }>;
+    } | undefined;
+    expect(richMessage?.blocks?.some((block) =>
+      block.type === "heading" && typeof block.text === "string" && block.text.includes("本周讨论"))).toBe(true);
     expect(contextStore.saveMessage).toHaveBeenCalledWith(expect.objectContaining({ messageId: 801 }));
-    expect(complete).toHaveBeenCalledWith(prepared, 801, [801]);
+    expect(complete).toHaveBeenCalledWith(prepared, 801, [801], expect.objectContaining({
+      deliveryMode: "rich_message",
+      chunkCount: 1,
+    }));
     expect(contextStore.saveMessage.mock.invocationCallOrder.at(-1)).toBeLessThan(
       complete.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     );
@@ -206,7 +214,11 @@ describe("Telegram group summary entry points", () => {
     });
 
     expect(summarize).not.toHaveBeenCalled();
-    expect(calls.find((call) => call.method === "sendMessage")?.payload.text).toContain("仅支持群和 Topic");
+    const richMessage = calls.find((call) => call.method === "sendRichMessage")?.payload.rich_message as {
+      blocks?: Array<{ type?: unknown; text?: unknown }>;
+    } | undefined;
+    expect(richMessage?.blocks?.some((block) =>
+      block.type === "paragraph" && typeof block.text === "string" && block.text.includes("仅支持群和 Topic"))).toBe(true);
   });
 
   it("keeps the direct phrase matcher narrow", () => {

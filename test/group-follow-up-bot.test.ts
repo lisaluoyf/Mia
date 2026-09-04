@@ -245,7 +245,15 @@ describe("Mia group follow-up", () => {
         data: followUpReply,
         webSearch: { callCount: 1, queries: ["北京后天天气"], sources: [] },
       });
-    const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 30_000 });
+    const structuredChat = vi.fn().mockResolvedValue({
+      should_respond: true,
+      response_to_message_id: 703,
+      intent_hint: "chat",
+      needs_web_search: true,
+      confidence: 0.99,
+      reason: "weather_follow_up",
+    });
+    const router = new IntentRouter({ structuredResponse, structuredChat }, { model: "gpt-5.4", timeoutMs: 30_000 });
     const { bot, calls, resolveCredential } = setup(vi.fn(), { router });
 
     await bot.handleUpdate(update({

@@ -430,6 +430,7 @@ export class GroupSummaryService {
     prepared: PreparedGroupSummary,
     lastAssistantMessageId: number,
     summaryMessageIds: readonly number[],
+    presentation?: unknown,
   ): boolean {
     let persisted = false;
     let persistenceSkipped: string | null = prepared.truncated ? "truncated_backlog" : null;
@@ -470,6 +471,7 @@ export class GroupSummaryService {
         memoriesWritten: persisted ? prepared.persistence?.memories.length ?? 0 : 0,
         persistenceSkipped,
         finalWatermark: persisted ? lastAssistantMessageId : null,
+        ...(presentation === undefined ? {} : { presentation }),
       },
     });
     return persisted;

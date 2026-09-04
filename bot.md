@@ -1,7 +1,7 @@
 # Mia Agent Bot 项目目标与进展档案
 
 > 本文件是 Mia Agent Bot 的长期目标、架构决策、交付记录和待办事项的共享进度源，供 `Agent Bot`、`处理 Bot 私聊` 和 `Bot 群聊` 任务共同维护。
-> 最后同步：2026-09-03（Asia/Shanghai）
+> 最后同步：2026-09-04（Asia/Shanghai）
 
 ## 维护规则
 
@@ -169,12 +169,33 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 
 ### 通用结构化回复与 Telegram 展示（已部署）
 
-- [x] 新增 `MiaResponse v1` 严格 JSON Schema，统一承载短标题、段落、列表、事实项、代码和受控动作 ID；模型不直接生成 HTML、Markdown、URL 或 callback data。
-- [x] 普通聊天、实时天气、看图问答和其他长回答由同一意图调用返回结构化 `reply`；简单寒暄仍保持一段自然文本，信息较多时才使用标题、粗体标签、列表和段落留白。
-- [x] Telegram Renderer 统一执行内容规范化、HTML 转义、原生粗体、代码块、4096 字符安全分段和纯文本降级；HTML 发送失败时自动重发对应纯文本。
-- [x] 群聊总结复用同一 Renderer。用户可见结构改为“具体短标题、1 至 5 条重点、必要的结论/待办/未决事项、自然收束句”，不再展示“概览、主要话题、覆盖说明”等后台报表栏目。
-- [x] 用户只发送图片且没有说明时，Mia 提供“看懂这张图 / 修改图片 / 做成视频”按钮；按钮跟随语言、只允许原发送者操作、重复点击幂等，并通过 Force Reply 进入现有媒体流程。
+- [x] 新增 `MiaResponse v1` 严格 JSON Schema，统一承载短标题、段落、列表、事实项、通用多列表格、引用、折叠补充、代码和受控动作 ID；模型不直接生成 HTML、Markdown、URL 或 callback data。
+- [x] 普通聊天、实时搜索、看图问答、群聊总结和其他长回答复用同一结构化 `reply` 与展示层；简单寒暄仍保持一段自然文本，复杂内容才按语义使用标题、列表、引用、表格或折叠内容。
+- [x] Telegram Renderer 把受控结构映射为原生 Rich Message blocks，统一处理长度、安全和回复关系；投递失败时按 Rich Message → 安全 HTML → 纯文本降级，临时生成状态继续使用可编辑的普通消息。
+- [x] 群聊总结复用同一 Renderer。用户可见结构改为”具体短标题、1 至 5 条重点、必要的结论/待办/未决事项、自然收束句”，不再展示”概览、主要话题、覆盖说明”等后台报表栏目。
+- [x] 用户只发送图片且没有说明时，Mia 提供”看懂这张图 / 修改图片 / 做成视频”按钮；按钮跟随语言、只允许原发送者操作、重复点击幂等，并通过 Force Reply 进入现有媒体流程。
 - [x] 已覆盖天气样式、长总结、HTML 注入、Markdown 清理、转义后超长分段、HTML 发送失败降级、图片按钮权限及重复点击。合并最新 GitHub 媒体修复后，185/185 测试、ESLint、前后端 TypeScript、生产构建和 `git diff --check` 通过（2026-09-03）。
+
+#### Telegram 样式优化分析（2026-09-04）
+
+**竞品对比观察**：
+- 竞品 `@mira` 在 Telegram 回复中使用了表格样式，有完整边框、背景色块、清晰对齐，视觉层次明显
+- 当前 Mia 的 `facts` 类型渲染为纯文本 `<b>标签：</b> 内容`，缺乏视觉容器
+
+**技术调研结果（已由 Bot API 与真实客户端验证）**：
+
+1. Mira 的表格不是图片或 Mini App，也不是 Telegram 自动识别普通 `|` 文本；实际能力来自 Bot API 10.1+ 的原生 Rich Messages。
+2. `sendRichMessage` 支持标题、段落、列表、引用、折叠内容和真正的 `table` block；真实 Mia Bot 样板已返回 HTTP 200，并在用户 Telegram 客户端正确显示大标题、表格边框、背景分行、引用和留白。
+3. grammY 当前版本已经包含 `sendRichMessage`、`Message.RichMessageMessage` 和完整 Rich Block 类型，无需升级依赖。
+4. 普通 `|` 文本只应作为 HTML/纯文本降级时的可读形式，不能当作原生表格实现。
+
+**通用实现结论**：
+
+- 模型继续返回受严格 JSON Schema 约束的语义结构，不直接控制 Rich HTML、按钮、链接或 callback。
+- 服务端统一把结构映射为 Telegram 原生 blocks；`facts` 映射为紧凑两列表格，`table` 支持 2 至 8 列通用对比数据，其余内容按语义映射为标题、段落、列表、引用、折叠补充或代码。
+- 天气、搜索、总结、对比、视觉问答等场景不维护专用卡片，统一复用同一 Prompt 约束、Schema、Renderer 和投递降级链路。
+- 接收的 `message.rich_message` 会提取成可读文本并按原会话作用域进入上下文，转发来的 Mira 富消息不再被过滤。
+- Debug 保存模型原始响应、最终 Rich blocks、实际发送方式、分段数及降级原因。
 
 ## 群聊主持人
 

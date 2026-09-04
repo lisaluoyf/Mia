@@ -13,6 +13,7 @@ import {
   stickerSetName,
 } from "../stickers/service.js";
 import { botText, mediaJobLocale } from "../telegram/localization.js";
+import { sendTelegramRichText } from "../telegram/send-rich-text.js";
 
 interface WorkerOptions {
   client: APIMasterClient;
@@ -271,7 +272,7 @@ export class MediaWorker {
       } catch (error) {
         if (job.type === "video_generate" && errorCode(error) === "content_too_large" && this.options.publicBaseUrl) {
           const token = this.options.store.createAccessToken("download", job.id);
-          await this.options.api.sendMessage(job.chatId, botText(locale, "videoReadyLink", {
+          await sendTelegramRichText(this.options.api, job.chatId, botText(locale, "videoReadyLink", {
             url: `${this.options.publicBaseUrl}/mia/media/download/${token.token}`,
           }), replyOptions(job));
           await this.clearCompletedStatus(job);
@@ -428,7 +429,7 @@ export class MediaWorker {
       }).then(() => true).catch(() => false);
       if (edited) return;
     }
-    await this.options.api.sendMessage(job.chatId, text, {
+    await sendTelegramRichText(this.options.api, job.chatId, text, {
       ...replyOptions(job),
       ...(keyboard ? { reply_markup: keyboard } : {}),
     }).catch(() => undefined);
