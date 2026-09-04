@@ -1,5 +1,4 @@
 import type { ContextStore } from "../storage/store.js";
-import { PROMPT_LIBRARY } from "../prompts.js";
 import type { DebugStore } from "./store.js";
 import type { ModelConfigStore } from "../model-config/store.js";
 import { MODEL_CONFIG_DEFINITIONS, type ModelConfigEntry } from "../model-config/types.js";
@@ -32,7 +31,7 @@ export class DebugService {
     private readonly contexts: Pick<ContextStore, "listMemories" | "getLatestSummary" | "listPendingCompletedTurns">,
     private readonly modelConfig: ModelConfigStore,
     private readonly client: Pick<APIMasterClient, "listModels">,
-    private readonly promptConfigs?: PromptConfigStore,
+    private readonly promptConfigs: PromptConfigStore,
   ) {}
 
   requests(telegramUserId: number) {
@@ -58,11 +57,10 @@ export class DebugService {
   }
 
   prompts() {
-    return this.promptConfigs?.list() ?? PROMPT_LIBRARY;
+    return this.promptConfigs.list();
   }
 
   savePrompt(id: string, text: unknown) {
-    if (!this.promptConfigs) throw new Error("Prompt configuration is unavailable");
     return this.promptConfigs.save(id, text);
   }
 

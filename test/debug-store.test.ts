@@ -177,11 +177,12 @@ describe("developer debug snapshots", () => {
     const debugStore = new DebugStore(":memory:");
     const contexts = new ContextStore(":memory:");
     const modelConfig = new ModelConfigStore(":memory:");
+    const promptConfigs = new PromptConfigStore(":memory:");
     const app = createServer({
       logger: createLogger("silent"),
       serviceKey: "test-internal-service-key",
       handleUpdate: vi.fn(),
-      debug: new DebugService(debugStore, contexts, modelConfig, { listModels: vi.fn().mockRejectedValue(new Error("offline")) }),
+      debug: new DebugService(debugStore, contexts, modelConfig, { listModels: vi.fn().mockRejectedValue(new Error("offline")) }, promptConfigs),
     });
     const response = await app.inject({
       method: "GET",
@@ -191,6 +192,7 @@ describe("developer debug snapshots", () => {
     expect(response.statusCode).toBe(503);
     expect(response.json()).toMatchObject({ success: false, error: "model_catalog_unavailable" });
     await app.close();
+    promptConfigs.close();
     modelConfig.close();
     contexts.close();
     debugStore.close();
