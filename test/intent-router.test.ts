@@ -622,12 +622,27 @@ describe("Mia intent router", () => {
     });
   });
 
-  it("registers mia.system as a base module included once by the actual router prompt", () => {
+  it("registers shared base modules in each composed chat prompt", () => {
     const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
+    const presentationPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.presentation-style");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
+    const followUpPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.follow-up-chat");
     expect(basePrompt).toMatchObject({ kind: "base" });
-    expect(routerPrompt).toMatchObject({ version: 9, kind: "composed", includes: ["mia.system"] });
+    expect(presentationPrompt).toMatchObject({ version: 1, kind: "base" });
+    expect(routerPrompt).toMatchObject({
+      version: 10,
+      kind: "composed",
+      includes: ["mia.system", "mia.presentation-style"],
+    });
     expect(routerPrompt?.text).toContain(basePrompt?.text ?? "missing");
+    expect(routerPrompt?.text).toContain(presentationPrompt?.text ?? "missing");
+    expect(routerPrompt?.text).toContain("一张核心表格 + 重点观察 + 一句建议");
     expect(routerPrompt?.text).toContain("不得把段落正文放进 paragraph.items");
+    expect(followUpPrompt).toMatchObject({
+      version: 4,
+      kind: "composed",
+      includes: ["mia.system", "mia.presentation-style"],
+    });
+    expect(followUpPrompt?.text).toContain(presentationPrompt?.text ?? "missing");
   });
 });
