@@ -10,14 +10,18 @@ import { MediaAPIError, ResolverError } from "../src/clients/apimaster.js";
 import { createLogger } from "../src/logger.js";
 import { MediaStore } from "../src/media/store.js";
 import { MediaWorker } from "../src/media/worker.js";
+import { ContextStore } from "../src/storage/store.js";
 
 describe("media worker transient regeneration status", () => {
   let store: MediaStore | undefined;
+  let contexts: ContextStore | undefined;
   let resultDirectory: string | undefined;
 
   afterEach(() => {
     store?.close();
     store = undefined;
+    contexts?.close();
+    contexts = undefined;
     if (resultDirectory) rmSync(resultDirectory, { recursive: true, force: true });
     resultDirectory = undefined;
     vi.unstubAllGlobals();
@@ -44,9 +48,14 @@ describe("media worker transient regeneration status", () => {
 
   it("keeps the progress text through submission and deletes it after sending the new image", async () => {
     createJob();
+    contexts = new ContextStore(":memory:");
+    contexts.upsertChat({
+      chatId: 42, type: "private", title: null, username: null, description: null, isForum: false,
+    });
     const editMessageText = vi.fn().mockResolvedValue({});
     const sendPhoto = vi.fn().mockResolvedValue({
       message_id: 79,
+      date: 1_788_333_610,
       photo: [{ file_id: "new-photo", file_unique_id: "new-unique", width: 1024, height: 1024 }],
     });
     const deleteMessage = vi.fn().mockResolvedValue(true);
@@ -69,6 +78,8 @@ describe("media worker transient regeneration status", () => {
       resultMaxBytes: 10_000_000,
       publicBaseUrl: null,
       botUsername: "MiaAssistantBot",
+      botUserId: 100,
+      contexts,
     });
 
     await worker.tick();
@@ -85,6 +96,13 @@ describe("media worker transient regeneration status", () => {
       status: "succeeded",
       statusMessageId: 79,
       resultTelegramFileId: "new-photo",
+    });
+    expect(contexts.getMessage(42, 79)).toMatchObject({
+      senderUserId: 100,
+      replyToMessageId: 77,
+      contentType: "photo",
+      mediaFileId: "new-photo",
+      mediaUniqueId: "new-unique",
     });
     expect(Buffer.from(store.readLocalResult(1, "image/png")?.bytes ?? []).toString("utf8")).toBe("image");
   });

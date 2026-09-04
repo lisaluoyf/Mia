@@ -1,10 +1,12 @@
 import { InlineKeyboard, InputFile, type Api } from "grammy";
+import type { Message } from "grammy/types";
 import type { Logger } from "pino";
 
 import type { APIMasterClient, ImageSubmitResult, NormalizedTaskStatus } from "../clients/apimaster.js";
 import { MediaAPIError, ResolverError } from "../clients/apimaster.js";
 import { APIMASTER_CONNECT_URL } from "../constants.js";
 import type { DebugRecorder } from "../debug/recorder.js";
+import type { ContextStore } from "../storage/store.js";
 import type { MediaStore } from "./store.js";
 import type { MediaJob } from "./types.js";
 import { dataUrl, downloadTelegramImages } from "./intake.js";
@@ -26,6 +28,8 @@ interface WorkerOptions {
   resultMaxBytes: number;
   publicBaseUrl: string | null;
   botUsername: string;
+  botUserId?: number;
+  contexts?: Pick<ContextStore, "upsertUser" | "saveMessage">;
   debug?: DebugRecorder;
 }
 
@@ -342,6 +346,9 @@ export class MediaWorker {
         mimeType: media.mimeType,
         mediaGroupId: null,
       });
+      if ("photo" in sent || "document" in sent) {
+        this.saveGeneratedImageContext(job, sent, file);
+      }
     }
     if (job.type !== "video_generate" && job.chatId === job.telegramUserId && file) {
       this.options.store.setActivePrivateImage({
@@ -364,6 +371,45 @@ export class MediaWorker {
       resultTelegramFileId: file?.file_id ?? null,
       resultTelegramUniqueId: file?.file_unique_id ?? null,
     });
+  }
+
+  private saveGeneratedImageContext(
+    job: MediaJob,
+    sent: Message.PhotoMessage | Message.DocumentMessage,
+    file: { file_id: string; file_unique_id: string },
+  ): void {
+    if (!this.options.contexts || !this.options.botUserId) return;
+    try {
+      this.options.contexts.upsertUser({
+        telegramUserId: this.options.botUserId,
+        firstName: "Mia",
+        lastName: null,
+        username: this.options.botUsername,
+        languageCode: null,
+        isBot: true,
+      });
+      this.options.contexts.saveMessage({
+        chatId: job.chatId,
+        messageId: sent.message_id,
+        threadId: job.threadId,
+        senderUserId: this.options.botUserId,
+        senderChatId: null,
+        replyToMessageId: job.requestMessageId,
+        contentType: "document" in sent ? "document" : "photo",
+        text: null,
+        caption: botText(mediaJobLocale(job.options), "imageReady"),
+        entitiesJson: null,
+        mediaFileId: file.file_id,
+        mediaUniqueId: file.file_unique_id,
+        sentAt: new Date(sent.date * 1_000).toISOString(),
+        editedAt: null,
+      });
+    } catch (error) {
+      this.options.logger.warn(
+        { err: error, jobId: job.id, chatId: job.chatId, messageId: sent.message_id },
+        "Mia generated image context could not be persisted",
+      );
+    }
   }
 
   private async deliverSticker(

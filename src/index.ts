@@ -133,6 +133,8 @@ async function main(): Promise<void> {
     resultMaxBytes: config.mediaResultMaxBytes,
     publicBaseUrl: config.publicBaseUrl,
     botUsername: bot.botInfo.username,
+    botUserId: bot.botInfo.id,
+    contexts,
     debug,
   });
   worker.start();
