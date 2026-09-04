@@ -625,6 +625,7 @@ describe("Mia intent router", () => {
   it("registers the concise base prompt in each composed chat prompt", () => {
     const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
+    const participationPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.follow-up-participation");
     const followUpPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.follow-up-chat");
     expect(basePrompt).toMatchObject({ version: 5, kind: "base" });
     expect(basePrompt?.text).toContain("开门见山，优先给出结论");
@@ -638,6 +639,8 @@ describe("Mia intent router", () => {
     expect(routerPrompt?.text).not.toContain("信息较多时");
     expect(routerPrompt?.text).not.toContain("list 用于并列重点");
     expect(routerPrompt?.text).toContain("不得把段落正文放进 paragraph.items");
+    expect(participationPrompt).toMatchObject({ version: 2 });
+    expect(participationPrompt?.text).not.toContain("简单附和或感谢、表情式回复");
     expect(followUpPrompt).toMatchObject({
       version: 8,
       kind: "composed",
