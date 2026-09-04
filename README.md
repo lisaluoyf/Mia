@@ -19,6 +19,11 @@ guest text credential. Guest media intents stop at an account activation prompt.
 - Image and video generation share a three-job per-user concurrency limit.
 - APIMaster owns accounts, Keys, quota checks, and model routing.
 - Mia never persists or sends a user's API Key to Telegram.
+- Direct identity and capability questions use a reviewed, server-owned product
+  profile instead of model-generated claims. The same capability allowlist is
+  included in Mia's system rules for indirect or unsupported phrasing. The
+  introduction includes shareable entry buttons for image generation, video
+  generation, sticker creation, and Mini App model settings.
 
 ## Conversation context
 

@@ -6,6 +6,7 @@ export const BOT_LOCALES = [
 export type BotLocale = typeof BOT_LOCALES[number];
 
 const ENGLISH = {
+  settings: "Settings",
   contextCleared: "Context cleared.",
   groupSummaryGroupOnly: "Chat summaries are available in groups and Topics only.",
   groupSummaryEmpty: "There are no new messages to summarize in this chat yet.",
@@ -100,6 +101,7 @@ export type BotMessageKey = keyof typeof ENGLISH;
 type MessageOverrides = Partial<Record<BotMessageKey, string>>;
 
 const CHINESE_SIMPLIFIED: MessageOverrides = {
+  settings: "设置",
   contextCleared: "上下文已清除。",
   groupSummaryGroupOnly: "群聊总结仅支持群和 Topic。",
   groupSummaryEmpty: "这个聊天目前还没有可总结的新消息。",
@@ -192,6 +194,7 @@ const CHINESE_SIMPLIFIED: MessageOverrides = {
 
 const CHINESE_TRADITIONAL: MessageOverrides = {
   ...CHINESE_SIMPLIFIED,
+  settings: "設定",
   contextCleared: "對話內容已清除。",
   queuedImage: "圖片生成任務已排隊……",
   generatingNewImage: "正在生成新圖片……",
@@ -245,6 +248,31 @@ const CORE_TRANSLATIONS: Record<Exclude<BotLocale, "en" | "zh-CN" | "zh-TW">, Me
   vi: { queuedImage: "Đã đưa tác vụ tạo ảnh vào hàng đợi…", submitted: "Đã gửi. Mia sẽ gửi kết quả tại đây khi hoàn tất.", imageReady: "Ảnh đã sẵn sàng", videoReady: "Video đã sẵn sàng", generateAgain: "Tạo lại", generateAnother: "Tạo thêm ảnh", continueEditing: "Tiếp tục chỉnh sửa", downloadOriginal: "Tải bản gốc", share: "Chia sẻ", stillProcessing: "Vẫn đang xử lý{progress}…", generationFailed: "Tạo nội dung đa phương tiện thất bại.", temporaryError: "Đã xảy ra lỗi tạm thời. Mia vẫn đang xử lý và sẽ kiểm tra lại.", activeLimit: "Bạn đã có 3 tác vụ đa phương tiện đang chạy." },
 };
 
+const SETTINGS_TRANSLATIONS: Record<Exclude<BotLocale, "en" | "zh-CN" | "zh-TW">, string> = {
+  ar: "الإعدادات",
+  cs: "Nastavení",
+  de: "Einstellungen",
+  es: "Ajustes",
+  fa: "تنظیمات",
+  fr: "Réglages",
+  hi: "सेटिंग्स",
+  id: "Pengaturan",
+  it: "Impostazioni",
+  ja: "設定",
+  ko: "설정",
+  ms: "Tetapan",
+  nl: "Instellingen",
+  pl: "Ustawienia",
+  pt: "Definições",
+  "pt-BR": "Configurações",
+  ru: "Настройки",
+  th: "การตั้งค่า",
+  tr: "Ayarlar",
+  uk: "Налаштування",
+  uz: "Sozlamalar",
+  vi: "Cài đặt",
+};
+
 type AccessMessageKey = "mediaBindRequired" | "mediaTokenRequired" | "mediaTopUpRequired" |
   "registerAndBindButton" | "createTokenButton" | "topUpButton";
 
@@ -288,7 +316,11 @@ function overrides(locale: BotLocale): MessageOverrides {
   if (locale === "zh-CN") return CHINESE_SIMPLIFIED;
   if (locale === "zh-TW") return CHINESE_TRADITIONAL;
   if (locale === "en") return {};
-  return { ...CORE_TRANSLATIONS[locale], ...ACCESS_TRANSLATIONS[locale] };
+  return {
+    ...CORE_TRANSLATIONS[locale],
+    ...ACCESS_TRANSLATIONS[locale],
+    settings: SETTINGS_TRANSLATIONS[locale],
+  };
 }
 
 export function botText(

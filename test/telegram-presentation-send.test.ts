@@ -67,4 +67,42 @@ describe("Telegram presentation delivery", () => {
       reply_parameters: { message_id: 2, allow_sending_without_reply: true },
     });
   });
+
+  it("keeps final-message buttons through Rich Message delivery and fallback", async () => {
+    const replyMarkup = { inline_keyboard: [[{ text: "生成图片", url: "https://t.me/MiaAssistantBot?start=image" }]] };
+    const richSent = { message_id: 3 };
+    const sendRichMessage = vi.fn().mockResolvedValue(richSent);
+    const sendMessage = vi.fn();
+    const richContext = { api: { sendRichMessage, sendMessage } };
+
+    await sendTelegramPresentationChunk(
+      richContext as never,
+      message as never,
+      chunk(),
+      { reply_markup: replyMarkup },
+    );
+    expect(sendRichMessage).toHaveBeenCalledWith(1, chunk().richMessage, {
+      reply_markup: replyMarkup,
+      reply_parameters: { message_id: 2, allow_sending_without_reply: true },
+    });
+
+    const fallbackSend = vi.fn().mockResolvedValue({ message_id: 4 });
+    const fallbackContext = {
+      api: {
+        sendRichMessage: vi.fn().mockRejectedValue(new Error("not supported")),
+        sendMessage: fallbackSend,
+      },
+    };
+    await sendTelegramPresentationChunk(
+      fallbackContext as never,
+      message as never,
+      chunk(),
+      { reply_markup: replyMarkup },
+    );
+    expect(fallbackSend).toHaveBeenCalledWith(1, "<b>重点</b>", {
+      parse_mode: "HTML",
+      reply_markup: replyMarkup,
+      reply_parameters: { message_id: 2, allow_sending_without_reply: true },
+    });
+  });
 });

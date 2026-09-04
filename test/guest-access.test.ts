@@ -119,6 +119,111 @@ describe("Mia guest access", () => {
     if (threadId !== undefined) expect(sent?.payload.message_thread_id).toBe(threadId);
   });
 
+  it("returns the fixed introduction with native action buttons without calling the model", async () => {
+    mediaStore = new MediaStore(":memory:");
+    const classify = vi.fn();
+    const resolve = vi.fn();
+    const bot = createBot("123:test", {
+      client: {} as APIMasterClient,
+      chatCredentials: { resolve },
+      logger: createLogger("silent"),
+      settings: { getPreferences: vi.fn() },
+      contexts: contextStubs(),
+      router: { model: "gpt-5.4", classify } as unknown as IntentRouter,
+      mediaStore,
+      botToken: "123:test",
+    });
+    bot.botInfo = botInfo;
+    const calls = installApi(bot);
+
+    await bot.handleUpdate({
+      update_id: 1010,
+      message: {
+        message_id: 17,
+        message_thread_id: 12,
+        date: 1_788_333_600,
+        chat: { id: -1001, type: "supergroup", title: "Guests", is_forum: true },
+        from: { id: 42, is_bot: false, first_name: "Guest", language_code: "zh-CN" },
+        text: "@MiaAssistantBot 向大家介绍一下你自己",
+        entities: [{ type: "mention", offset: 0, length: 16 }],
+      },
+    } as never);
+
+    expect(resolve).not.toHaveBeenCalled();
+    expect(classify).not.toHaveBeenCalled();
+    const sent = calls.find((call) => call.method === "sendMessage");
+    expect(sent?.payload.message_thread_id).toBe(12);
+    expect(sent?.payload.text).toContain("我是 Mia");
+    expect(sent?.payload.text).toContain("💬 对话和查询实时信息");
+    expect(sent?.payload.text).toContain("✨ 生成Telegram 贴纸");
+    expect(sent?.payload.text).not.toContain("群聊整理");
+    expect(sent?.payload.reply_markup).toEqual({
+      inline_keyboard: [
+        [
+          { text: "🖼 生成图片", callback_data: "intro_action:image" },
+          { text: "🎬 生成视频", callback_data: "intro_action:video" },
+        ],
+        [
+          { text: "✨ 制作贴纸", url: "https://t.me/MiaAssistantBot?start=sticker" },
+          { text: "⚙️ 模型设置", url: "https://t.me/MiaAssistantBot?start=settings" },
+        ],
+      ],
+    });
+  });
+
+  it("turns an introduction image button into a selective prompt in the same Topic", async () => {
+    mediaStore = new MediaStore(":memory:");
+    const classify = vi.fn();
+    const bot = createBot("123:test", {
+      client: {} as APIMasterClient,
+      logger: createLogger("silent"),
+      settings: { getPreferences: vi.fn() },
+      contexts: contextStubs(),
+      router: { model: "gpt-5.4", classify } as unknown as IntentRouter,
+      mediaStore,
+      botToken: "123:test",
+    });
+    bot.botInfo = botInfo;
+    const calls = installApi(bot);
+
+    await bot.handleUpdate({
+      update_id: 1011,
+      callback_query: {
+        id: "intro-image",
+        from: { id: 42, is_bot: false, first_name: "Guest", language_code: "zh-CN" },
+        message: {
+          message_id: 19,
+          message_thread_id: 12,
+          date: 1_788_333_600,
+          chat: { id: -1001, type: "supergroup", title: "Guests", is_forum: true },
+          from: botInfo,
+          text: "我是 Mia",
+        },
+        chat_instance: "group-instance",
+        data: "intro_action:image",
+      },
+    } as never);
+
+    expect(classify).not.toHaveBeenCalled();
+    expect(calls.some((call) => call.method === "answerCallbackQuery")).toBe(true);
+    const prompt = calls.filter((call) => call.method === "sendMessage").at(-1);
+    expect(prompt?.payload).toMatchObject({
+      text: "Guest: 请回复这条消息，描述你想生成的图片。",
+      message_thread_id: 12,
+      reply_parameters: { message_id: 19, allow_sending_without_reply: true },
+      reply_markup: {
+        force_reply: true,
+        selective: true,
+        input_field_placeholder: "描述你想生成的图片",
+      },
+    });
+    expect(mediaStore.getPendingIntent({ telegramUserId: 42, chatId: -1001, threadId: 12 })).toMatchObject({
+      intent: "image_generate",
+      missingRequired: ["instruction", "callback_reply"],
+      sourceMessageIds: [19, expect.any(Number)],
+    });
+  });
+
   it("blocks a natural-language media intent before any guest Token reaches a media model", async () => {
     mediaStore = new MediaStore(":memory:");
     const classify = vi.fn().mockResolvedValue({

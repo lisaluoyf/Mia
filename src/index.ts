@@ -110,6 +110,7 @@ async function main(): Promise<void> {
         return modelConfig.get("guest_chat") ?? config.miaGuestChatModel;
       },
     },
+    miniAppUrl: config.publicBaseUrl ? `${config.publicBaseUrl}/mia/` : null,
   });
   await bot.init();
   try {

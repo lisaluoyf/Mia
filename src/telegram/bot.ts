@@ -1,5 +1,5 @@
 import { Bot, InlineKeyboard, InputFile, type Context, type Filter } from "grammy";
-import type { Message } from "grammy/types";
+import type { Message, User } from "grammy/types";
 import type { Logger } from "pino";
 
 import type { APIMasterClient } from "../clients/apimaster.js";
@@ -14,6 +14,7 @@ import { debugContextLayers } from "../debug/context.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { DebugContextLayers, DebugRequestKind } from "../debug/types.js";
 import { FollowUpCoordinator } from "../follow-up/coordinator.js";
+import { isMiaIntroductionRequest, miaIntroduction } from "../identity.js";
 import {
   mediaIntentSchema,
   type IntentRouter,
@@ -42,6 +43,12 @@ import { renderTelegramRich, type TelegramRichPresentationChunk } from "../prese
 import { stickerPrompt, stickerSetTitle } from "../stickers/service.js";
 import { botText, mediaJobLocale, resolveBotLocale, type BotLocale } from "./localization.js";
 import { groupSummaryPresentation } from "./group-summary-html.js";
+import {
+  miaIntroductionActionPrompt,
+  miaIntroductionPanel,
+  miaSettingsLaunch,
+  type MiaIntroductionAction,
+} from "./introduction-panel.js";
 import { userFacingError } from "./messages.js";
 import { promptFromMessage, shouldRespond } from "./policy.js";
 import { sendTelegramRichText } from "./send-rich-text.js";
@@ -71,6 +78,7 @@ interface BotDependencies {
   debug?: DebugRecorder;
   onboarding?: OnboardingService;
   followUpCredential?: Pick<ChatCredential, "apiKey" | "model">;
+  miniAppUrl?: string | null;
 }
 
 interface IncomingMessage {
@@ -307,6 +315,36 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   if (!automaticFollowUp && !shouldRespond(policyInput, identity) && !explicit && !namedMediaReply &&
       !explicitSummaryPhrase && !suppliesPendingMedia) return;
 
+  const startPayload = message.chat.type === "private" ? parseStartPayload(request.text) : null;
+  if (startPayload === "settings") {
+    const launch = miaSettingsLaunch(locale, miniAppUrl(dependencies));
+    const sent = await replyTo(ctx, message, launch.text, { reply_markup: launch.keyboard });
+    persistMessage(sent, dependencies);
+    return;
+  }
+  if (startPayload === "sticker") {
+    await sendIntroductionActionPrompt(ctx, message, message.from, "sticker", dependencies);
+    return;
+  }
+
+  const requestedIntroduction = promptFromMessage(policyInput, identity);
+  if (!automaticFollowUp && isMiaIntroductionRequest(requestedIntroduction)) {
+    const panel = miaIntroductionPanel(locale, ctx.me.username, {
+      privateChat: message.chat.type === "private",
+      miniAppUrl: miniAppUrl(dependencies),
+    });
+    const delivery = await sendConversationResponse(
+      ctx,
+      message,
+      miaIntroduction(locale),
+      dependencies,
+      { reply_markup: panel },
+    );
+    if (delivery.assistantMessageId !== null) recordSuccessfulGroupTrigger(message, dependencies);
+    request.onIntervention?.();
+    return;
+  }
+
   if (explicit?.command === "media_on" || explicit?.command === "media_off") {
     await handleMediaAdmin(ctx, explicit.command === "media_on", dependencies.mediaStore);
     return;
@@ -387,11 +425,13 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   let onboardingEligibility: OnboardingEligibility | null = null;
   let followUpTypingSent = false;
   if (savedCallbackIntent?.success) {
+    const callbackInstruction = request.text.trim() ||
+      (stickerContinuation ? savedCallbackIntent.data.instruction : "");
     routed = {
       ...savedCallbackIntent.data,
       intent: stickerContinuation ? "sticker_create" : savedCallbackIntent.data.intent,
-      instruction: request.text.trim(),
-      missingRequired: request.text.trim() ? [] : ["instruction"],
+      instruction: callbackInstruction,
+      missingRequired: callbackInstruction ? [] : ["instruction"],
     };
   } else if (explicit?.command === "image") {
     const image = parseImageOptions(explicit.instruction);
@@ -932,6 +972,83 @@ function imageActionKeyboard(userId: number, messageId: number, locale: BotLocal
     .text(botText(locale, "animateImageButton"), `${prefix}:video`);
 }
 
+function miniAppUrl(dependencies: BotDependencies): string {
+  return dependencies.miniAppUrl?.trim() || "https://apimaster.ai/mia/";
+}
+
+async function sendIntroductionActionPrompt(
+  ctx: Context,
+  sourceMessage: Message,
+  actor: User,
+  action: MiaIntroductionAction,
+  dependencies: BotDependencies,
+): Promise<void> {
+  if (!dependencies.mediaStore) return;
+  const locale = resolveBotLocale(actor.language_code);
+  const copy = miaIntroductionActionPrompt(locale, action);
+  const actorName = [actor.first_name, actor.last_name].filter(Boolean).join(" ") || actor.username || String(actor.id);
+  const promptText = sourceMessage.chat.type === "private" ? copy.text : `${actorName}: ${copy.text}`;
+  const prompt = await sendRichText(ctx, sourceMessage.chat.id, promptText, {
+    ...threadOptionFromCallbackMessage(sourceMessage),
+    reply_parameters: { message_id: sourceMessage.message_id, allow_sending_without_reply: true },
+    reply_markup: {
+      force_reply: true,
+      selective: true,
+      input_field_placeholder: copy.placeholder,
+    },
+  });
+  const intent = action === "image" ? "image_generate" : action === "video" ? "video_generate" : "sticker_create";
+  const instruction = action === "sticker" ? "制作一张贴纸" : "";
+  dependencies.mediaStore.savePendingIntent({
+    telegramUserId: actor.id,
+    chatId: sourceMessage.chat.id,
+    threadId: sourceMessage.message_thread_id ?? null,
+    intent,
+    slots: {
+      intent,
+      should_respond: true,
+      response_to_message_id: null,
+      confidence: 1,
+      instruction,
+      media_source: "none",
+      media_message_ids: [],
+      image_options: action === "image" || action === "sticker" ? { aspect_ratio: null } : null,
+      video_options: action === "video" ? {
+        mode: "text_to_video",
+        duration_seconds: null,
+        aspect_ratio: null,
+        resolution: null,
+        image_roles: [],
+      } : null,
+      reply: null,
+      final_response: null,
+      conversation_mode: "task",
+      onboarding_opportunity: false,
+      profile_updates: null,
+    },
+    missingRequired: action === "sticker" ? ["image", "callback_reply"] : ["instruction", "callback_reply"],
+    sourceMessageIds: [sourceMessage.message_id, prompt.message_id],
+  });
+  persistMessage(prompt, dependencies);
+}
+
+async function handleIntroductionCallback(ctx: Context, dependencies: BotDependencies): Promise<boolean> {
+  const query = ctx.callbackQuery;
+  if (!query?.data) return false;
+  const message = query.message;
+  const match = /^intro_action:(image|video|sticker)$/.exec(query.data);
+  if (!match) return false;
+  const action = match[1] as MiaIntroductionAction;
+  const locale = resolveBotLocale(query.from.language_code);
+  if (!message || !dependencies.mediaStore || action === "sticker" && message.chat.type !== "private") {
+    await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
+    return true;
+  }
+  await ctx.answerCallbackQuery();
+  await sendIntroductionActionPrompt(ctx, message, query.from, action, dependencies);
+  return true;
+}
+
 async function handleImageActionCallback(ctx: Context, dependencies: BotDependencies): Promise<boolean> {
   const query = ctx.callbackQuery;
   const message = query?.message;
@@ -1060,6 +1177,7 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
     await handleOnboardingCallback(ctx, dependencies);
     return;
   }
+  if (await handleIntroductionCallback(ctx, dependencies)) return;
   if (await handleImageActionCallback(ctx, dependencies)) return;
   if (!dependencies.mediaStore) return;
   const match = /^media:(\d+):(generate|cancel|dur_up|dur_down|ratio|download|again|edit)$/.exec(query.data);
@@ -1566,13 +1684,16 @@ async function sendConversationResponse(
   message: Message,
   response: string | MiaResponse,
   dependencies: BotDependencies,
+  finalMessageOptions: Record<string, unknown> = {},
 ): Promise<ConversationDelivery> {
   let lastMessageId: number | null = null;
   let allPersisted = true;
   const deliveries: TelegramPresentationDelivery[] = [];
   const presentation = typeof response === "string" ? miaResponseFromText(response) : response;
-  for (const chunk of renderTelegramRich(presentation)) {
-    const delivery = await sendTelegramPresentationChunk(ctx, message, chunk);
+  const chunks = renderTelegramRich(presentation);
+  for (const [index, chunk] of chunks.entries()) {
+    const options = index === chunks.length - 1 ? finalMessageOptions : {};
+    const delivery = await sendTelegramPresentationChunk(ctx, message, chunk, options);
     deliveries.push(delivery);
     for (const sent of delivery.messages) {
       allPersisted = persistMessage(sent, dependencies) && allPersisted;
@@ -1599,24 +1720,30 @@ export async function sendTelegramPresentationChunk(
   ctx: Context,
   message: Message,
   chunk: TelegramRichPresentationChunk,
+  finalMessageOptions: Record<string, unknown> = {},
 ): Promise<TelegramPresentationDelivery> {
   try {
-    const sent = await ctx.api.sendRichMessage(message.chat.id, chunk.richMessage, replyOptions(message));
+    const sent = await ctx.api.sendRichMessage(
+      message.chat.id,
+      chunk.richMessage,
+      replyOptions(message, finalMessageOptions),
+    );
     if (!isStorableMessage(sent)) throw new Error("invalid_rich_message_response");
     return { messages: [sent], mode: "rich_message", fallbackReasons: [], richBlocks: chunk.richBlocks };
   } catch {
     const messages: StorableMessage[] = [];
     const modes = new Set<"html" | "plain_text">();
     const fallbackReasons = ["send_rich_message_failed"];
-    for (const fallback of chunk.htmlFallback) {
+    for (const [index, fallback] of chunk.htmlFallback.entries()) {
+      const options = index === chunk.htmlFallback.length - 1 ? finalMessageOptions : {};
       try {
-        const sent = await replyPlainTo(ctx, message, fallback.html, { parse_mode: "HTML" });
+        const sent = await replyPlainTo(ctx, message, fallback.html, { parse_mode: "HTML", ...options });
         if (!isStorableMessage(sent)) throw new Error("invalid_html_message_response");
         messages.push(sent);
         modes.add("html");
       } catch {
         fallbackReasons.push("send_html_message_failed");
-        const sent = await replyPlainTo(ctx, message, fallback.plainText);
+        const sent = await replyPlainTo(ctx, message, fallback.plainText, options);
         if (!isStorableMessage(sent)) throw new Error("invalid_plain_message_response");
         messages.push(sent);
         modes.add("plain_text");
@@ -1658,6 +1785,12 @@ function directIntent(intent: PendingMediaIntent, instruction: string, mediaSour
 function parseExplicitCommand(text: string): { command: string; instruction: string } | null {
   const match = /^\/(image|vision|video|sticker|summary|new|forget|media_on|media_off)(?:@\w+)?(?:\s+([\s\S]*))?$/i.exec(text.trim());
   return match ? { command: match[1]?.toLowerCase() ?? "", instruction: match[2]?.trim() ?? "" } : null;
+}
+
+function parseStartPayload(text: string): "sticker" | "settings" | null {
+  const match = /^\/start(?:@\w+)?\s+(sticker|settings)$/i.exec(text.trim());
+  const payload = match?.[1]?.toLowerCase();
+  return payload === "sticker" || payload === "settings" ? payload : null;
 }
 
 export function isExplicitGroupSummaryPhrase(text: string): boolean {

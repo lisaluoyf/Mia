@@ -627,11 +627,11 @@ describe("Mia intent router", () => {
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
     const participationPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.follow-up-participation");
     const followUpPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.follow-up-chat");
-    expect(basePrompt).toMatchObject({ version: 5, kind: "base" });
+    expect(basePrompt).toMatchObject({ version: 6, kind: "base" });
     expect(basePrompt?.text).toContain("开门见山，优先给出结论");
     expect(basePrompt?.text).toContain("默认不超过 200 字或 3 个要点");
     expect(routerPrompt).toMatchObject({
-      version: 14,
+      version: 15,
       kind: "composed",
       includes: ["mia.system"],
     });
@@ -642,7 +642,7 @@ describe("Mia intent router", () => {
     expect(participationPrompt).toMatchObject({ version: 2 });
     expect(participationPrompt?.text).not.toContain("简单附和或感谢、表情式回复");
     expect(followUpPrompt).toMatchObject({
-      version: 8,
+      version: 9,
       kind: "composed",
       includes: ["mia.system"],
     });

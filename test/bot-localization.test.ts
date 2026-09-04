@@ -32,6 +32,7 @@ describe("Telegram bot localization", () => {
   });
 
   it("localizes the complete Simplified Chinese media lifecycle", () => {
+    expect(botText("zh-hans", "settings")).toBe("设置");
     expect(botText("zh-hans", "queuedImage")).toBe("图片生成任务已排队……");
     expect(botText("zh-hans", "generatingNewImage")).toBe("正在生成新图片……");
     expect(botText("zh-hans", "submitted")).toBe("已提交，生成完成后 Mia 会把结果发送到这里。");
@@ -43,6 +44,14 @@ describe("Telegram bot localization", () => {
     expect(botText("zh-hans", "noUsableKey", { model: "gpt-image-2" }))
       .toContain("gpt-image-2");
     expect(mediaJobLocale({ locale: "zh-hans" })).toBe("zh-CN");
+  });
+
+  it("localizes the settings menu label for every advertised locale", () => {
+    for (const locale of BOT_LOCALES) {
+      const translated = botText(locale, "settings");
+      expect(translated.length, locale).toBeGreaterThan(0);
+      if (locale !== "en") expect(translated, locale).not.toBe(botText("en", "settings"));
+    }
   });
 
   it("uses processing language for media work without exposing the internal queue", () => {
