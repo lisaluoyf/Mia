@@ -346,6 +346,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 | `a124a56` | `lisaluoyf/Mia` | 私聊前 100 轮用户画像引导、25 种语言角色按钮、画像长期记忆和 Debug 审计 |
 | `70c6774` | `lisaluoyf/Mia` | 群聊与 Topic 上下文压缩、公开群记忆、原子水位和管理员清除保护 |
 | `2a684df` | `lisaluoyf/Mia` | 核心意图与文字回复迁移到 Responses、自动 Web Search 和 Debug 搜索审计 |
+| `72acb20` | `lisaluoyf/Mia` | 未绑定媒体请求统一跳转 APIMaster 一键 Telegram 连接入口 |
 
 ## 当前验证状态
 
@@ -374,6 +375,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - Mia 通用 Rich Message：功能提交 `845758f` 已从 GitHub 精确 SHA 发布到 `/srv/mia/releases/mia-git-845758f10123-20260904T061408Z`；216/216 测试、ESLint、前后端 TypeScript、生产构建和 `git diff --check` 通过。生产 `gpt-5.4` 严格 Schema 实测返回 `table + quote`，Mia Bot 原生 `sendRichMessage` 投递成功（消息 ID 1554）；内部 `/health` 正常、PM2 `online` 且 0 次重启、SQLite 完整性为 `ok`、错误日志为空并保留 3 个 release。APIMaster Web、new-api、Flask 与静态资源只读冒烟 20/20 通过，未修改或重启 APIMaster 主服务（2026-09-04）。
 - Mia 通用回复展示风格：提交 `b8f1386` 已从 GitHub 精确 SHA 发布到 `/srv/mia/releases/mia-git-b8f13867b548-20260904T070124Z`；新增可在 Debug 单独审阅的 `mia.presentation-style@v1`，并组合进 `mia.intent-router@v10` 与 `mia.follow-up-chat@v4`。短回答不强制格式，较长回复允许标题、区块和并列重点使用语义 Emoji；对比内容优先一张核心表格、重点观察和一句建议。216/216 测试、ESLint、前后端 TypeScript、生产构建和 `git diff --check` 通过；生产内部 `/health` 正常、PM2 `online` 且 0 次重启、SQLite 完整性为 `ok`、错误日志为空、保留 3 个 release，APIMaster 只读冒烟 19/19 通过；未修改或重启 APIMaster Web、new-api 或 Flask（2026-09-04）。
 - Mia 交流风格精简：提交 `eab43e8` 已从 GitHub 精确 SHA 发布到 `/srv/mia/releases/mia-git-eab43e83c88a-20260904T071131Z`；`mia.system@v2` 要求根据用户语言回答，保持自然幽默、主动积极、开门见山，并在 Telegram 中避免大段连续文字；多项信息优先使用简短列表。组合 Prompt 同步升级为 `mia.intent-router@v11` 与 `mia.follow-up-chat@v5`。216/216 测试、ESLint、前后端 TypeScript、生产构建和 `git diff --check` 通过；生产内部 `/health` 正常、PM2 `online` 且 0 次重启、SQLite 完整性为 `ok`、错误日志为空、保留 3 个 release，APIMaster 只读冒烟 19/19 通过；未修改或重启 APIMaster Web、new-api 或 Flask（2026-09-04）。
+- Mia Telegram 一键连接：Mia `72acb20` 与 APIMaster Web `d7e6f5c` 已推送到各自 GitHub `main`。未绑定用户的图片/视频入口统一指向 `/connect/telegram`；APIMaster 登录或注册后自动恢复该路径，创建一次性 Telegram 绑定凭证并跳回 Bot，已绑定用户直接回 Bot，不再进入 Profile。Mia 244/244 测试、ESLint、前后端 TypeScript 和生产构建通过；APIMaster 新路由 ESLint、生产构建、本地未登录 307 回跳及 `git diff --check` 通过。生产 SSH 当前在密钥交换阶段被服务器主动关闭，因此尚未部署，线上 `/connect/telegram` 仍为 404（2026-09-04）。
 
 ## 下一阶段优先级
 
