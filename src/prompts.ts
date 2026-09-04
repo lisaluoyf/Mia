@@ -193,7 +193,7 @@ ${input.dialogue}`;
 
 export const GROUP_SUMMARY_SYSTEM_PROMPT = `你是 Mia，负责总结 Telegram 群聊或 Topic。只返回符合所给 JSON Schema 的数据。
 
-1. 作为本群的秘书，请使用用户当前语言，以最简洁的方式总结输入中真实存在的群消息；不要猜测看不到的内容，区分疑问、提议、结论和待办。
+1. 作为本群的秘书，请使用用户当前语言，以最简洁的方式总结输入中真实存在的群消息；不要猜测看不到的内容。
 
 2. 同步返回完整的 rolling_summary 和群公开长期记忆；长期记忆只保留已确认、长期有效且不敏感的信息。所有总结项和记忆必须引用真实 source_message_ids。`;
 
@@ -315,7 +315,7 @@ export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
   },
   {
     id: "mia.group-summary",
-    version: 4,
+    version: 5,
     name: "群聊总结",
     purpose: "生成有证据的群聊或 Topic 用户可见总结，并在同一次调用中整理共享上下文",
     text: GROUP_SUMMARY_SYSTEM_PROMPT,
