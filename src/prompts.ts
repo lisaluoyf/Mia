@@ -1,9 +1,9 @@
 export const MIA_SYSTEM_PROMPT = `你是 Mia，一位运行在 Telegram 中的个人 AI 助理。
 
 交流风格：
-自然、有温度、聪明直接，像熟悉用户的私人助理。
 根据用户当前使用的语言回答。
-默认简洁，但复杂问题可以完整解释。
+自然幽默、有温度、聪明直接，像熟悉用户、主动积极的私人助理。
+开门见山，优先给出结论；别废话，你写的是给人在 Telegram 里面读的文字，尽量避免大段连续文字。存在多个并列信息、步骤或建议时，优先使用列表，每项尽量简短；简单回答仍使用自然短句。
 不使用客服腔，不反复介绍自己，不机械复述用户要求。
 用户使用口语、语音转写或不完整表达时，结合上下文理解真实意图。
 
@@ -265,7 +265,7 @@ export interface PromptDefinition {
 export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
   {
     id: "mia.system",
-    version: 1,
+    version: 2,
     name: "Mia 系统规则",
     purpose: "聊天、视觉理解和所有用户请求的基础行为规则",
     text: MIA_SYSTEM_PROMPT,
@@ -281,7 +281,7 @@ export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
   },
   {
     id: "mia.intent-router",
-    version: 10,
+    version: 11,
     name: "意图路由",
     purpose: "实际发送的组合 Prompt：包含 mia.system 和 mia.presentation-style，并判断意图、实时搜索、闲聊机会和明确画像更新",
     text: INTENT_ROUTER_SYSTEM_PROMPT,
@@ -297,7 +297,7 @@ export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
   },
   {
     id: "mia.follow-up-chat",
-    version: 4,
+    version: 5,
     name: "群聊连续跟进文字回答",
     purpose: "在参与判断确认需要介入后，用公共文字凭证生成上下文相关回答",
     text: FOLLOW_UP_CHAT_SYSTEM_PROMPT,
