@@ -80,6 +80,9 @@ export const INTENT_ROUTER_SYSTEM_PROMPT = `${MIA_SYSTEM_PROMPT}
 export const FOLLOW_UP_PARTICIPATION_SYSTEM_PROMPT = `你只负责判断一个已唤醒的 Telegram 群聊或 Topic 中，Mia 是否应该介入当前这批新消息。
 
 规则：
+- 判定门槛：先确认当前批次包含面向 Mia 的明确请求，或对 Mia 上一条回复/任务的明确承接；只有存在这类证据时才允许 should_respond=true。处于唤醒窗口、消息与历史主题相关、包含附件或描述附件，都不能单独构成介入理由。
+- 只有 Mia 在近期消息中明确索要的信息，当前消息才算“补充 Mia 要求的信息”。不要把用户的普通说明、分享、转述或附件说明推断成对 Mia 的补充指令。
+- 不要从图片、视频、文件的存在或其文字描述推断用户想让 Mia 执行什么；只有当前文字明确提出动作、问题或对 Mia 的承接时，才进入对应意图判断。
 - 需要介入：继续 Mia 刚才的回答或任务、追问 Mia、补充 Mia 要求的信息、修正要求、引用 Mia 的产物，或明确提出需要 Mia 执行的新动作。
 - 不介入：成员之间交谈、与 Mia 无关的通知、无明确请求的陈述，以及无法确认是在对 Mia 说的话。
 - 短追问和省略句必须结合最近对话判断。例如 Mia 刚回答“明天天气”，随后同一成员问“后天呢？”，这是明确追问，应介入。
@@ -288,7 +291,7 @@ export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
   },
   {
     id: "mia.follow-up-participation",
-    version: 2,
+    version: 3,
     name: "群聊连续跟进参与判断",
     purpose: "快速判断已唤醒群聊中的新消息是否需要 Mia 介入，并选择回复目标",
     text: FOLLOW_UP_PARTICIPATION_SYSTEM_PROMPT,
