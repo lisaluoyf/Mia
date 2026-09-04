@@ -36,6 +36,7 @@ const structuredChatResponseSchema = z.object({
 });
 
 const responsesResponseSchema = z.object({
+  output_text: z.string().optional(),
   output: z.array(z.object({
     type: z.string(),
     action: z.object({
@@ -55,7 +56,7 @@ const responsesResponseSchema = z.object({
         }).passthrough().optional(),
       }).passthrough()).optional(),
     }).passthrough()).optional(),
-  }).passthrough()),
+  }).passthrough()).default([]),
 });
 
 const imageSubmitResponseSchema = z.object({
@@ -352,33 +353,70 @@ export class APIMasterClient {
   }
 
   async chatMessages(apiKey: string, model: string, messages: readonly StructuredMessage[]): Promise<string> {
-    let response: Response;
+    if (preferResponsesForModel(model)) {
+      return this.responsesText(apiKey, model, messages);
+    }
+    const response = await this.postChatCompletions(apiKey, model, messages, this.options.timeoutMs);
+    if (response.ok) {
+      const payload: unknown = await response.json().catch(() => undefined);
+      const parsed = chatResponseSchema.safeParse(payload);
+      if (parsed.success && parsed.data.choices[0] !== undefined) return parsed.data.choices[0].message.content;
+      throw new ChatCompletionError(response.status);
+    }
+    if (await isResponsesOnlyError(response)) {
+      return this.responsesText(apiKey, model, messages);
+    }
+    throw new ChatCompletionError(response.status);
+  }
+
+  private async postChatCompletions(
+    apiKey: string,
+    model: string,
+    messages: readonly StructuredMessage[],
+    timeoutMs: number,
+  ): Promise<Response> {
     try {
-      response = await this.fetcher(`${this.options.baseUrl}/v1/chat/completions`, {
+      return await this.fetcher(`${this.options.baseUrl}/v1/chat/completions`, {
         method: "POST",
-        headers: {
-          authorization: `Bearer ${apiKey}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          stream: false,
-        }),
-        signal: AbortSignal.timeout(this.options.timeoutMs),
+        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ model, messages, stream: false }),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       throw new ChatCompletionError();
     }
+  }
 
-    if (!response.ok) {
-      throw new ChatCompletionError(response.status);
+  private async responsesText(
+    apiKey: string,
+    model: string,
+    messages: readonly StructuredMessage[],
+    timeoutMs = this.options.timeoutMs,
+  ): Promise<string> {
+    const instructions = messages.filter((message) => message.role === "system")
+      .map((message) => contentAsText(message.content)).join("\n\n");
+    const input = messages.filter((message) => message.role !== "system").map((message) => ({
+      role: message.role,
+      content: responsesContent(message.content),
+    }));
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.options.baseUrl}/v1/responses`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ model, instructions, input, stream: false, store: false }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch {
+      throw new ChatCompletionError();
     }
-
+    if (!response.ok) throw new ChatCompletionError(response.status);
     const payload: unknown = await response.json().catch(() => undefined);
-    const parsed = chatResponseSchema.safeParse(payload);
-    if (!parsed.success || parsed.data.choices[0] === undefined) throw new ChatCompletionError(response.status);
-    return parsed.data.choices[0].message.content;
+    const parsed = responsesResponseSchema.safeParse(payload);
+    if (!parsed.success) throw new ChatCompletionError(response.status);
+    const text = responseOutputText(parsed.data);
+    if (!text) throw new ChatCompletionError(response.status);
+    return text;
   }
 
   async structuredChat(
@@ -389,6 +427,10 @@ export class APIMasterClient {
     schema: object,
     timeoutMs = this.options.timeoutMs,
   ): Promise<unknown> {
+    if (preferResponsesForModel(model)) {
+      const result = await this.structuredResponse(apiKey, model, messages, schemaName, schema, timeoutMs, { webSearch: false });
+      return result.data;
+    }
     let response: Response;
     try {
       response = await this.fetcher(`${this.options.baseUrl}/v1/chat/completions`, {
@@ -409,9 +451,11 @@ export class APIMasterClient {
     } catch {
       throw new ChatCompletionError();
     }
-    if (!response.ok) {
-      throw new ChatCompletionError(response.status);
+    if (!response.ok && await isResponsesOnlyError(response)) {
+      const result = await this.structuredResponse(apiKey, model, messages, schemaName, schema, timeoutMs, { webSearch: false });
+      return result.data;
     }
+    if (!response.ok) throw new ChatCompletionError(response.status);
     const payload: unknown = await response.json().catch(() => undefined);
     const parsed = structuredChatResponseSchema.safeParse(payload);
     if (!parsed.success) {
@@ -475,10 +519,7 @@ export class APIMasterClient {
     const payload: unknown = await response.json().catch(() => undefined);
     const parsed = responsesResponseSchema.safeParse(payload);
     if (!parsed.success) throw new ChatCompletionError(response.status);
-    const text = parsed.data.output.flatMap((item) => item.content ?? [])
-      .filter((content) => content.type === "output_text" && typeof content.text === "string")
-      .map((content) => content.text ?? "")
-      .join("");
+    const text = responseOutputText(parsed.data);
     if (!text) throw new ChatCompletionError(response.status);
     let data: unknown;
     try {
@@ -520,6 +561,13 @@ export class APIMasterClient {
         image_url: { url: `data:${image.mimeType};base64,${Buffer.from(image.bytes).toString("base64")}` },
       })),
     ];
+    if (preferResponsesForModel(model)) {
+      return this.responsesText(apiKey, model, [
+        { role: "system", content: MIA_SYSTEM_PROMPT },
+        ...context,
+        { role: "user", content },
+      ]);
+    }
     let response: Response;
     try {
       response = await this.fetcher(`${this.options.baseUrl}/v1/chat/completions`, {
@@ -539,9 +587,14 @@ export class APIMasterClient {
     } catch {
       throw new ChatCompletionError();
     }
-    if (!response.ok) {
-      throw new ChatCompletionError(response.status);
+    if (!response.ok && await isResponsesOnlyError(response)) {
+      return this.responsesText(apiKey, model, [
+        { role: "system", content: MIA_SYSTEM_PROMPT },
+        ...context,
+        { role: "user", content },
+      ]);
     }
+    if (!response.ok) throw new ChatCompletionError(response.status);
     const payload: unknown = await response.json().catch(() => undefined);
     const parsed = chatResponseSchema.safeParse(payload);
     if (!parsed.success || parsed.data.choices[0] === undefined) {
@@ -781,6 +834,32 @@ function responsesContent(content: unknown): unknown {
     }
     return { type: "input_text", text: JSON.stringify(value) };
   });
+}
+
+function responseOutputText(payload: z.infer<typeof responsesResponseSchema>): string {
+  if (payload.output_text) return payload.output_text;
+  const outputText = payload.output.flatMap((item) => item.content ?? [])
+    .filter((content) => content.type === "output_text" && typeof content.text === "string")
+    .map((content) => content.text ?? "")
+    .join("");
+  return outputText;
+}
+
+function preferResponsesForModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return normalized === "grok-4.5"
+    || normalized === "o3-pro"
+    || normalized === "o3-deep-research"
+    || normalized === "o4-mini-deep-research";
+}
+
+async function isResponsesOnlyError(response: Response): Promise<boolean> {
+  if (![400, 404, 422].includes(response.status)) return false;
+  const payload = await response.clone().json().catch(() => undefined) as Record<string, unknown> | undefined;
+  const text = JSON.stringify(payload ?? "").toLowerCase();
+  return text.includes("protocol_not_supported")
+    || (text.includes("does not support") && text.includes("chat completions"))
+    || (text.includes("不支持") && text.includes("chat completions"));
 }
 
 function normalizeTaskStatus(status: string): NormalizedTaskStatus["status"] {

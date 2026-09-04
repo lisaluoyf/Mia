@@ -148,6 +148,39 @@ describe("APIMaster client", () => {
     });
   });
 
+  it("uses Responses for Grok 4.5 and translates messages to input", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      output: [{ type: "message", content: [{ type: "output_text", text: "你好，Grok" }] }],
+    }));
+    const client = createClient(fetcher);
+
+    await expect(client.chat("user-api-key", "grok-4.5", "hello")).resolves.toBe("你好，Grok");
+    const [url, init] = fetcher.mock.calls[0] ?? [];
+    expect(url).toBe("https://apimaster.example/v1/responses");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      model: "grok-4.5",
+      instructions: MIA_SYSTEM_PROMPT,
+      input: [{ role: "user", content: "hello" }],
+      stream: false,
+      store: false,
+    });
+  });
+
+  it("retries Responses when an unknown model rejects Chat Completions by protocol", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ code: "protocol_not_supported", message: "model does not support chat completions" }, { status: 400 }))
+      .mockResolvedValueOnce(Response.json({
+        output: [{ type: "message", content: [{ type: "output_text", text: "response fallback" }] }],
+      }));
+    const client = createClient(fetcher);
+
+    await expect(client.chat("user-api-key", "provider-response-model", "hello")).resolves.toBe("response fallback");
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      "https://apimaster.example/v1/chat/completions",
+      "https://apimaster.example/v1/responses",
+    ]);
+  });
+
   it("uses Responses structured output with automatic Web Search and captures hidden search metadata", async () => {
     const output = {
       intent: "chat",
