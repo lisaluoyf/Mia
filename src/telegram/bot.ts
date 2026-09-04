@@ -38,7 +38,7 @@ import type { ContextStore } from "../storage/store.js";
 import type { ConversationScope, GroupConversationScope, GroupFollowUpState } from "../storage/types.js";
 import { MIA_SYSTEM_PROMPT, promptReference } from "../prompts.js";
 import { richMessagePlainText } from "../presentation/rich-message-text.js";
-import { miaResponseFromText, type MiaResponse } from "../presentation/schema.js";
+import { miaResponseFromText, miaResponsePlainText, type MiaResponse } from "../presentation/schema.js";
 import { renderTelegramRich, type TelegramRichPresentationChunk } from "../presentation/telegram-rich.js";
 import { stickerPrompt, stickerSetTitle } from "../stickers/service.js";
 import { botText, mediaJobLocale, resolveBotLocale, type BotLocale } from "./localization.js";
@@ -329,18 +329,31 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
 
   const requestedIntroduction = promptFromMessage(policyInput, identity);
   if (!automaticFollowUp && isMiaIntroductionRequest(requestedIntroduction)) {
+    const introduction = miaIntroduction(locale);
     const panel = miaIntroductionPanel(locale, ctx.me.username, {
       privateChat: message.chat.type === "private",
       miniAppUrl: miniAppUrl(dependencies),
     });
-    const delivery = await sendConversationResponse(
-      ctx,
-      message,
-      miaIntroduction(locale),
-      dependencies,
-      { reply_markup: panel },
-    );
-    if (delivery.assistantMessageId !== null) recordSuccessfulGroupTrigger(message, dependencies);
+    let assistantMessageId: number | null = null;
+    try {
+      const sent = await ctx.api.sendPhoto(message.chat.id, introductionImageUrl(dependencies), {
+        ...replyOptions(message),
+        caption: miaResponsePlainText(introduction),
+        reply_markup: panel,
+      });
+      assistantMessageId = persistContextOnly(sent, dependencies) ? sent.message_id : null;
+    } catch (error) {
+      dependencies.logger.warn({ err: error }, "Mia introduction image could not be sent; using text fallback");
+      const delivery = await sendConversationResponse(
+        ctx,
+        message,
+        introduction,
+        dependencies,
+        { reply_markup: panel },
+      );
+      assistantMessageId = delivery.assistantMessageId;
+    }
+    if (assistantMessageId !== null) recordSuccessfulGroupTrigger(message, dependencies);
     request.onIntervention?.();
     return;
   }
@@ -974,6 +987,23 @@ function imageActionKeyboard(userId: number, messageId: number, locale: BotLocal
 
 function miniAppUrl(dependencies: BotDependencies): string {
   return dependencies.miniAppUrl?.trim() || "https://apimaster.ai/mia/";
+}
+
+function introductionImageUrl(dependencies: BotDependencies): string {
+  return new URL("mia-introduction.png", miniAppUrl(dependencies)).toString();
+}
+
+function persistContextOnly(message: StorableMessage, dependencies: BotDependencies): boolean {
+  try {
+    captureMessage(message, dependencies.contexts);
+    return true;
+  } catch (error) {
+    dependencies.logger.error(
+      { err: error, chatId: message.chat.id, messageId: message.message_id },
+      "Failed to persist Telegram message context",
+    );
+    return false;
+  }
 }
 
 async function sendIntroductionActionPrompt(

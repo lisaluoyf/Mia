@@ -43,6 +43,23 @@ function installApi(bot: ReturnType<typeof createBot>) {
   bot.api.config.use((_previous, method, payload) => {
     const safePayload = payload as unknown as Record<string, unknown>;
     calls.push({ method, payload: safePayload });
+    if (method === "sendPhoto") {
+      const chatId = Number(safePayload.chat_id);
+      const caption = typeof safePayload.caption === "string" ? safePayload.caption : "";
+      return Promise.resolve({
+        ok: true,
+        result: {
+          message_id: 900 + calls.length,
+          date: 1_788_333_601,
+          chat: chatId > 0
+            ? { id: chatId, type: "private", first_name: "Guest" }
+            : { id: chatId, type: "supergroup", title: "Guests", is_forum: true },
+          from: botInfo,
+          caption,
+          photo: [{ file_id: "intro-photo", file_unique_id: "intro-photo-unique", width: 1254, height: 1254 }],
+        },
+      } as never);
+    }
     if (method === "sendMessage") {
       const chatId = Number(safePayload.chat_id);
       const text = typeof safePayload.text === "string" ? safePayload.text : "";
@@ -151,12 +168,21 @@ describe("Mia guest access", () => {
 
     expect(resolve).not.toHaveBeenCalled();
     expect(classify).not.toHaveBeenCalled();
-    const sent = calls.find((call) => call.method === "sendMessage");
+    const sent = calls.find((call) => call.method === "sendPhoto");
     expect(sent?.payload.message_thread_id).toBe(12);
-    expect(sent?.payload.text).toContain("我是 Mia");
-    expect(sent?.payload.text).toContain("💬 对话和查询实时信息");
-    expect(sent?.payload.text).toContain("✨ 生成Telegram 贴纸");
-    expect(sent?.payload.text).not.toContain("群聊整理");
+    expect(sent?.payload.photo).toBe("https://apimaster.ai/mia/mia-introduction.png");
+    expect(sent?.payload.caption).toBe(`我是 Mia，APIMaster 的 Telegram AI 助理
+
+我能：
+
+💬 对话和查询实时信息
+
+🖼 生成图片、修改图片
+
+✨ 生成Telegram 贴纸
+
+🎬 创作视频`);
+    expect(sent?.payload.caption).not.toContain("●");
     expect(sent?.payload.reply_markup).toEqual({
       inline_keyboard: [
         [

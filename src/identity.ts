@@ -28,16 +28,14 @@ export function isMiaIntroductionRequest(text: string): boolean {
 }
 
 interface IntroductionCopy {
-  title: string;
-  lead: string;
+  headline: string;
   capabilitiesHeading: string;
   capabilities: readonly string[];
 }
 
 const INTRODUCTIONS: Partial<Record<BotLocale, IntroductionCopy>> = {
   "zh-CN": {
-    title: "我是 Mia",
-    lead: "APIMaster 的 Telegram AI 助理",
+    headline: "我是 Mia，APIMaster 的 Telegram AI 助理",
     capabilitiesHeading: "我能：",
     capabilities: [
       "💬 对话和查询实时信息",
@@ -47,8 +45,7 @@ const INTRODUCTIONS: Partial<Record<BotLocale, IntroductionCopy>> = {
     ],
   },
   "zh-TW": {
-    title: "我是 Mia",
-    lead: "APIMaster 的 Telegram AI 助理",
+    headline: "我是 Mia，APIMaster 的 Telegram AI 助理",
     capabilitiesHeading: "我能：",
     capabilities: [
       "💬 對話和查詢即時資訊",
@@ -58,8 +55,7 @@ const INTRODUCTIONS: Partial<Record<BotLocale, IntroductionCopy>> = {
     ],
   },
   en: {
-    title: "I'm Mia",
-    lead: "APIMaster's Telegram AI assistant",
+    headline: "I'm Mia, APIMaster's Telegram AI assistant",
     capabilitiesHeading: "I can:",
     capabilities: [
       "💬 Chat and look up current information",
@@ -74,23 +70,14 @@ export function miaIntroduction(locale: BotLocale): MiaResponse {
   const copy = INTRODUCTIONS[locale] ?? INTRODUCTIONS.en!;
   return {
     version: 1,
-    title: { text: copy.title, emoji: null },
+    title: null,
     blocks: [
       {
         type: "paragraph",
         heading: null,
         emoji: null,
-        text: copy.lead,
+        text: [copy.headline, copy.capabilitiesHeading, ...copy.capabilities].join("\n\n"),
         items: [],
-        ordered: false,
-        language: null,
-      },
-      {
-        type: "list",
-        heading: copy.capabilitiesHeading,
-        emoji: null,
-        text: null,
-        items: copy.capabilities.map((text) => ({ label: null, text })),
         ordered: false,
         language: null,
       },

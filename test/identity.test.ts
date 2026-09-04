@@ -24,15 +24,17 @@ describe("Mia identity", () => {
   });
 
   it("uses the reviewed Simplified Chinese copy exactly", () => {
-    expect(miaResponsePlainText(miaIntroduction("zh-CN"))).toBe(`我是 Mia
-
-APIMaster 的 Telegram AI 助理
+    expect(miaResponsePlainText(miaIntroduction("zh-CN"))).toBe(`我是 Mia，APIMaster 的 Telegram AI 助理
 
 我能：
-● 💬 对话和查询实时信息
-● 🖼 生成图片、修改图片
-● ✨ 生成Telegram 贴纸
-● 🎬 创作视频`);
+
+💬 对话和查询实时信息
+
+🖼 生成图片、修改图片
+
+✨ 生成Telegram 贴纸
+
+🎬 创作视频`);
   });
 
   it("keeps an explicit product allowlist for non-introduction answers", () => {

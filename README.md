@@ -22,8 +22,9 @@ guest text credential. Guest media intents stop at an account activation prompt.
 - Direct identity and capability questions use a reviewed, server-owned product
   profile instead of model-generated claims. The same capability allowlist is
   included in Mia's system rules for indirect or unsupported phrasing. The
-  introduction includes shareable entry buttons for image generation, video
-  generation, sticker creation, and Mini App model settings.
+  introduction is delivered as a branded image with a concise caption and
+  entry buttons for image generation, video generation, sticker creation, and
+  Mini App model settings.
 
 ## Conversation context
 
