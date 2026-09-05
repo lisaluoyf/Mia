@@ -95,6 +95,17 @@ const ENGLISH = {
   stickerPrivateOnly: "Sticker creation is currently available in a private chat with Mia only.",
   stickerSingleImage: "Send one image at a time to create a sticker.",
   addStickerPack: "Add sticker pack",
+  translationModeEnabled: "Translation mode is on.\n{pair}",
+  translationModeDisabled: "Translation mode is off.",
+  translationModeExpired: "Translation mode expired after 30 minutes.",
+  translationSwitchButton: "Switch language pair",
+  translationExitButton: "Exit translation mode",
+  translationCopyButton: "Copy translation",
+  translationChoosePair: "Choose a language pair:",
+  translationPairZhEn: "Chinese ↔ English",
+  translationPairEnRu: "English ↔ Russian",
+  translationPairZhRu: "Chinese ↔ Russian",
+  translationPrivateOnly: "Translation mode is available in private chat only.",
 } as const;
 
 export type BotMessageKey = keyof typeof ENGLISH;
@@ -190,6 +201,17 @@ const CHINESE_SIMPLIFIED: MessageOverrides = {
   stickerPrivateOnly: "贴纸生成功能目前只支持和 Mia 私聊。",
   stickerSingleImage: "一次请只发一张图片来制作贴纸。",
   addStickerPack: "添加贴纸包",
+  translationModeEnabled: "翻译模式已开启\n{pair}",
+  translationModeDisabled: "翻译模式已退出。",
+  translationModeExpired: "翻译模式已因 30 分钟无操作自动退出。",
+  translationSwitchButton: "切换语言对",
+  translationExitButton: "退出翻译模式",
+  translationCopyButton: "复制译文",
+  translationChoosePair: "选择语言对：",
+  translationPairZhEn: "中文 ↔ 英语",
+  translationPairEnRu: "英语 ↔ 俄语",
+  translationPairZhRu: "中文 ↔ 俄语",
+  translationPrivateOnly: "翻译模式仅支持私聊。",
 };
 
 const CHINESE_TRADITIONAL: MessageOverrides = {

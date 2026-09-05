@@ -11,7 +11,8 @@ type PromptId =
   | "mia.group-context-compaction"
   | "mia.group-context-compaction-input"
   | "mia.group-summary"
-  | "mia.group-summary-input";
+  | "mia.group-summary-input"
+  | "mia.translation-mode";
 
 export type PromptLocale = "zh-CN" | "en" | "ru";
 
@@ -45,6 +46,12 @@ const MIA_SYSTEM_PROMPT_ZH = `你是 Mia，一位运行在 Telegram 中的个人
 ${MIA_PRODUCT_FACTS_PROMPTS["zh-CN"]}`;
 
 export const MIA_SYSTEM_PROMPT = MIA_SYSTEM_PROMPT_ZH;
+
+export const TRANSLATION_MODE_SYSTEM_PROMPT = `你现在只负责翻译。
+自动识别当前语言，在已设置的两种语言之间互译。
+只输出译文，不解释、不回答、不闲聊、不执行其他任务。
+保留原文语气、格式、链接和 emoji。
+可以适当润色、修正语法，但不得改变原意。`;
 
 const MIA_SYSTEM_PROMPT_EN = `You are Mia, a personal AI assistant that runs inside Telegram.
 
@@ -709,6 +716,7 @@ const BUILT_IN_PROMPTS: Readonly<Record<PromptLocale, Readonly<Record<PromptId, 
     "mia.group-context-compaction-input": GROUP_CONTEXT_COMPACTION_INPUT_TEMPLATE_ZH,
     "mia.group-summary": GROUP_SUMMARY_SYSTEM_PROMPT_ZH,
     "mia.group-summary-input": GROUP_SUMMARY_INPUT_TEMPLATE_ZH,
+    "mia.translation-mode": TRANSLATION_MODE_SYSTEM_PROMPT,
   },
   en: {
     "mia.system": MIA_SYSTEM_PROMPT_EN,
@@ -721,6 +729,7 @@ const BUILT_IN_PROMPTS: Readonly<Record<PromptLocale, Readonly<Record<PromptId, 
     "mia.group-context-compaction-input": GROUP_CONTEXT_COMPACTION_INPUT_TEMPLATE_EN,
     "mia.group-summary": GROUP_SUMMARY_SYSTEM_PROMPT_EN,
     "mia.group-summary-input": GROUP_SUMMARY_INPUT_TEMPLATE_EN,
+    "mia.translation-mode": TRANSLATION_MODE_SYSTEM_PROMPT,
   },
   ru: {
     "mia.system": MIA_SYSTEM_PROMPT_RU,
@@ -733,6 +742,7 @@ const BUILT_IN_PROMPTS: Readonly<Record<PromptLocale, Readonly<Record<PromptId, 
     "mia.group-context-compaction-input": GROUP_CONTEXT_COMPACTION_INPUT_TEMPLATE_RU,
     "mia.group-summary": GROUP_SUMMARY_SYSTEM_PROMPT_RU,
     "mia.group-summary-input": GROUP_SUMMARY_INPUT_TEMPLATE_RU,
+    "mia.translation-mode": TRANSLATION_MODE_SYSTEM_PROMPT,
   },
 };
 
@@ -764,6 +774,14 @@ export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
     name: "Mia 系统规则",
     purpose: "聊天、视觉理解和所有用户请求的基础行为规则",
     text: MIA_SYSTEM_PROMPT_ZH,
+    kind: "base",
+  },
+  {
+    id: "mia.translation-mode",
+    version: 1,
+    name: "翻译模式",
+    purpose: "只在用户指定的两种语言之间互译，不回答其他问题",
+    text: TRANSLATION_MODE_SYSTEM_PROMPT,
     kind: "base",
   },
   {

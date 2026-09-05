@@ -3,13 +3,15 @@ import { describe, expect, it } from "vitest";
 import { botCommands } from "../src/telegram/commands.js";
 
 describe("Telegram slash command menu", () => {
-  it("registers only the five public shortcuts in the requested order", () => {
+  it("registers the public shortcuts in the requested order", () => {
     expect(botCommands("en").map(({ command }) => command)).toEqual([
       "image",
       "video",
       "sticker",
       "new",
       "summary",
+      "tr",
+      "ntr",
     ]);
   });
 

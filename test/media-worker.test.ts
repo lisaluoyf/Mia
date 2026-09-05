@@ -88,8 +88,9 @@ describe("media worker transient regeneration status", () => {
 
     await worker.tick();
     expect(sendPhoto).toHaveBeenCalledWith(42, expect.anything(), expect.objectContaining({
-      reply_parameters: { message_id: 77, allow_sending_without_reply: true },
+      caption: expect.any(String) as unknown,
     }));
+    expect(sendPhoto.mock.calls[0]?.[2]).not.toHaveProperty("reply_parameters");
     expect(deleteMessage).toHaveBeenCalledWith(42, 78);
     expect(sendPhoto.mock.invocationCallOrder[0]).toBeLessThan(deleteMessage.mock.invocationCallOrder[0] ?? 0);
     expect(store.getJobByIdempotencyKey("callback:again-1")).toMatchObject({
@@ -99,7 +100,7 @@ describe("media worker transient regeneration status", () => {
     });
     expect(contexts.getMessage(42, 79)).toMatchObject({
       senderUserId: 100,
-      replyToMessageId: 77,
+      replyToMessageId: null,
       contentType: "photo",
       mediaFileId: "new-photo",
       mediaUniqueId: "new-unique",

@@ -75,6 +75,16 @@ export interface GroupFollowUpState {
   updatedAt: string;
 }
 
+export interface TranslationSession {
+  telegramUserId: number;
+  chatId: number;
+  userLanguage: string;
+  foreignLanguage: string;
+  lastActivityAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type GroupFollowUpEvaluationClaim =
   | { outcome: "claimed"; state: GroupFollowUpState }
   | { outcome: "inactive"; state: null }

@@ -24,9 +24,7 @@ describe("Telegram presentation delivery", () => {
     await expect(sendTelegramPresentationChunk(ctx as never, message as never, chunk())).resolves.toMatchObject({
       messages: [sent], mode: "rich_message", fallbackReasons: [],
     });
-    expect(sendRichMessage).toHaveBeenCalledWith(1, chunk().richMessage, {
-      reply_parameters: { message_id: 2, allow_sending_without_reply: true },
-    });
+    expect(sendRichMessage).toHaveBeenCalledWith(1, chunk().richMessage, {});
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
@@ -41,7 +39,6 @@ describe("Telegram presentation delivery", () => {
     });
     expect(sendMessage).toHaveBeenCalledWith(1, "<b>重点</b>", {
       parse_mode: "HTML",
-      reply_parameters: { message_id: 2, allow_sending_without_reply: true },
     });
   });
 
@@ -61,11 +58,8 @@ describe("Telegram presentation delivery", () => {
 
     expect(sendMessage).toHaveBeenNthCalledWith(1, 1, "<b>重点</b>", {
       parse_mode: "HTML",
-      reply_parameters: { message_id: 2, allow_sending_without_reply: true },
     });
-    expect(sendMessage).toHaveBeenNthCalledWith(2, 1, "重点", {
-      reply_parameters: { message_id: 2, allow_sending_without_reply: true },
-    });
+    expect(sendMessage).toHaveBeenNthCalledWith(2, 1, "重点", {});
   });
 
   it("keeps final-message buttons through Rich Message delivery and fallback", async () => {
@@ -83,7 +77,6 @@ describe("Telegram presentation delivery", () => {
     );
     expect(sendRichMessage).toHaveBeenCalledWith(1, chunk().richMessage, {
       reply_markup: replyMarkup,
-      reply_parameters: { message_id: 2, allow_sending_without_reply: true },
     });
 
     const fallbackSend = vi.fn().mockResolvedValue({ message_id: 4 });
@@ -102,7 +95,23 @@ describe("Telegram presentation delivery", () => {
     expect(fallbackSend).toHaveBeenCalledWith(1, "<b>重点</b>", {
       parse_mode: "HTML",
       reply_markup: replyMarkup,
-      reply_parameters: { message_id: 2, allow_sending_without_reply: true },
+    });
+  });
+
+  it("keeps replies and Topic routing in group chats", async () => {
+    const groupMessage = {
+      message_id: 8,
+      message_thread_id: 21,
+      chat: { id: -1001, type: "supergroup" },
+    };
+    const sendRichMessage = vi.fn().mockResolvedValue({ message_id: 9 });
+    const ctx = { api: { sendRichMessage, sendMessage: vi.fn() } };
+
+    await sendTelegramPresentationChunk(ctx as never, groupMessage as never, chunk());
+
+    expect(sendRichMessage).toHaveBeenCalledWith(-1001, chunk().richMessage, {
+      message_thread_id: 21,
+      reply_parameters: { message_id: 8, allow_sending_without_reply: true },
     });
   });
 });

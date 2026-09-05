@@ -114,8 +114,8 @@ describe("sticker media delivery", () => {
     );
     const setName = createNewStickerSet.mock.calls[0]?.[1] as string;
     expect(getStickerSet).toHaveBeenCalledWith(setName);
-    expect(sendSticker).toHaveBeenCalledWith(42, "sticker-file", expect.objectContaining({
-      reply_parameters: { message_id: 7, allow_sending_without_reply: true },
+    expect(sendSticker).toHaveBeenCalledWith(42, "sticker-file", expect.not.objectContaining({
+      reply_parameters: expect.anything() as unknown,
     }));
     expect(deleteMessage).toHaveBeenCalledWith(42, 8);
     expect(sendSticker.mock.invocationCallOrder[0]).toBeLessThan(deleteMessage.mock.invocationCallOrder[0] ?? 0);

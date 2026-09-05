@@ -394,7 +394,7 @@ export class MediaWorker {
         threadId: job.threadId,
         senderUserId: this.options.botUserId,
         senderChatId: null,
-        replyToMessageId: job.requestMessageId,
+        replyToMessageId: job.chatId === job.telegramUserId ? null : job.requestMessageId,
         contentType: "document" in sent ? "document" : "photo",
         text: null,
         caption: botText(mediaJobLocale(job.options), "imageReady"),
@@ -533,7 +533,9 @@ function hasEphemeralStatus(job: MediaJob): boolean {
 
 function replyOptions(job: MediaJob) {
   return {
-    reply_parameters: { message_id: job.requestMessageId, allow_sending_without_reply: true },
+    ...(job.chatId === job.telegramUserId ? {} : {
+      reply_parameters: { message_id: job.requestMessageId, allow_sending_without_reply: true },
+    }),
     ...(job.threadId === null ? {} : { message_thread_id: job.threadId }),
   };
 }

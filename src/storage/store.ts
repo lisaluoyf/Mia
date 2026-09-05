@@ -23,6 +23,7 @@ import type {
   StoredMessage,
   SummaryInput,
   SummaryRecord,
+  TranslationSession,
   UserProfile,
   UserProfileInput,
 } from "./types.js";
@@ -112,6 +113,16 @@ interface GroupFollowUpRow {
   last_handled_at: string;
   evaluation_window_started_at: string;
   evaluation_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface TranslationSessionRow {
+  telegram_user_id: number;
+  chat_id: number;
+  user_language: string;
+  foreign_language: string;
+  last_activity_at: string;
   created_at: string;
   updated_at: string;
 }
@@ -278,6 +289,18 @@ function groupFollowUpFromRow(row: GroupFollowUpRow): GroupFollowUpState {
     lastHandledAt: row.last_handled_at,
     evaluationWindowStartedAt: row.evaluation_window_started_at,
     evaluationCount: row.evaluation_count,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function translationSessionFromRow(row: TranslationSessionRow): TranslationSession {
+  return {
+    telegramUserId: row.telegram_user_id,
+    chatId: row.chat_id,
+    userLanguage: row.user_language,
+    foreignLanguage: row.foreign_language,
+    lastActivityAt: row.last_activity_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -464,7 +487,93 @@ export class ContextStore {
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (chat_id, thread_id)
       );
+
+      CREATE TABLE IF NOT EXISTS mia_translation_sessions (
+        telegram_user_id INTEGER NOT NULL REFERENCES mia_users(telegram_user_id) ON DELETE CASCADE,
+        chat_id INTEGER NOT NULL REFERENCES mia_chats(chat_id) ON DELETE CASCADE,
+        user_language TEXT NOT NULL,
+        foreign_language TEXT NOT NULL,
+        last_activity_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (telegram_user_id, chat_id)
+      );
     `);
+  }
+
+  private getTranslationSessionRow(telegramUserId: number, chatId: number): TranslationSessionRow | null {
+    const row = this.database.prepare(`
+      SELECT * FROM mia_translation_sessions WHERE telegram_user_id = ? AND chat_id = ?
+    `).get(telegramUserId, chatId) as TranslationSessionRow | undefined;
+    return row ?? null;
+  }
+
+  enterTranslationSession(
+    telegramUserId: number,
+    chatId: number,
+    userLanguage: string,
+    foreignLanguage: string,
+    now = new Date(),
+  ): TranslationSession {
+    requireSafeInteger(telegramUserId, "telegramUserId");
+    requireSafeInteger(chatId, "chatId");
+    const timestamp = now.toISOString();
+    this.database.prepare(`
+      INSERT INTO mia_translation_sessions (
+        telegram_user_id, chat_id, user_language, foreign_language, last_activity_at
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(telegram_user_id, chat_id) DO UPDATE SET
+        user_language = excluded.user_language,
+        foreign_language = excluded.foreign_language,
+        last_activity_at = excluded.last_activity_at,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(telegramUserId, chatId, userLanguage, foreignLanguage, timestamp);
+    const row = this.getTranslationSessionRow(telegramUserId, chatId);
+    if (!row) throw new Error("Failed to enter translation session");
+    return translationSessionFromRow(row);
+  }
+
+  getActiveTranslationSession(
+    telegramUserId: number,
+    chatId: number,
+    now = new Date(),
+    idleTimeoutMs = 30 * 60 * 1_000,
+  ): TranslationSession | null {
+    const row = this.getTranslationSessionRow(telegramUserId, chatId);
+    if (!row) return null;
+    if (now.getTime() - Date.parse(row.last_activity_at) < idleTimeoutMs) return translationSessionFromRow(row);
+    this.exitTranslationSession(telegramUserId, chatId);
+    return null;
+  }
+
+  touchTranslationSession(telegramUserId: number, chatId: number, now = new Date()): TranslationSession | null {
+    const result = this.database.prepare(`
+      UPDATE mia_translation_sessions SET last_activity_at = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE telegram_user_id = ? AND chat_id = ?
+    `).run(now.toISOString(), telegramUserId, chatId);
+    if (result.changes === 0) return null;
+    const row = this.getTranslationSessionRow(telegramUserId, chatId);
+    return row ? translationSessionFromRow(row) : null;
+  }
+
+  setTranslationLanguagePair(
+    telegramUserId: number,
+    chatId: number,
+    userLanguage: string,
+    foreignLanguage: string,
+  ): TranslationSession | null {
+    this.database.prepare(`
+      UPDATE mia_translation_sessions SET user_language = ?, foreign_language = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE telegram_user_id = ? AND chat_id = ?
+    `).run(userLanguage, foreignLanguage, telegramUserId, chatId);
+    const row = this.getTranslationSessionRow(telegramUserId, chatId);
+    return row ? translationSessionFromRow(row) : null;
+  }
+
+  exitTranslationSession(telegramUserId: number, chatId: number): boolean {
+    return this.database.prepare(
+      "DELETE FROM mia_translation_sessions WHERE telegram_user_id = ? AND chat_id = ?",
+    ).run(telegramUserId, chatId).changes > 0;
   }
 
   private getGroupFollowUpRow(scope: GroupConversationScope): GroupFollowUpRow | null {
@@ -707,6 +816,15 @@ export class ContextStore {
     return message;
   }
 
+  markMessageAsTranslation(chatId: number, messageId: number): void {
+    requireSafeInteger(chatId, "chatId", true);
+    requireSafeInteger(messageId, "messageId");
+    this.database.prepare(`
+      UPDATE mia_messages SET content_type = 'translation', updated_at = CURRENT_TIMESTAMP
+      WHERE chat_id = ? AND message_id = ?
+    `).run(chatId, messageId);
+  }
+
   getMessage(chatId: number, messageId: number): StoredMessage | null {
     requireSafeInteger(chatId, "chatId", true);
     requireSafeInteger(messageId, "messageId");
@@ -724,7 +842,7 @@ export class ContextStore {
     const rows = this.database.prepare(`
       SELECT * FROM (
         SELECT * FROM mia_messages
-        WHERE chat_id = ? AND thread_id = ?
+        WHERE chat_id = ? AND thread_id = ? AND content_type <> 'translation'
         ORDER BY message_id DESC
         LIMIT ?
       ) ORDER BY message_id ASC
@@ -740,7 +858,7 @@ export class ContextStore {
     const { chatId, threadId } = conversationCoordinates(scope);
     const rows = this.database.prepare(`
       SELECT * FROM mia_messages
-      WHERE chat_id = ? AND thread_id = ? AND message_id > ?
+      WHERE chat_id = ? AND thread_id = ? AND message_id > ? AND content_type <> 'translation'
       ORDER BY message_id ASC
       LIMIT ?
     `).all(chatId, threadId, afterMessageId ?? 0, limit) as MessageRow[];
@@ -778,6 +896,7 @@ export class ContextStore {
       SELECT * FROM (
         SELECT * FROM mia_messages
         WHERE chat_id = ? AND thread_id = ? AND message_id > ? AND message_id < ?
+          AND content_type <> 'translation'
         ORDER BY message_id DESC
         LIMIT ?
       ) ORDER BY message_id ASC
@@ -793,6 +912,7 @@ export class ContextStore {
     const rows = this.database.prepare(`
       SELECT * FROM mia_messages
       WHERE chat_id = ? AND thread_id = ? AND message_id BETWEEN ? AND ?
+        AND content_type <> 'translation'
       ORDER BY message_id ASC
     `).all(chatId, threadId, fromMessageId, throughMessageId) as MessageRow[];
     return rows.map(messageFromRow);
@@ -809,7 +929,7 @@ export class ContextStore {
       visited.add(currentId);
       const message = this.getMessage(chatId, currentId);
       if (!message) break;
-      chain.push(message);
+      if (message.contentType !== "translation") chain.push(message);
       currentId = message.replyToMessageId;
     }
     return chain.reverse();
