@@ -81,6 +81,15 @@ function formatModelSavings(model: ModelOption, t: AppProps["t"]): string | null
   return savings > 0 ? `${t("priceDiscount")}${savings}%` : null;
 }
 
+function modelSortPrice(model: ModelOption): number {
+  const pricing = model.pricing;
+  if (!pricing) return Number.POSITIVE_INFINITY;
+  const value = pricing.unit === "token_1m" ? pricing.inputPrice : pricing.price;
+  return value !== undefined && Number.isFinite(value) && value >= 0
+    ? value
+    : Number.POSITIVE_INFINITY;
+}
+
 interface ModelSheetProps {
   capability: PreferenceCapability;
   models: ModelOption[];
@@ -99,11 +108,16 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
       ? models.filter((model) => `${model.displayName} ${model.id} ${model.vendor}`.toLowerCase().includes(needle))
       : models;
     return [...matching].sort((left, right) => {
+      const leftPrice = modelSortPrice(left);
+      const rightPrice = modelSortPrice(right);
+      if (leftPrice !== rightPrice) return leftPrice - rightPrice;
       const selectedRank = Number(sameModelId(right.id, selected)) - Number(sameModelId(left.id, selected));
       if (selectedRank !== 0) return selectedRank;
       const leftRecommended = capability === "vision" ? left.visionRecommended : left.recommended;
       const rightRecommended = capability === "vision" ? right.visionRecommended : right.recommended;
-      return Number(rightRecommended) - Number(leftRecommended);
+      const recommendedRank = Number(rightRecommended) - Number(leftRecommended);
+      if (recommendedRank !== 0) return recommendedRank;
+      return left.displayName.localeCompare(right.displayName);
     });
   }, [capability, models, query, selected]);
 
