@@ -55,7 +55,21 @@ describe("group media context routing", () => {
       logger: createLogger("silent"),
       settings: {
         getPreferences: vi.fn().mockReturnValue({ videoModel: "minimax-h3" }),
-        getSnapshot: vi.fn().mockResolvedValue(null),
+        getSnapshot: vi.fn().mockResolvedValue({
+          apimasterUserId: 7,
+          models: [{
+            id: "minimax-h3", displayName: "MiniMax H3", vendor: "MiniMax", capability: "video",
+            recommended: true, supportsVision: false, visionRecommended: false,
+            videoCapabilities: {
+              modes: ["text_to_video", "image_to_video"],
+              durationSeconds: { min: 4, max: 15, default: 4 },
+              resolutions: ["768P"], defaultResolution: "768P",
+              aspectRatios: ["1:1", "16:9", "9:16"], defaultAspectRatio: "16:9", maxReferenceImages: 10,
+            },
+          }],
+          settings: { chatModel: null, visionModel: null, imageModel: null, videoModel: "minimax-h3" },
+          unavailable: [],
+        }),
       },
       contexts,
       mediaStore,
@@ -135,7 +149,21 @@ describe("group media context routing", () => {
       logger: createLogger("silent"),
       settings: {
         getPreferences,
-        getSnapshot: vi.fn().mockResolvedValue(null),
+        getSnapshot: vi.fn().mockResolvedValue({
+          apimasterUserId: 7,
+          models: [{
+            id: "minimax-h3", displayName: "MiniMax H3", vendor: "MiniMax", capability: "video",
+            recommended: true, supportsVision: false, visionRecommended: false,
+            videoCapabilities: {
+              modes: ["text_to_video", "image_to_video"],
+              durationSeconds: { min: 4, max: 15, default: 4 },
+              resolutions: ["768P"], defaultResolution: "768P",
+              aspectRatios: ["1:1", "16:9", "9:16"], defaultAspectRatio: "16:9", maxReferenceImages: 10,
+            },
+          }],
+          settings: { chatModel: null, visionModel: null, imageModel: null, videoModel: "minimax-h3" },
+          unavailable: [],
+        }),
       },
       contexts,
       mediaStore,

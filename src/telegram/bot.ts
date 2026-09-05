@@ -34,6 +34,7 @@ import {
 } from "../onboarding/localization.js";
 import { onboardingMissingFields, type OnboardingEligibility, type OnboardingService } from "../onboarding/service.js";
 import { sameModelId, type ModelSettingsService, type SettingsSnapshot } from "../settings/service.js";
+import type { ModelOption } from "../settings/types.js";
 import type { ContextStore } from "../storage/store.js";
 import type {
   ConversationScope,
@@ -1051,12 +1052,15 @@ async function createVideoDraft(
   const model = snapshot?.settings.videoModel ?? dependencies.settings.getPreferences(message.from.id).videoModel ?? DEFAULT_MODELS.video;
   const modelOption = snapshot?.models.find((item) => sameModelId(item.id, model));
   const caps = modelOption?.videoCapabilities;
-  const duration = routed.video_options?.duration_seconds ?? caps?.durationSeconds.default ?? 4;
-  const ratio = routed.video_options?.aspect_ratio ?? caps?.defaultAspectRatio ?? "16:9";
-  const resolution = routed.video_options?.resolution ?? caps?.defaultResolution ?? "768P";
-  if (duration < (caps?.durationSeconds.min ?? 4) || duration > (caps?.durationSeconds.max ?? 15) ||
-      !(caps?.aspectRatios ?? ["1:1", "16:9", "9:16"]).includes(ratio) ||
-      !(caps?.resolutions ?? ["768P"]).includes(resolution) || inputs.length > (caps?.maxReferenceImages ?? 10)) {
+  if (!caps || !hasCompleteVideoCapabilities(modelOption)) {
+    await replyTo(ctx, message, botText(locale, "videoMetadataMissing"));
+    return true;
+  }
+  const duration = routed.video_options?.duration_seconds ?? caps.durationSeconds.default;
+  const ratio = routed.video_options?.aspect_ratio ?? caps.defaultAspectRatio;
+  const resolution = resolveVideoResolution(caps, routed.video_options?.resolution ?? null);
+  if (resolution === null || duration < caps.durationSeconds.min || duration > caps.durationSeconds.max ||
+      !caps.aspectRatios.includes(ratio) || inputs.length > caps.maxReferenceImages) {
     await replyTo(ctx, message, botText(locale, "unsupportedVideo"));
     return true;
   }
@@ -1079,6 +1083,32 @@ async function createVideoDraft(
   const sent = await replyPlainTo(ctx, message, videoDraftText(draft), { reply_markup: draftKeyboard(draft) });
   dependencies.mediaStore.updateDraft(draft.id, draft.options, sent.message_id);
   return true;
+}
+
+function hasCompleteVideoCapabilities(model: ModelOption | undefined): model is ModelOption & {
+  videoCapabilities: NonNullable<ModelOption["videoCapabilities"]>;
+} {
+  const caps = model?.videoCapabilities;
+  return Boolean(
+    caps &&
+    caps.resolutions.length > 0 &&
+    caps.defaultResolution &&
+    caps.resolutions.some((value) => value.toLowerCase() === caps.defaultResolution.toLowerCase()) &&
+    caps.aspectRatios.length > 0 &&
+    caps.defaultAspectRatio &&
+    caps.aspectRatios.includes(caps.defaultAspectRatio) &&
+    caps.durationSeconds.min <= caps.durationSeconds.default &&
+    caps.durationSeconds.default <= caps.durationSeconds.max,
+  );
+}
+
+export function resolveVideoResolution(
+  capabilities: NonNullable<ModelOption["videoCapabilities"]>,
+  requested: string | null,
+): string | null {
+  const requestedValue = requested?.trim();
+  const wanted = requestedValue || capabilities.defaultResolution;
+  return capabilities.resolutions.find((value) => value.toLowerCase() === wanted.toLowerCase()) ?? null;
 }
 
 function onboardingDebugDetails(
@@ -2222,10 +2252,10 @@ function isMediaIntent(intent: RoutedIntent["intent"]): intent is PendingMediaIn
 function parseVideoOptions(text: string, hasImages: boolean) {
   const duration = /(?:^|\s)(\d{1,2})\s*(?:s|sec|seconds?|秒)(?:\s|$)/i.exec(text)?.[1];
   const ratio = /(?:^|\s)(1:1|16:9|9:16)(?:\s|$)/.exec(text)?.[1] as "1:1" | "16:9" | "9:16" | undefined;
-  const resolution = /(?:^|\s)(768p|2k|4k)(?:\s|$)/i.exec(text)?.[1]?.toUpperCase();
+  const resolution = /(?:^|\s)((?:\d{3,4}p)|(?:\d{1,2}k))(?:\s|$)/i.exec(text)?.[1]?.toUpperCase();
   const instruction = text
     .replace(/(?:^|\s)\d{1,2}\s*(?:s|sec|seconds?|秒)(?=\s|$)/ig, " ")
-    .replace(/(?:^|\s)(?:1:1|16:9|9:16|768p|2k|4k)(?=\s|$)/ig, " ")
+    .replace(/(?:^|\s)(?:(?:\d{3,4}p)|(?:\d{1,2}k)|1:1|16:9|9:16)(?=\s|$)/ig, " ")
     .trim();
   return {
     instruction,

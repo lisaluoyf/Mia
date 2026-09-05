@@ -143,7 +143,8 @@ export class MediaWorker {
       if (job.type === "video_generate") {
         const durationSeconds = numberOption(job.options.durationSeconds, 4);
         const aspectRatio = stringOption(job.options.aspectRatio, "16:9");
-        const resolution = stringOption(job.options.resolution, "768P");
+        const resolution = stringOption(job.options.resolution, "");
+        if (!resolution) throw new Error("video_resolution_missing");
         taskId = await this.options.client.submitVideo(apiKey, {
           model: job.model,
           prompt: job.instruction,
