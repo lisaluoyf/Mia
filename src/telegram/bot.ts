@@ -1058,10 +1058,7 @@ async function createVideoDraft(
   }
   const duration = routed.video_options?.duration_seconds ?? caps.durationSeconds.default;
   const ratio = routed.video_options?.aspect_ratio ?? caps.defaultAspectRatio;
-  // The classifier may populate video_options even when the user never named a
-  // resolution. Only the user's own message can make a resolution explicit.
-  const requestedResolution = explicitVideoResolution(message.text ?? message.caption ?? "");
-  const resolution = resolveVideoResolution(caps, requestedResolution);
+  const resolution = resolveVideoResolution(caps, routed.video_options?.resolution ?? null);
   if (resolution === null || duration < caps.durationSeconds.min || duration > caps.durationSeconds.max ||
       !caps.aspectRatios.includes(ratio) || inputs.length > caps.maxReferenceImages) {
     await replyTo(ctx, message, botText(locale, "unsupportedVideo"));
@@ -1112,10 +1109,6 @@ export function resolveVideoResolution(
   const requestedValue = requested?.trim();
   const wanted = requestedValue || capabilities.defaultResolution;
   return capabilities.resolutions.find((value) => value.toLowerCase() === wanted.toLowerCase()) ?? null;
-}
-
-export function explicitVideoResolution(text: string): string | null {
-  return /(?:^|\s)((?:\d{3,4}p)|(?:\d{1,2}k))(?:\s|$)/i.exec(text)?.[1]?.toUpperCase() ?? null;
 }
 
 function onboardingDebugDetails(
@@ -2259,7 +2252,7 @@ function isMediaIntent(intent: RoutedIntent["intent"]): intent is PendingMediaIn
 function parseVideoOptions(text: string, hasImages: boolean) {
   const duration = /(?:^|\s)(\d{1,2})\s*(?:s|sec|seconds?|秒)(?:\s|$)/i.exec(text)?.[1];
   const ratio = /(?:^|\s)(1:1|16:9|9:16)(?:\s|$)/.exec(text)?.[1] as "1:1" | "16:9" | "9:16" | undefined;
-  const resolution = explicitVideoResolution(text);
+  const resolution = /(?:^|\s)((?:\d{3,4}p)|(?:\d{1,2}k))(?:\s|$)/i.exec(text)?.[1]?.toUpperCase();
   const instruction = text
     .replace(/(?:^|\s)\d{1,2}\s*(?:s|sec|seconds?|秒)(?=\s|$)/ig, " ")
     .replace(/(?:^|\s)(?:(?:\d{3,4}p)|(?:\d{1,2}k)|1:1|16:9|9:16)(?=\s|$)/ig, " ")
