@@ -220,8 +220,8 @@ const CHINESE_SIMPLIFIED: MessageOverrides = {
   translationNextButton: "下一页",
   translationBackButton: "返回",
   translationPrivateOnly: "翻译模式仅支持私聊。",
-  telegramLoginConfirmed: "已确认 Telegram。点击下方按钮登录 APIMaster。",
-  telegramLoginButton: "立即登录",
+  telegramLoginConfirmed: "已确认 Telegram。点击下方按钮登录 APIMaster。\n\n✨ 马上开始 AI 之旅\n👇 点击按钮，马上登录",
+  telegramLoginButton: "🔐 登录 APIMaster",
   telegramLoginExpired: "这个登录链接已过期，请返回 APIMaster 后重试。",
   telegramLoginUnavailable: "登录确认暂时不可用，请稍后重试。",
 };
