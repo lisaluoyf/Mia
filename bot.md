@@ -133,6 +133,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] 本地验证：Mia 267/267 测试、ESLint、前后端 TypeScript、生产构建；APIMaster Telegram 登录签名回归测试、ESLint、生产构建与差异检查通过。
 - [x] 生产验证（2026-09-05）：APIMaster `08b95e5` 和 Mia `2499e2e` 均按精确 GitHub SHA 发布；APIMaster 登录页返回 `200`，未登录认证接口返回预期 `401`，深链入口实际生成 `t.me/...start=login_...`，内部确认接口未授权返回 `401`，Mia `/health` 返回 `200`、PM2 `online`；APIMaster 既有只读生产冒烟 21/21 通过，new-api 未修改、未重启。
 - [x] 深链确认路由修复（2026-09-05）：Mia 改为调用 `/api/auth/telegram/deep-link/confirm`；APIMaster Web 路由提交 `92041e0`，Mia 客户端提交 `2b8e602`（生产 Mia release 已包含该修复）。公网带内部鉴权的空请求返回 `400`，确认请求已到达 APIMaster Web，不再被错误转发到 new-api 的 `404` 路径；Mia 健康检查 `200`、PM2 `online`，APIMaster 只读生产冒烟 `21/21` 通过，new-api 未修改、未重启。
+- [x] 身份服务地址修复（2026-09-05）：发现 Mia 的 `baseUrl` 和 `internalBaseUrl` 均为 new-api `127.0.0.1:3001`；深链确认改为强制使用独立的 `APIMASTER_IDENTITY_BASE_URL=127.0.0.1:3000`，提交 `901539b` 已发布。确认失败现在区分真实过期和服务暂时不可用，并只记录 Telegram 用户 ID 与 HTTP 状态。生产生成测试码后，经运行中的身份服务确认返回成功、数据库状态为 `confirmed`；Mia 健康检查 `200`。new-api 未修改、未重启。
 - [ ] 使用真实 Telegram 客户端走完“网页点击 -> Telegram 打开 Bot -> Start -> 立即登录 -> 浏览器登录完成”人工验收，并检查已绑定账户、新 TG-only 账户和重复点击的体验。
 
 ## 私聊助手
