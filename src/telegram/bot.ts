@@ -410,7 +410,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   if (message.chat.type === "private" && translations && explicit?.command === "tr") {
     const pair = defaultTranslationLanguages(message.from.language_code, explicit.instruction);
     const session = translations.enterTranslationSession(message.from.id, message.chat.id, pair.leftLanguage, pair.rightLanguage);
-    await replyTo(ctx, message, translationStatusText(session, locale), {
+    await replyPlainTo(ctx, message, translationStatusText(session, locale), {
       reply_markup: translationStatusKeyboard(message.from.id, locale),
     });
     return;

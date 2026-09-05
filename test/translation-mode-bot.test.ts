@@ -100,6 +100,7 @@ describe("private translation mode", () => {
       leftLanguage: "zh-CN",
       rightLanguage: "ja",
     });
+    expect(calls.some((call) => call.method === "sendRichMessage")).toBe(false);
     await bot.handleUpdate(update(2, 2, "你好"));
 
     expect(structuredResponse).toHaveBeenCalledOnce();
