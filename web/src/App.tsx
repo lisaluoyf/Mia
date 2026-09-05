@@ -71,10 +71,14 @@ function formatModelPrice(model: ModelOption, t: AppProps["t"]): string {
   } else {
     text = `${format(pricing.price)} ${t("pricePerSecond")}`;
   }
-  if (pricing.discountRatio !== undefined && Number.isFinite(pricing.discountRatio)) {
-    text += ` · ${t("priceDiscount")} ${(pricing.discountRatio * 100).toFixed(0)}%`;
-  }
   return text;
+}
+
+function formatModelSavings(model: ModelOption, t: AppProps["t"]): string | null {
+  const ratio = model.pricing?.discountRatio;
+  if (ratio === undefined || !Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) return null;
+  const savings = Math.round((1 - ratio) * 100);
+  return savings > 0 ? `${t("priceDiscount")}${savings}%` : null;
 }
 
 interface ModelSheetProps {
@@ -150,27 +154,31 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
         </div>
         <div className="model-list">
           {filtered.length === 0 && <div className="empty-state">{t("noModels")}</div>}
-          {filtered.map((model) => (
-            <button
-              className={`model-option${sameModelId(selected, model.id) ? " selected" : ""}`}
-              type="button"
-              key={model.id}
-              onClick={() => onSelect(model.id)}
-              disabled={saving}
-            >
-              <span className="model-copy">
-                <span className="model-name">{model.displayName}</span>
-                <span className="model-price">{formatModelPrice(model, t)}</span>
-              </span>
-              {(capability === "vision" ? model.visionRecommended : model.recommended)
-                && <span className="recommended">{t("recommended")}</span>}
-              <span className="selection-mark" aria-hidden="true">
-                {saving && !sameModelId(selected, model.id)
-                  ? null
-                  : sameModelId(selected, model.id) && <Check size={16} />}
-              </span>
-            </button>
-          ))}
+          {filtered.map((model) => {
+            const savings = formatModelSavings(model, t);
+            return <button
+                className={`model-option${sameModelId(selected, model.id) ? " selected" : ""}`}
+                type="button"
+                key={model.id}
+                onClick={() => onSelect(model.id)}
+                disabled={saving}
+              >
+                <span className="model-copy">
+                  <span className="model-name">{model.displayName}</span>
+                  <span className="model-price">
+                    <span>{formatModelPrice(model, t)}</span>
+                    {savings && <span className="discount-badge">{savings}</span>}
+                  </span>
+                </span>
+                {(capability === "vision" ? model.visionRecommended : model.recommended)
+                  && <span className="recommended">{t("recommended")}</span>}
+                <span className="selection-mark" aria-hidden="true">
+                  {saving && !sameModelId(selected, model.id)
+                    ? null
+                    : sameModelId(selected, model.id) && <Check size={16} />}
+                </span>
+              </button>;
+          })}
         </div>
       </section>
     </div>

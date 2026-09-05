@@ -21,7 +21,7 @@
   "serviceUnavailable": "服务暂时不可用。",
   "saveFailed": "设置保存失败，请重试。",
   "priceInput": "输入",
-  "priceDiscount": "折扣",
+  "priceDiscount": "省",
   "priceUnavailable": "价格暂不可用",
   "pricePerImage": "/ 张",
   "pricePerSecond": "/ 秒"

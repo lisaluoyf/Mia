@@ -21,7 +21,7 @@
   "serviceUnavailable": "The service is temporarily unavailable.",
   "saveFailed": "Could not save your settings. Try again.",
   "priceInput": "Input",
-  "priceDiscount": "discount",
+  "priceDiscount": "Save ",
   "priceUnavailable": "Price unavailable",
   "pricePerImage": "/ image",
   "pricePerSecond": "/ sec"
