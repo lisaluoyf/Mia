@@ -400,6 +400,12 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   if (!automaticFollowUp && !shouldRespond(policyInput, identity) && !explicit && !namedMediaReply &&
       !explicitSummaryPhrase && !suppliesPendingMedia) return;
 
+  const startPayload = message.chat.type === "private" ? parseStartPayload(request.text) : null;
+  if (startPayload !== null && typeof startPayload === "object" && startPayload.type === "login") {
+    await handleTelegramDeepLinkLogin(ctx, message, startPayload.code, dependencies);
+    return;
+  }
+
   const translations = translationStore(dependencies);
   if (message.chat.type === "private" && translations && explicit?.command === "tr") {
     const pair = defaultTranslationLanguages(message.from.language_code, explicit.instruction);
@@ -430,7 +436,6 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     }
   }
 
-  const startPayload = message.chat.type === "private" ? parseStartPayload(request.text) : null;
   if (startPayload === "settings") {
     const launch = miaSettingsLaunch(locale, miniAppUrl(dependencies));
     const sent = await replyTo(ctx, message, launch.text, { reply_markup: launch.keyboard });
@@ -2137,10 +2142,41 @@ function translationStatusText(session: TranslationSession, locale: BotLocale): 
   });
 }
 
-function parseStartPayload(text: string): "sticker" | "settings" | null {
-  const match = /^\/start(?:@\w+)?\s+(sticker|settings)$/i.exec(text.trim());
-  const payload = match?.[1]?.toLowerCase();
-  return payload === "sticker" || payload === "settings" ? payload : null;
+type StartPayload = "sticker" | "settings" | { type: "login"; code: string };
+
+function parseStartPayload(text: string): StartPayload | null {
+  const match = /^\/start(?:@\w+)?\s+([^\s]+)$/i.exec(text.trim());
+  const payload = match?.[1] ?? "";
+  const normalized = payload.toLowerCase();
+  if (normalized === "sticker" || normalized === "settings") return normalized;
+  const login = /^login_([A-Za-z0-9_-]{32,128})$/.exec(payload);
+  const code = login?.[1];
+  return code ? { type: "login", code } : null;
+}
+
+async function handleTelegramDeepLinkLogin(
+  ctx: Context,
+  message: Message,
+  code: string,
+  dependencies: BotDependencies,
+): Promise<void> {
+  if (!message.from || message.chat.type !== "private") return;
+  const locale = resolveBotLocale(message.from.language_code);
+  const loginUrl = await dependencies.client.confirmTelegramDeepLinkLogin({
+    code,
+    telegramUserId: message.from.id,
+    firstName: message.from.first_name,
+    ...(message.from.last_name ? { lastName: message.from.last_name } : {}),
+    ...(message.from.username ? { username: message.from.username } : {}),
+    ...(message.from.language_code ? { languageCode: message.from.language_code } : {}),
+  });
+  if (!loginUrl) {
+    await replyPlainTo(ctx, message, botText(locale, "telegramLoginExpired"));
+    return;
+  }
+  await replyPlainTo(ctx, message, botText(locale, "telegramLoginConfirmed"), {
+    reply_markup: new InlineKeyboard().url(botText(locale, "telegramLoginButton"), loginUrl),
+  });
 }
 
 export function isExplicitGroupSummaryPhrase(text: string): boolean {

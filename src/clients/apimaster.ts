@@ -137,6 +137,11 @@ const debugIdentitiesResponseSchema = z.object({
   }),
 });
 
+const telegramDeepLinkLoginResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({ login_url: z.string().url() }),
+});
+
 export interface ModelCatalog {
   apimasterUserId: number;
   models: ModelOption[];
@@ -271,6 +276,44 @@ export class APIMasterClient {
       throw new ResolverError("service_unavailable", response.status);
     }
     return parsed.data.data.api_key;
+  }
+
+  async confirmTelegramDeepLinkLogin(input: {
+    code: string;
+    telegramUserId: number;
+    firstName: string;
+    lastName?: string | null;
+    username?: string | null;
+    languageCode?: string | null;
+  }): Promise<string | null> {
+    let response: Response;
+    try {
+      response = await this.fetcher(
+        `${this.options.baseUrl}/api/user/internal/mia-telegram-login/confirm`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-mia-internal-key": this.options.serviceKey,
+          },
+          body: JSON.stringify({
+            code: input.code,
+            telegram_user_id: String(input.telegramUserId),
+            first_name: input.firstName,
+            last_name: input.lastName ?? null,
+            username: input.username ?? null,
+            language_code: input.languageCode ?? null,
+          }),
+          signal: AbortSignal.timeout(this.options.timeoutMs),
+        },
+      );
+    } catch {
+      return null;
+    }
+    if (!response.ok) return null;
+    const payload: unknown = await response.json().catch(() => undefined);
+    const parsed = telegramDeepLinkLoginResponseSchema.safeParse(payload);
+    return parsed.success ? parsed.data.data.login_url : null;
   }
 
   async resolveDebugTelegramUsers(emails: readonly string[]): Promise<number[]> {

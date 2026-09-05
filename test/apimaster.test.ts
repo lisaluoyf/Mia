@@ -35,6 +35,23 @@ describe("APIMaster client", () => {
     });
   });
 
+  it("confirms a Bot deep-link login through the APIMaster identity service", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      success: true,
+      data: { login_url: "https://apimaster.example/api/auth/telegram/deep-link/complete?code=abc" },
+    }));
+    const client = createClient(fetcher);
+    await expect(client.confirmTelegramDeepLinkLogin({
+      code: "abc", telegramUserId: 123456, firstName: "Lisa", username: "lisa", languageCode: "zh-CN",
+    })).resolves.toContain("deep-link/complete");
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "https://apimaster.example/api/user/internal/mia-telegram-login/confirm",
+    );
+    const [, init] = fetcher.mock.calls[0] ?? [];
+    const body: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    expect(body).toMatchObject({ code: "abc", telegram_user_id: "123456", first_name: "Lisa" });
+  });
+
   it("submits text images asynchronously and reference images through synchronous edits", async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ data: [{ task_id: "img-1", status: "submitted" }] }))

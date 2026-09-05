@@ -108,6 +108,9 @@ const ENGLISH = {
   translationNextButton: "Next",
   translationBackButton: "Back",
   translationPrivateOnly: "Translation mode is available in private chat only.",
+  telegramLoginConfirmed: "Telegram is confirmed. Tap below to sign in to APIMaster.",
+  telegramLoginButton: "Log in now",
+  telegramLoginExpired: "This login link expired. Return to APIMaster and try again.",
 } as const;
 
 export type BotMessageKey = keyof typeof ENGLISH;
@@ -216,6 +219,9 @@ const CHINESE_SIMPLIFIED: MessageOverrides = {
   translationNextButton: "下一页",
   translationBackButton: "返回",
   translationPrivateOnly: "翻译模式仅支持私聊。",
+  telegramLoginConfirmed: "已确认 Telegram。点击下方按钮登录 APIMaster。",
+  telegramLoginButton: "立即登录",
+  telegramLoginExpired: "这个登录链接已过期，请返回 APIMaster 后重试。",
 };
 
 const CHINESE_TRADITIONAL: MessageOverrides = {
