@@ -64,9 +64,9 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 
 | 组件 | 当前基线 | 状态 |
 | --- | --- | --- |
-| Mia | `2499e2e` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、精简版专用群聊总结、结构化 Telegram 回复、群聊唤醒后智能连续跟进、媒体与贴纸能力、Responses 自动 Web Search、开发者 Debug 控制台和 Telegram Bot 深链登录确认 |
+| Mia | `1eb153a` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、精简版专用群聊总结、结构化 Telegram 回复、群聊唤醒后智能连续跟进、媒体与贴纸能力、Responses 自动 Web Search、开发者 Debug 控制台和 Telegram Bot 深链登录确认 |
 | APIMaster new-api | `9130c1d` | GHCR 镜像蓝绿部署，提供 Telegram 用户 Key 解析、规范化 Mia 模型目录、产品名和 Debug 身份解析 |
-| APIMaster Web | `08b95e5` | Next.js PM2 双实例运行，提供 Telegram 登录与 TG-only 账号、登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
+| APIMaster Web | `4c5941` | Next.js PM2 双实例运行，提供 Telegram 登录与 TG-only 账号、登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
 | Mini App | `/mia/` | 已由 Nginx 公开，Telegram 默认菜单按钮 `Mia` 已配置 |
 | 持久化 | `/var/lib/mia/mia.sqlite` | schema v2，保存用户模型设置与分作用域的会话数据，WAL 模式 |
 
@@ -134,6 +134,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] 生产验证（2026-09-05）：APIMaster `08b95e5` 和 Mia `2499e2e` 均按精确 GitHub SHA 发布；APIMaster 登录页返回 `200`，未登录认证接口返回预期 `401`，深链入口实际生成 `t.me/...start=login_...`，内部确认接口未授权返回 `401`，Mia `/health` 返回 `200`、PM2 `online`；APIMaster 既有只读生产冒烟 21/21 通过，new-api 未修改、未重启。
 - [x] 深链确认路由修复（2026-09-05）：Mia 改为调用 `/api/auth/telegram/deep-link/confirm`；APIMaster Web 路由提交 `92041e0`，Mia 客户端提交 `2b8e602`（生产 Mia release 已包含该修复）。公网带内部鉴权的空请求返回 `400`，确认请求已到达 APIMaster Web，不再被错误转发到 new-api 的 `404` 路径；Mia 健康检查 `200`、PM2 `online`，APIMaster 只读生产冒烟 `21/21` 通过，new-api 未修改、未重启。
 - [x] 身份服务地址修复（2026-09-05）：发现 Mia 的 `baseUrl` 和 `internalBaseUrl` 均为 new-api `127.0.0.1:3001`；深链确认改为强制使用独立的 `APIMASTER_IDENTITY_BASE_URL=127.0.0.1:3000`，提交 `901539b` 已发布。确认失败现在区分真实过期和服务暂时不可用，并只记录 Telegram 用户 ID 与 HTTP 状态。生产生成测试码后，经运行中的身份服务确认返回成功、数据库状态为 `confirmed`；Mia 健康检查 `200`。new-api 未修改、未重启。
+- [x] 已绑定账户登录修复与文案更新（2026-09-05）：Telegram 身份已绑定 APIMaster 用户时，控制台侧遗留的 Telegram 字段冲突不再拦截 APIMaster 登录；新 TG-only 账号仍保留控制台绑定失败保护。网页登录回调和 Bot 深链完成回调使用同一规则。APIMaster 修复提交 `6059b7f` 已包含在生产 Web `4c5941`，服务器生产构建、PM2 滚动 reload 与本机 HTTP `200` 已验证。Mia 确认消息更新为“马上开始 AI 之旅 / 点击按钮，马上登录”，按钮为“登录 APIMaster”；提交 `0eeb4e7` 已包含在生产 Mia `1eb153a`，原子发布健康检查通过，上一版 release 保留为回滚点。new-api 未修改、未重启。
 - [ ] 使用真实 Telegram 客户端走完“网页点击 -> Telegram 打开 Bot -> Start -> 立即登录 -> 浏览器登录完成”人工验收，并检查已绑定账户、新 TG-only 账户和重复点击的体验。
 
 ## 私聊助手
