@@ -289,7 +289,7 @@ export class APIMasterClient {
     let response: Response;
     try {
       response = await this.fetcher(
-        `${this.options.baseUrl}/api/user/internal/mia-telegram-login/confirm`,
+        `${this.options.baseUrl}/api/auth/telegram/deep-link/confirm`,
         {
           method: "POST",
           headers: {

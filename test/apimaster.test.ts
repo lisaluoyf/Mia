@@ -45,7 +45,7 @@ describe("APIMaster client", () => {
       code: "abc", telegramUserId: 123456, firstName: "Lisa", username: "lisa", languageCode: "zh-CN",
     })).resolves.toContain("deep-link/complete");
     expect(fetcher.mock.calls[0]?.[0]).toBe(
-      "https://apimaster.example/api/user/internal/mia-telegram-login/confirm",
+      "https://apimaster.example/api/auth/telegram/deep-link/confirm",
     );
     const [, init] = fetcher.mock.calls[0] ?? [];
     const body: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
