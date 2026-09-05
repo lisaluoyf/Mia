@@ -11,6 +11,9 @@ describe("translation language directory", () => {
   it("uses all 25 localized Mia languages in the picker", () => {
     expect(TRANSLATION_PICKER_LANGUAGES).toHaveLength(25);
     expect(new Set(TRANSLATION_PICKER_LANGUAGES)).toHaveLength(25);
+    expect(TRANSLATION_PICKER_LANGUAGES.slice(0, 8)).toEqual([
+      "zh-CN", "en", "ru", "es", "pt-BR", "ja", "ko", "fr",
+    ]);
   });
 
   it("shows compact localized language names in an active pair", () => {

@@ -1,6 +1,12 @@
 import { BOT_LOCALES, type BotLocale } from "./localization.js";
 
-export const TRANSLATION_PICKER_LANGUAGES = [...BOT_LOCALES] as const;
+// Keep the picker optimized for the languages Mia users are most likely to need,
+// rather than inheriting the alphabetical locale registry order.
+export const TRANSLATION_PICKER_LANGUAGES = [
+  "zh-CN", "en", "ru", "es", "pt-BR", "ja", "ko", "fr",
+  "de", "ar", "hi", "it", "tr", "id", "vi", "th",
+  "pl", "uk", "fa", "nl", "pt", "ms", "zh-TW", "cs", "uz",
+] as const satisfies readonly BotLocale[];
 export type TranslationLanguage = typeof TRANSLATION_PICKER_LANGUAGES[number];
 
 const languageSet = new Set<string>(TRANSLATION_PICKER_LANGUAGES);
