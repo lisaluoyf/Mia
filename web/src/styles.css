@@ -219,7 +219,6 @@ button { color: inherit; }
   justify-content: center;
   padding-top: max(48px, env(safe-area-inset-top));
   background: rgba(14, 15, 17, .46);
-  backdrop-filter: blur(3px);
 }
 .sheet {
   width: min(100%, 560px);

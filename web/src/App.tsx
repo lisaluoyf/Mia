@@ -112,8 +112,10 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
   }, [onClose]);
 
   return (
-    <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
+    <div className="sheet-backdrop" role="presentation" onPointerDown={(event) => {
+      if (event.target !== event.currentTarget) return;
+      event.preventDefault();
+      onClose();
     }}>
       <section className="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
         <div className="sheet-handle" />
@@ -122,7 +124,18 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
             <span className="sheet-kicker">{t(capability)}</span>
             <h2 id="sheet-title">{t("selectModel")}</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label={t("close")} title={t("close")}>
+          <button
+            className="icon-button"
+            type="button"
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              onClose();
+            }}
+            onClick={onClose}
+            aria-label={t("close")}
+            title={t("close")}
+          >
             <X size={20} />
           </button>
         </header>
