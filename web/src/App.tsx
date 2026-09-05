@@ -175,6 +175,7 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
           {filtered.length === 0 && <div className="empty-state">{t("noModels")}</div>}
           {filtered.map((model) => {
             const savings = formatModelSavings(model, t);
+            const recommended = capability === "vision" ? model.visionRecommended : model.recommended;
             return <button
                 className={`model-option${sameModelId(selected, model.id) ? " selected" : ""}`}
                 type="button"
@@ -183,18 +184,19 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
                 disabled={saving}
               >
                 <span className="model-copy">
-                  <span className="model-name">{model.displayName}</span>
+                  <span className="model-heading">
+                    <span className="model-name">{model.displayName}</span>
+                    {recommended && <span className="recommended">{t("recommended")}</span>}
+                  </span>
                   <span className="model-price">
                     <span>{formatModelPrice(model, t)}</span>
                     {savings && <span className="discount-badge">{savings}</span>}
                   </span>
                 </span>
-                {(capability === "vision" ? model.visionRecommended : model.recommended)
-                  && <span className="recommended">{t("recommended")}</span>}
                 <span className="selection-mark" aria-hidden="true">
                   {saving && !sameModelId(selected, model.id)
                     ? null
-                    : sameModelId(selected, model.id) && <Check size={16} />}
+                    : sameModelId(selected, model.id) && <Check size={18} strokeWidth={3} />}
                 </span>
               </button>;
           })}
