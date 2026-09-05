@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveVideoResolution } from "../src/telegram/bot.js";
+import { explicitVideoResolution, resolveVideoResolution } from "../src/telegram/bot.js";
 
 const capabilities = {
   modes: ["text_to_video", "image_to_video"] as const,
@@ -23,5 +23,14 @@ describe("Mia video resolution selection", () => {
 
   it("rejects a resolution that the selected model does not advertise", () => {
     expect(resolveVideoResolution(capabilities, "720p")).toBeNull();
+  });
+
+  it("does not treat a classifier-only resolution as an explicit user choice", () => {
+    expect(explicitVideoResolution("基于这张图做一个视频")).toBeNull();
+    expect(resolveVideoResolution(capabilities, explicitVideoResolution("基于这张图做一个视频"))).toBe("768P");
+  });
+
+  it("reads an explicitly requested resolution from the user's message", () => {
+    expect(explicitVideoResolution("做一个 2k 视频")).toBe("2K");
   });
 });
