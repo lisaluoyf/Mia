@@ -1,7 +1,7 @@
 # Mia Agent Bot 项目目标与进展档案
 
 > 本文件是 Mia Agent Bot 的长期目标、架构决策、交付记录和待办事项的共享进度源，供 `Agent Bot`、`处理 Bot 私聊` 和 `Bot 群聊` 任务共同维护。
-> 最后同步：2026-09-04（Asia/Shanghai）
+> 最后同步：2026-09-05（Asia/Shanghai）
 
 ## 维护规则
 
@@ -15,7 +15,7 @@
 
 Mia 是面向 Telegram 生态的娱乐型 AI 助手。用户应能像和真人秘书聊天一样，直接使用自然语言提出需求；命令只作为快捷入口，不应成为主要交互方式。产品不以办公自动化为主线，重点是个人创作、轻量娱乐和群聊气氛互动。
 
-Mia 当前复用 APIMaster 的账号、API Key、模型目录、计费和模型路由能力，但保持独立代码仓库与服务边界。APIMaster 对 Mia 来说是外部能力服务，而不是需要深度耦合的业务框架。第一阶段用户通过已绑定的 APIMaster 账号使用；后续可增加 Telegram 直接登录和独立开户，但不属于当前交付范围。
+Mia 当前复用 APIMaster 的账号、API Key、模型目录、计费和模型路由能力，但保持独立代码仓库与服务边界。APIMaster 对 Mia 来说是外部能力服务，而不是需要深度耦合的业务框架。用户既可绑定已有 APIMaster 账号，也可通过 Telegram 直接创建无邮箱账号并长期登录；系统不生成虚假邮箱，后续可由用户补绑真实邮箱。
 
 长期产品由三个可独立演进的模块组成：
 
@@ -66,7 +66,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 | --- | --- | --- |
 | Mia | `57772e6` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、精简版专用群聊总结、结构化 Telegram 回复、群聊唤醒后智能连续跟进、媒体与贴纸能力、Responses 自动 Web Search 和开发者 Debug 控制台 |
 | APIMaster new-api | `9130c1d` | GHCR 镜像蓝绿部署，提供 Telegram 用户 Key 解析、规范化 Mia 模型目录、产品名和 Debug 身份解析 |
-| APIMaster Web | `7d62618` | Next.js PM2 双实例运行，提供登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
+| APIMaster Web | `6e258b5` | Next.js PM2 双实例运行，提供 Telegram 登录与 TG-only 账号、登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
 | Mini App | `/mia/` | 已由 Nginx 公开，Telegram 默认菜单按钮 `Mia` 已配置 |
 | 持久化 | `/var/lib/mia/mia.sqlite` | schema v2，保存用户模型设置与分作用域的会话数据，WAL 模式 |
 
@@ -359,6 +359,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 | `70c6774` | `lisaluoyf/Mia` | 群聊与 Topic 上下文压缩、公开群记忆、原子水位和管理员清除保护 |
 | `2a684df` | `lisaluoyf/Mia` | 核心意图与文字回复迁移到 Responses、自动 Web Search 和 Debug 搜索审计 |
 | `72acb20` | `lisaluoyf/Mia` | 未绑定媒体请求统一跳转 APIMaster 一键 Telegram 连接入口 |
+| `588a5a8` | `RomaCredit/apimaster-workspace` | APIMaster Telegram 登录、TG-only 无邮箱账号、统一用户资料、邮箱补绑与体验卡身份兼容 |
 
 ## 当前验证状态
 
@@ -389,6 +390,8 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - Mia 交流风格精简：提交 `eab43e8` 已从 GitHub 精确 SHA 发布到 `/srv/mia/releases/mia-git-eab43e83c88a-20260904T071131Z`；`mia.system@v2` 要求根据用户语言回答，保持自然幽默、主动积极、开门见山，并在 Telegram 中避免大段连续文字；多项信息优先使用简短列表。组合 Prompt 同步升级为 `mia.intent-router@v11` 与 `mia.follow-up-chat@v5`。216/216 测试、ESLint、前后端 TypeScript、生产构建和 `git diff --check` 通过；生产内部 `/health` 正常、PM2 `online` 且 0 次重启、SQLite 完整性为 `ok`、错误日志为空、保留 3 个 release，APIMaster 只读冒烟 19/19 通过；未修改或重启 APIMaster Web、new-api 或 Flask（2026-09-04）。
 - Mia Telegram 一键连接：Mia 功能提交 `72acb20` 与 APIMaster Web `7bcad73` 已推送并发布。未绑定用户的图片/视频入口统一指向 `/connect/telegram`；APIMaster 登录或注册后自动恢复该路径，创建一次性 Telegram 绑定凭证并跳回 Bot，已绑定用户直接回 Bot，不再进入 Profile。Mia 244/244 测试、ESLint、前后端 TypeScript、生产构建和健康检查通过；APIMaster 新路由 ESLint、生产构建和公开未登录链路通过，登录地址正确保留 `next=/connect/telegram`，生产只读冒烟 21/21 通过。发布过程未修改、构建或重启 new-api（2026-09-04）。
 - Mia Prompt 翻译清理：提交 `0000bad` 已从 GitHub 精确 SHA 发布到 `/srv/mia/releases/mia-git-0000badae2cc-20260904T154046Z`；修复英文/俄语 prompt 中的中文空占位泄漏，清理俄语 prompt 与产品 facts 中的中文残留和中英混杂术语，并补上对应回归测试；同时修正 `test/apimaster.test.ts` 的类型安全断言以满足当前 ESLint 规则。251/251 测试、ESLint、前后端 TypeScript、生产构建和 `git diff --check` 通过。因本机直连生产机 `188.245.245.213:22` 被远端关闭，本次按标准 GitHub 精确 SHA 发版流程经 `roma-prod` 跳板执行服务器构建；生产 release 元数据指向 `0000badae2cc7b1a76e7eb3af598ed38da7dd3d6`，Node.js `v20.20.2`、PM2 `online`、健康检查 `ok`，耗时 8 秒，回滚目标保留为 `mia-git-d3b908584556-20260904T153304Z`；未修改或重启 APIMaster Web、new-api 或 Flask（2026-09-04）。
+
+- APIMaster Telegram 登录与 TG-only 账号：功能提交 `588a5a8` 已随精确 GitHub SHA `6e258b5` 发布到 APIMaster Web。登录/注册页均已提供 Telegram，验签用户可创建 `email = NULL` 的 APIMaster 账号并同步 new-api 镜像账号；已有账号必须先登录后绑定，不按昵称或手机号自动合并；账号页支持补绑真实邮箱，体验卡继续保留 IP、设备、领取记录、社交身份和入群条件风控。数据库迁移前已备份 `users`、`user_social_bindings` 和 `trial_claims`，迁移后确认邮箱可空、Telegram 唯一索引和体验卡验证字段存在。12/12 可执行测试、定向 ESLint、15 个 locale JSON、生产构建和提交检查通过；生产正常回跳保留 `/connect/telegram`，危险外链回跳被清空，nonce Cookie 为 HttpOnly，官方 Widget 成功渲染。APIMaster 两个 PM2 worker 在线、生产代码为 `6e258b5`，只读生产冒烟 21/21 通过；发布未修改、构建或重启 new-api。尚待真实 Telegram 账号完成一次登录/创建/回跳人工验收（2026-09-05）。
 
 ## 下一阶段优先级
 
