@@ -3,7 +3,7 @@ export interface MiaBotCommand {
   description: string;
 }
 
-const COMMANDS = ["image", "video", "sticker", "new", "summary", "tr", "ntr"] as const;
+const COMMANDS = ["tr", "ntr", "image", "video", "sticker", "new", "summary"] as const;
 
 const ENGLISH_DESCRIPTIONS: Record<typeof COMMANDS[number], string> = {
   image: "Generate or edit an image",

@@ -2010,7 +2010,7 @@ function defaultTranslationPair(languageCode?: string | null): { userLanguage: s
 function translationStatusKeyboard(userId: number, locale: BotLocale, includeCopyText?: string): InlineKeyboard {
   const keyboard = new InlineKeyboard();
   if (includeCopyText && [...includeCopyText].length <= 256) {
-    keyboard.copyText(botText(locale, "translationCopyButton"), includeCopyText).row();
+    keyboard.copyText(botText(locale, "translationCopyButton"), includeCopyText);
   }
   return keyboard
     .text(botText(locale, "translationSwitchButton"), `translation:switch:${userId}`)

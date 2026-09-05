@@ -21,9 +21,25 @@ function labeledText(label: string | null, text: string): RichText {
   return label ? [{ type: "bold", text: label }, "：", text] : text;
 }
 
-function tableCell(text: RichText, header = false) {
+function tableText(text: string): RichText {
+  const parts: RichText[] = [];
+  const pattern = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
+  let offset = 0;
+  for (const match of text.matchAll(pattern)) {
+    const index = match.index;
+    const label = match[1];
+    const url = match[2];
+    if (index > offset) parts.push(text.slice(offset, index));
+    if (label && url) parts.push({ type: "url", text: label, url });
+    offset = index + match[0].length;
+  }
+  if (offset < text.length) parts.push(text.slice(offset));
+  return parts.length === 0 ? text : parts.length === 1 ? parts[0] ?? text : parts;
+}
+
+function tableCell(text: string, header = false) {
   return {
-    text,
+    text: tableText(text),
     ...(header ? { is_header: true as const } : {}),
     align: "left" as const,
     valign: "middle" as const,

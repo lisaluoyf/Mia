@@ -135,6 +135,84 @@ function cleanInline(value: string): string {
   return value.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/__([^_]+)__/g, "$1").trim();
 }
 
+function splitMarkdownTableRow(line: string): string[] | null {
+  const trimmed = line.trim();
+  if (!trimmed.includes("|")) return null;
+  const body = trimmed.replace(/^\|/, "").replace(/\|$/, "");
+  const cells: string[] = [];
+  let current = "";
+  let escaped = false;
+  for (const character of body) {
+    if (escaped) {
+      current += character;
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (character === "|") {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += character;
+    }
+  }
+  if (escaped) current += "\\";
+  cells.push(current.trim());
+  return cells.length >= 2 ? cells : null;
+}
+
+function isMarkdownTableDivider(cells: readonly string[]): boolean {
+  return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+interface MarkdownTableMatch {
+  start: number;
+  end: number;
+  columns: string[];
+  rows: string[][];
+}
+
+function findMarkdownTable(text: string): MarkdownTableMatch | null {
+  const lines = text.split(/\r?\n/);
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const columns = splitMarkdownTableRow(lines[index] ?? "");
+    const divider = splitMarkdownTableRow(lines[index + 1] ?? "");
+    if (!columns || !divider || columns.length !== divider.length || !isMarkdownTableDivider(divider)) continue;
+    const rows: string[][] = [];
+    let end = index + 2;
+    while (end < lines.length) {
+      const row = splitMarkdownTableRow(lines[end] ?? "");
+      if (!row || row.length !== columns.length) break;
+      rows.push(row);
+      end += 1;
+    }
+    if (rows.length > 0) return { start: index, end, columns, rows };
+  }
+  return null;
+}
+
+function promoteMarkdownTables(block: MiaResponseBlock): MiaResponseBlock[] {
+  if (block.type !== "paragraph" || !block.text || !findMarkdownTable(block.text)) return [block];
+  const result: MiaResponseBlock[] = [];
+  let remaining = block.text;
+  let match = findMarkdownTable(remaining);
+  while (match) {
+    const before = remaining.split(/\r?\n/).slice(0, match.start).join("\n").trim();
+    if (before) result.push({ ...block, text: before });
+    result.push({
+      type: "table",
+      heading: null,
+      emoji: null,
+      columns: match.columns,
+      rows: match.rows,
+      compact: false,
+    });
+    remaining = remaining.split(/\r?\n/).slice(match.end).join("\n").trim();
+    match = findMarkdownTable(remaining);
+  }
+  if (remaining) result.push({ ...block, text: remaining });
+  return result;
+}
+
 export function normalizeMiaResponse(value: MiaResponse): MiaResponse {
   const blocks = value.blocks.flatMap((block): MiaResponseBlock[] => {
     if (block.type === "table") {
@@ -163,12 +241,12 @@ export function normalizeMiaResponse(value: MiaResponse): MiaResponse {
         : null;
     if ((block.type === "paragraph" || block.type === "code" || block.type === "quote" || block.type === "details") && !text) return [];
     if ((block.type === "list" || block.type === "facts") && items.length === 0) return [];
-    return [{
+    return promoteMarkdownTables({
       ...block,
       heading,
       text,
       items: block.type === "list" || block.type === "facts" ? items : [],
-    }];
+    });
   });
   return {
     version: 1,

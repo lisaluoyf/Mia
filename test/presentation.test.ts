@@ -104,6 +104,35 @@ describe("Mia Telegram presentation", () => {
     expect(miaResponsePlainText(normalized)).toContain("状态：A < B & C > D");
   });
 
+  it("promotes a Markdown table returned inside a paragraph to a native table block", () => {
+    const normalized = normalizeMiaResponse(response([{
+      type: "paragraph", heading: null, emoji: null,
+      text: "For a serious alternative:\n\n| Project | Best for | Why it can be better |\n|---|---|---|\n| [Crawlee](https://github.com/apify/crawlee) | Production crawling | Browser support |\n| Spider | High performance | Rust-based |\n\nThat is the shortlist.",
+      items: [], ordered: false, language: null,
+    }]));
+
+    expect(normalized.blocks).toEqual([
+      expect.objectContaining({ type: "paragraph", text: "For a serious alternative:" }),
+      expect.objectContaining({
+        type: "table",
+        columns: ["Project", "Best for", "Why it can be better"],
+        rows: [
+          ["[Crawlee](https://github.com/apify/crawlee)", "Production crawling", "Browser support"],
+          ["Spider", "High performance", "Rust-based"],
+        ],
+      }),
+      expect.objectContaining({ type: "paragraph", text: "That is the shortlist." }),
+    ]);
+    const table = renderTelegramRich(normalized)[0]?.richBlocks.find((block) => block.type === "table");
+    expect(table).toEqual(expect.objectContaining({ type: "table" }));
+    if (table?.type !== "table") throw new Error("Expected a native table block");
+    expect(table.cells[1]?.[0]?.text).toEqual({
+      type: "url",
+      text: "Crawlee",
+      url: "https://github.com/apify/crawlee",
+    });
+  });
+
   it("splits after HTML escaping so every Telegram chunk remains within the limit", () => {
     const chunks = renderTelegramHtml(response([{
       type: "paragraph", heading: null, emoji: null, text: "<&>".repeat(2600),

@@ -78,6 +78,7 @@ describe("private translation mode", () => {
     expect(router.classify).not.toHaveBeenCalled();
     const translationMarkup = calls.find((call) => call.method === "sendMessage" && call.payload.text === "Hello")?.payload.reply_markup;
     expect(JSON.stringify(translationMarkup)).toContain('"copy_text":{"text":"Hello"}');
+    expect((translationMarkup as { inline_keyboard?: unknown[][] } | undefined)?.inline_keyboard?.[0]).toHaveLength(3);
 
     await bot.handleUpdate(update(3, 3, "/ntr"));
     expect(contexts.getActiveTranslationSession(42, 42)).toBeNull();
