@@ -114,4 +114,42 @@ describe("model ID matching", () => {
     expect(current.getPreferences(42).chatModel).toBe("grok-4.5");
     expect(current.getPreferences(42).imageModel).toBe("user-image-model");
   });
+
+  it("marks Mia global defaults as recommended without changing cached catalog metadata", async () => {
+    const defaults: ModelPreferences = {
+      chatModel: "chat-default",
+      visionModel: "vision-default",
+      imageModel: "image-default",
+      videoModel: "video-default",
+    };
+    const plainCatalog: ModelCatalog = {
+      apimasterUserId: 7,
+      models: [
+        { id: "chat-default", displayName: "Chat default", vendor: "Test", capability: "chat", recommended: false, supportsVision: false, visionRecommended: false },
+        { id: "vision-default", displayName: "Vision default", vendor: "Test", capability: "chat", recommended: false, supportsVision: true, visionRecommended: false },
+        { id: "api-recommended", displayName: "API recommended", vendor: "Test", capability: "chat", recommended: true, supportsVision: true, visionRecommended: true },
+        { id: "image-default", displayName: "Image default", vendor: "Test", capability: "image", recommended: false, supportsVision: false, visionRecommended: false },
+        { id: "video-default", displayName: "Video default", vendor: "Test", capability: "video", recommended: false, supportsVision: false, visionRecommended: false },
+      ],
+    };
+    const store = { get: vi.fn(() => ({
+      chatModel: "api-recommended",
+      visionModel: "api-recommended",
+      imageModel: null,
+      videoModel: null,
+    })) } as unknown as SettingsStore;
+    const client = { listModels: vi.fn(() => Promise.resolve(plainCatalog)) } as unknown as APIMasterClient;
+    const current = new ModelSettingsService(client, store, () => ({ ...defaults }));
+
+    const snapshot = await current.getSnapshot(42);
+    const model = (id: string) => snapshot.models.find((item) => item.id === id)!;
+
+    expect(model("chat-default").recommended).toBe(true);
+    expect(model("vision-default").visionRecommended).toBe(true);
+    expect(model("image-default").recommended).toBe(true);
+    expect(model("video-default").recommended).toBe(true);
+    expect(model("api-recommended")).toMatchObject({ recommended: true, visionRecommended: true });
+    expect(snapshot.settings.chatModel).toBe("api-recommended");
+    expect(plainCatalog.models.find((item) => item.id === "image-default")?.recommended).toBe(false);
+  });
 });

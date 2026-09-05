@@ -196,7 +196,7 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
                 <span className="selection-mark" aria-hidden="true">
                   {saving && !sameModelId(selected, model.id)
                     ? null
-                    : sameModelId(selected, model.id) && <Check size={18} strokeWidth={3} />}
+                    : sameModelId(selected, model.id) && <Check size={24} strokeWidth={3} />}
                 </span>
               </button>;
           })}

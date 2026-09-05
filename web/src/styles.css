@@ -326,8 +326,8 @@ button { color: inherit; }
   white-space: nowrap;
 }
 :root[data-theme="dark"] .recommended { color: #f0c764; }
-.selection-mark { display: grid; width: 36px; height: 36px; align-self: center; justify-self: end; place-items: center; border-radius: 50%; }
-.selected .selection-mark { background: var(--tg-button); color: var(--tg-button-text); }
+.selection-mark { display: grid; width: 36px; height: 36px; align-self: center; justify-self: end; place-items: center; color: transparent; }
+.selected .selection-mark { color: var(--mia-cyan); }
 .empty-state { display: grid; min-height: 180px; place-items: center; padding: 20px; color: var(--tg-hint); font-size: 14px; }
 .toast {
   position: fixed;

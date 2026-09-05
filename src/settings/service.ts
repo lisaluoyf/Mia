@@ -60,6 +60,25 @@ function availableModel(
   return candidates.find((model) => model.recommended)?.id ?? candidates[0]?.id ?? null;
 }
 
+function withDefaultRecommendations(catalog: ModelCatalog, defaults: ModelPreferences): ModelCatalog {
+  return {
+    ...catalog,
+    // The APIMaster catalog is shared and cached. Add Mia's managed defaults only
+    // to the response snapshot so a user selection never changes what is recommended.
+    models: catalog.models.map((model) => ({
+      ...model,
+      recommended: model.recommended
+        || (model.capability === "chat" && sameModelId(model.id, defaults.chatModel))
+        || (model.capability === "image" && sameModelId(model.id, defaults.imageModel))
+        || (model.capability === "video" && sameModelId(model.id, defaults.videoModel)),
+      visionRecommended: model.visionRecommended
+        || (model.capability === "chat"
+          && model.supportsVision
+          && sameModelId(model.id, defaults.visionModel)),
+    })),
+  };
+}
+
 export class ModelSettingsService {
   private readonly catalogCache = new Map<number, CachedCatalog>();
   private readonly catalogRequests = new Map<number, Promise<ModelCatalog>>();
@@ -89,18 +108,19 @@ export class ModelSettingsService {
   async getSnapshot(telegramUserId: number): Promise<SettingsSnapshot> {
     const catalog = await this.getCatalog(telegramUserId);
     const stored = this.store.get(telegramUserId);
+    const defaults = this.defaults();
     const unavailable: ModelPreferenceCapability[] = [];
     const normalized = { ...stored };
     for (const capability of ["chat", "vision", "image", "video"] as const) {
       const key = preferenceKey(capability);
       const selected = stored[key];
-      const effective = availableModel(selected ?? this.defaults()[key], capability, catalog);
+      const effective = availableModel(selected ?? defaults[key], capability, catalog);
       if (selected && (!effective || !sameModelId(selected, effective))) {
         unavailable.push(capability);
       }
       normalized[key] = effective;
     }
-    return { ...catalog, settings: normalized, unavailable };
+    return { ...withDefaultRecommendations(catalog, defaults), settings: normalized, unavailable };
   }
 
   async save(telegramUserId: number, preferences: ModelPreferences): Promise<ModelPreferences> {
