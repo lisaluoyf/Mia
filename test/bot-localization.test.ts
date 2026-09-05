@@ -46,6 +46,11 @@ describe("Telegram bot localization", () => {
     expect(mediaJobLocale({ locale: "zh-hans" })).toBe("zh-CN");
   });
 
+  it("keeps the translation status to one compact line", () => {
+    expect(botText("zh-CN", "translationModeEnabled", { pair: "中文 ↔ 英语" })).toBe("翻译：中文 ↔ 英语");
+    expect(botText("en", "translationModeEnabled", { pair: "Chinese ↔ English" })).toBe("Translation: Chinese ↔ English");
+  });
+
   it("localizes the settings menu label for every advertised locale", () => {
     for (const locale of BOT_LOCALES) {
       const translated = botText(locale, "settings");
