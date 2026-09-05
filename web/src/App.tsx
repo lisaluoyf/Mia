@@ -147,9 +147,6 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
             >
               <span className="model-copy">
                 <span className="model-name">{model.displayName}</span>
-                {model.vendor && model.vendor.toLowerCase() !== "custom" && (
-                  <span className="model-meta">{model.vendor}</span>
-                )}
                 <span className="model-price">{formatModelPrice(model, t)}</span>
               </span>
               {(capability === "vision" ? model.visionRecommended : model.recommended)
