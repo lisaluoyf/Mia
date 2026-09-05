@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
+import { sep } from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
@@ -73,6 +74,12 @@ export function createServer({ logger, serviceKey, handleUpdate, miniApp, mediaD
         root: miniApp.staticRoot,
         prefix: "/mia/",
         decorateReply: true,
+        setHeaders(response, pathName) {
+          const isVersionedAsset = pathName.includes(`${sep}assets${sep}`);
+          response.header("cache-control", isVersionedAsset
+            ? "public, max-age=31536000, immutable"
+            : "no-cache");
+        },
       });
       app.get("/mia", (_request, reply) => reply.redirect("/mia/"));
       app.get("/mia/debug", (_request, reply) => reply.sendFile("index.html"));

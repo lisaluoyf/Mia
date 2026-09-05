@@ -44,11 +44,21 @@ function service() {
     videoModel: input.videoModel,
   }));
   const store = { get: vi.fn(() => stored), save } as unknown as SettingsStore;
-  const client = { listModels: vi.fn(() => Promise.resolve(catalog)) } as unknown as APIMasterClient;
-  return { current: new ModelSettingsService(client, store), save };
+  const listModels = vi.fn(() => Promise.resolve(catalog));
+  const client = { listModels } as unknown as APIMasterClient;
+  return { current: new ModelSettingsService(client, store), save, listModels };
 }
 
 describe("model ID matching", () => {
+  it("caches the catalog used by repeated Mini App bootstraps", async () => {
+    const { current, listModels } = service();
+
+    await current.getSnapshot(42);
+    await current.getSnapshot(42);
+
+    expect(listModels).toHaveBeenCalledTimes(1);
+  });
+
   it("treats stored model IDs as case-insensitive and returns catalog casing", async () => {
     const { current } = service();
 

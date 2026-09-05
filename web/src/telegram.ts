@@ -12,7 +12,7 @@ interface TelegramThemeParams {
 
 interface TelegramWebApp {
   initData: string;
-  initDataUnsafe?: { user?: { language_code?: string } };
+  initDataUnsafe?: { user?: { id?: number; language_code?: string } };
   colorScheme?: "light" | "dark";
   themeParams?: TelegramThemeParams;
   ready(): void;

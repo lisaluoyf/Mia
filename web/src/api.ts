@@ -1,6 +1,14 @@
 import type { BootstrapData, Preferences } from "./types";
 import { telegramApp } from "./telegram";
 
+const bootstrapCacheKey = "mia.bootstrap.v1";
+const bootstrapCacheMaxAgeMs = 6 * 60 * 60 * 1_000;
+
+interface BootstrapCacheEntry {
+  cachedAt: number;
+  data: BootstrapData;
+}
+
 class ApiError extends Error {
   constructor(public readonly code: string, public readonly status: number) {
     super(code);
@@ -69,6 +77,31 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export async function loadBootstrap(): Promise<BootstrapData> {
   const response = await request<{ success: true; data: BootstrapData }>("/mia/api/bootstrap");
   return response.data;
+}
+
+export function loadCachedBootstrap(): BootstrapData | null {
+  const telegramUserId = telegramApp()?.initDataUnsafe?.user?.id;
+  if (!telegramUserId) return null;
+  try {
+    const raw = window.localStorage.getItem(bootstrapCacheKey);
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as BootstrapCacheEntry;
+    if (cached.cachedAt + bootstrapCacheMaxAgeMs <= Date.now() || cached.data.user.id !== telegramUserId) {
+      window.localStorage.removeItem(bootstrapCacheKey);
+      return null;
+    }
+    return cached.data;
+  } catch {
+    return null;
+  }
+}
+
+export function cacheBootstrap(data: BootstrapData): void {
+  try {
+    window.localStorage.setItem(bootstrapCacheKey, JSON.stringify({ cachedAt: Date.now(), data }));
+  } catch {
+    // Private browsing or an exhausted WebView store must not block startup.
+  }
 }
 
 export async function savePreferences(settings: Preferences): Promise<Preferences> {

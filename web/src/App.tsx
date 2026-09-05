@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 
-import { ApiError, loadBootstrap, savePreferences } from "./api";
+import { ApiError, cacheBootstrap, loadBootstrap, loadCachedBootstrap, savePreferences } from "./api";
 import type { PreferenceCapability, BootstrapData, ModelOption, Preferences } from "./types";
 import type { TranslationKey } from "./i18n";
 import { notifyHaptic } from "./telegram";
@@ -186,29 +186,31 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
 }
 
 export function App({ t }: AppProps) {
-  const [data, setData] = useState<BootstrapData | null>(null);
-  const [settings, setSettings] = useState<Preferences | null>(null);
+  const [initialBootstrap] = useState(loadCachedBootstrap);
+  const [data, setData] = useState<BootstrapData | null>(initialBootstrap);
+  const [settings, setSettings] = useState<Preferences | null>(initialBootstrap?.settings ?? null);
   const [active, setActive] = useState<PreferenceCapability | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(initialBootstrap === null);
   const [saving, setSaving] = useState<PreferenceCapability | null>(null);
   const [error, setError] = useState<TranslationKey | null>(null);
   const [toast, setToast] = useState<TranslationKey | null>(null);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (showLoading = false) => {
+    if (showLoading) setLoading(true);
     setError(null);
     try {
       const next = await loadBootstrap();
       setData(next);
       setSettings(next.settings);
+      cacheBootstrap(next);
     } catch (loadError) {
-      setError(errorKey(loadError));
+      if (!data) setError(errorKey(loadError));
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(initialBootstrap === null); }, []);
 
   const saveSelection = async (capability: PreferenceCapability, model: string) => {
     if (!settings || !data || saving) return;
@@ -250,7 +252,7 @@ export function App({ t }: AppProps) {
       <main className="center-state error-page">
         <AlertCircle size={30} aria-hidden="true" />
         <p>{t(error ?? "serviceUnavailable")}</p>
-        <button className="secondary-button" type="button" onClick={() => void load()}>
+        <button className="secondary-button" type="button" onClick={() => void load(true)}>
           <RotateCcw size={17} />{t("retry")}
         </button>
       </main>

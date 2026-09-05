@@ -20,6 +20,11 @@ export interface SettingsSnapshot extends ModelCatalog {
   unavailable: ModelPreferenceCapability[];
 }
 
+interface CachedCatalog {
+  catalog: ModelCatalog;
+  expiresAt: number;
+}
+
 export function sameModelId(left: string | null, right: string | null): boolean {
   return left !== null && right !== null && left.toLowerCase() === right.toLowerCase();
 }
@@ -56,10 +61,14 @@ function availableModel(
 }
 
 export class ModelSettingsService {
+  private readonly catalogCache = new Map<number, CachedCatalog>();
+  private readonly catalogRequests = new Map<number, Promise<ModelCatalog>>();
+
   constructor(
     private readonly client: APIMasterClient,
     private readonly store: SettingsStore,
     private readonly defaults: () => ModelPreferences = () => ({ ...DEFAULT_PREFERENCES }),
+    private readonly catalogCacheTtlMs = 2 * 60 * 1_000,
   ) {}
 
   getDefaults(): ModelPreferences {
@@ -78,7 +87,7 @@ export class ModelSettingsService {
   }
 
   async getSnapshot(telegramUserId: number): Promise<SettingsSnapshot> {
-    const catalog = await this.client.listModels(telegramUserId);
+    const catalog = await this.getCatalog(telegramUserId);
     const stored = this.store.get(telegramUserId);
     const unavailable: ModelPreferenceCapability[] = [];
     const normalized = { ...stored };
@@ -95,7 +104,9 @@ export class ModelSettingsService {
   }
 
   async save(telegramUserId: number, preferences: ModelPreferences): Promise<ModelPreferences> {
-    const catalog = await this.client.listModels(telegramUserId);
+    // An explicit model selection must validate against the live catalog,
+    // rather than a short-lived snapshot shown while the Mini App opens.
+    const catalog = await this.getCatalog(telegramUserId, true);
     const normalized = { ...preferences };
     for (const capability of ["chat", "vision", "image", "video"] as const) {
       const key = preferenceKey(capability);
@@ -113,5 +124,26 @@ export class ModelSettingsService {
       apimasterUserId: catalog.apimasterUserId,
       ...normalized,
     });
+  }
+
+  private async getCatalog(telegramUserId: number, forceRefresh = false): Promise<ModelCatalog> {
+    const cached = this.catalogCache.get(telegramUserId);
+    if (!forceRefresh && cached && cached.expiresAt > Date.now()) {
+      return cached.catalog;
+    }
+    const pending = this.catalogRequests.get(telegramUserId);
+    if (pending) return pending;
+
+    const request = this.client.listModels(telegramUserId)
+      .then((catalog) => {
+        this.catalogCache.set(telegramUserId, {
+          catalog,
+          expiresAt: Date.now() + this.catalogCacheTtlMs,
+        });
+        return catalog;
+      })
+      .finally(() => this.catalogRequests.delete(telegramUserId));
+    this.catalogRequests.set(telegramUserId, request);
+    return request;
   }
 }
