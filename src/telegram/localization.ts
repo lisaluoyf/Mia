@@ -101,10 +101,7 @@ const ENGLISH = {
   translationSwitchButton: "Switch languages",
   translationExitButton: "Exit translation",
   translationCopyButton: "Copy",
-  translationChoosePair: "Choose a language pair:",
-  translationPairZhEn: "Chinese ↔ English",
-  translationPairEnRu: "English ↔ Russian",
-  translationPairZhRu: "Chinese ↔ Russian",
+  translationChooseTarget: "Send /tr followed by your target language. For example: /tr Japanese",
   translationPrivateOnly: "Translation mode is available in private chat only.",
 } as const;
 
@@ -207,10 +204,7 @@ const CHINESE_SIMPLIFIED: MessageOverrides = {
   translationSwitchButton: "切换语言",
   translationExitButton: "退出翻译",
   translationCopyButton: "复制",
-  translationChoosePair: "选择语言对：",
-  translationPairZhEn: "中文 ↔ 英语",
-  translationPairEnRu: "英语 ↔ 俄语",
-  translationPairZhRu: "中文 ↔ 俄语",
+  translationChooseTarget: "发送 /tr 加目标语言即可切换。例如：/tr 日语",
   translationPrivateOnly: "翻译模式仅支持私聊。",
 };
 

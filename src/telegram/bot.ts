@@ -70,7 +70,7 @@ interface BotDependencies {
       "markGroupFollowUpHandled" | "expireGroupFollowUp" |
       "markMessageAsTranslation" |
       "enterTranslationSession" | "getActiveTranslationSession" | "touchTranslationSession" |
-      "setTranslationLanguagePair" | "exitTranslationSession">>;
+      "exitTranslationSession">>;
   compactor?: ContextCompactor;
   groupCompactor?: GroupContextCompactor;
   groupSummary?: GroupSummaryService;
@@ -93,14 +93,6 @@ const TRANSLATION_RESULT_SCHEMA = {
     translated_text: { type: "string", minLength: 1, maxLength: 20_000 },
   },
 } as const;
-
-type TranslationPairKey = "zh-en" | "en-ru" | "zh-ru";
-
-const TRANSLATION_PAIRS: Record<TranslationPairKey, { userLanguage: string; foreignLanguage: string }> = {
-  "zh-en": { userLanguage: "zh-CN", foreignLanguage: "en" },
-  "en-ru": { userLanguage: "en", foreignLanguage: "ru" },
-  "zh-ru": { userLanguage: "zh-CN", foreignLanguage: "ru" },
-};
 
 interface IncomingMessage {
   ctx: Context;
@@ -126,7 +118,7 @@ type FollowUpStore = Pick<ContextStore,
 
 type TranslationStore = Pick<ContextStore,
   "enterTranslationSession" | "getActiveTranslationSession" | "touchTranslationSession" |
-  "setTranslationLanguagePair" | "exitTranslationSession">;
+  "exitTranslationSession">;
 
 function followUpStore(dependencies: BotDependencies): FollowUpStore | null {
   const store = dependencies.contexts as Partial<FollowUpStore>;
@@ -137,7 +129,7 @@ function followUpStore(dependencies: BotDependencies): FollowUpStore | null {
 function translationStore(dependencies: BotDependencies): TranslationStore | null {
   const store = dependencies.contexts as Partial<TranslationStore>;
   return store.enterTranslationSession && store.getActiveTranslationSession && store.touchTranslationSession &&
-    store.setTranslationLanguagePair && store.exitTranslationSession ? store as TranslationStore : null;
+    store.exitTranslationSession ? store as TranslationStore : null;
 }
 
 function mediaFromMessage(message: Message, position = 0): MediaInput | null {
@@ -403,8 +395,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
 
   const translations = translationStore(dependencies);
   if (message.chat.type === "private" && translations && explicit?.command === "tr") {
-    const pair = defaultTranslationPair(message.from.language_code);
-    const session = translations.enterTranslationSession(message.from.id, message.chat.id, pair.userLanguage, pair.foreignLanguage);
+    const languages = defaultTranslationLanguages(message.from.language_code, explicit.instruction);
+    const session = translations.enterTranslationSession(message.from.id, message.chat.id, languages.userLanguage, languages.targetLanguage);
     await replyTo(ctx, message, translationStatusText(session, locale), {
       reply_markup: translationStatusKeyboard(message.from.id, locale),
     });
@@ -1323,7 +1315,7 @@ async function handleTranslationCallback(ctx: Context, dependencies: BotDependen
   const query = ctx.callbackQuery;
   const message = query?.message;
   if (!query?.data || !query.from || !message) return false;
-  const match = /^translation:(switch|exit|pair):(\d+)(?::(zh-en|en-ru|zh-ru))?$/.exec(query.data);
+  const match = /^translation:(switch|exit):(\d+)$/.exec(query.data);
   if (!match) return false;
   const ownerId = Number(match[2]);
   const translations = translationStore(dependencies);
@@ -1335,7 +1327,7 @@ async function handleTranslationCallback(ctx: Context, dependencies: BotDependen
   if (match[1] === "exit") {
     translations.exitTranslationSession(ownerId, message.chat.id);
     await ctx.answerCallbackQuery();
-    await editCallbackMessage(ctx, botText(locale, "translationModeDisabled"));
+    await sendTranslationCallbackState(ctx, message, botText(locale, "translationModeDisabled"));
     return true;
   }
   if (match[1] === "switch") {
@@ -1344,26 +1336,10 @@ async function handleTranslationCallback(ctx: Context, dependencies: BotDependen
       return true;
     }
     await ctx.answerCallbackQuery();
-    await editCallbackMessage(ctx, botText(locale, "translationChoosePair"));
-    await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, {
-      reply_markup: translationPairKeyboard(ownerId, locale),
-    });
+    await sendTranslationCallbackState(ctx, message, botText(locale, "translationChooseTarget"));
     return true;
   }
-  const pairKey = match[3] as TranslationPairKey | undefined;
-  const pair = pairKey ? TRANSLATION_PAIRS[pairKey] : undefined;
-  if (!pair) return true;
-  const session = translations.setTranslationLanguagePair(ownerId, message.chat.id, pair.userLanguage, pair.foreignLanguage);
-  if (!session) {
-    await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
-    return true;
-  }
-  await ctx.answerCallbackQuery();
-  await editCallbackMessage(ctx, translationStatusText(session, locale));
-  await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, {
-    reply_markup: translationStatusKeyboard(ownerId, locale),
-  });
-  return true;
+  return false;
 }
 
 async function handleCallback(ctx: Context, dependencies: BotDependencies): Promise<void> {
@@ -1984,23 +1960,30 @@ function parseExplicitCommand(text: string): { command: string; instruction: str
   return match ? { command: match[1]?.toLowerCase() ?? "", instruction: match[2]?.trim() ?? "" } : null;
 }
 
-function translationPairKey(session: { userLanguage: string; foreignLanguage: string }): TranslationPairKey {
-  const pair = Object.entries(TRANSLATION_PAIRS).find(([, value]) =>
-    (value.userLanguage === session.userLanguage && value.foreignLanguage === session.foreignLanguage) ||
-    (value.userLanguage === session.foreignLanguage && value.foreignLanguage === session.userLanguage));
-  return (pair?.[0] as TranslationPairKey | undefined) ?? "zh-en";
+function defaultTranslationLanguages(
+  languageCode?: string | null,
+  requestedTarget?: string,
+): { userLanguage: string; targetLanguage: string } {
+  const userLanguage = languageNameFromCode(languageCode);
+  const targetLanguage = normalizeTranslationTarget(requestedTarget) ||
+    (languageCode?.trim().toLowerCase().startsWith("en") ? "Chinese" : "English");
+  return { userLanguage, targetLanguage };
 }
 
-function translationPairLabel(key: TranslationPairKey, locale: BotLocale): string {
-  const messageKey = key === "en-ru" ? "translationPairEnRu" : key === "zh-ru" ? "translationPairZhRu" : "translationPairZhEn";
-  return botText(locale, messageKey);
+function normalizeTranslationTarget(value?: string): string | null {
+  const target = value?.normalize("NFKC").replace(/\s+/g, " ").trim();
+  return target && target.length <= 80 ? target : null;
 }
 
-function defaultTranslationPair(languageCode?: string | null): { userLanguage: string; foreignLanguage: string } {
-  const locale = resolveBotLocale(languageCode);
-  if (locale === "ru") return { userLanguage: "ru", foreignLanguage: "en" };
-  if (locale === "en") return { userLanguage: "en", foreignLanguage: "zh-CN" };
-  return { userLanguage: "zh-CN", foreignLanguage: "en" };
+function languageNameFromCode(languageCode?: string | null): string {
+  const code = languageCode?.trim();
+  if (!code) return "English";
+  try {
+    const locale = new Intl.Locale(code).toString();
+    return new Intl.DisplayNames(["en"], { type: "language" }).of(locale) ?? locale;
+  } catch {
+    return code;
+  }
 }
 
 function translationStatusKeyboard(userId: number, locale: BotLocale, includeCopyText?: string): InlineKeyboard {
@@ -2013,17 +1996,9 @@ function translationStatusKeyboard(userId: number, locale: BotLocale, includeCop
     .text(botText(locale, "translationExitButton"), `translation:exit:${userId}`);
 }
 
-function translationPairKeyboard(userId: number, locale: BotLocale): InlineKeyboard {
-  return new InlineKeyboard()
-    .text(translationPairLabel("zh-en", locale), `translation:pair:${userId}:zh-en`).row()
-    .text(translationPairLabel("en-ru", locale), `translation:pair:${userId}:en-ru`).row()
-    .text(translationPairLabel("zh-ru", locale), `translation:pair:${userId}:zh-ru`).row()
-    .text(botText(locale, "translationExitButton"), `translation:exit:${userId}`);
-}
-
 function translationStatusText(session: { userLanguage: string; foreignLanguage: string }, locale: BotLocale): string {
   return botText(locale, "translationModeEnabled", {
-    pair: translationPairLabel(translationPairKey(session), locale),
+    pair: `${session.userLanguage} ↔ ${session.foreignLanguage}`,
   });
 }
 
@@ -2269,6 +2244,18 @@ async function replyMediaAccessError(
 async function editCallbackMessage(ctx: Context, text: string): Promise<void> {
   const message = ctx.callbackQuery?.message;
   if (message) await ctx.api.editMessageText(message.chat.id, message.message_id, text);
+}
+
+async function sendTranslationCallbackState(
+  ctx: Context,
+  message: Message,
+  text: string,
+  keyboard?: InlineKeyboard,
+): Promise<void> {
+  await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, {
+    reply_markup: { inline_keyboard: [] },
+  });
+  await replyPlainTo(ctx, message, text, keyboard ? { reply_markup: keyboard } : {});
 }
 
 export function createBot(token: string, dependencies: BotDependencies): Bot {
