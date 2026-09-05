@@ -37,10 +37,15 @@ describe("private translation mode", () => {
   }
 
   it("translates active private messages without invoking the normal router", async () => {
-    const structuredResponse = vi.fn().mockResolvedValue({
-      data: { source: "user_language", translated_text: "Hello" },
-      webSearch: { callCount: 0, queries: [], sources: [] },
-    });
+    const structuredResponse = vi.fn()
+      .mockResolvedValueOnce({
+        data: { source: "user_language", translated_text: "Hello" },
+        webSearch: { callCount: 0, queries: [], sources: [] },
+      })
+      .mockResolvedValueOnce({
+        data: { source: "foreign_language", translated_text: "\u4f60\u597d" },
+        webSearch: { callCount: 0, queries: [], sources: [] },
+      });
     const router = { classify: vi.fn(), model: "gpt-5.4" };
     const credentials: ChatCredentialProvider = {
       resolve: vi.fn().mockResolvedValue({ apiKey: "user-key", model: "gpt-5.4", source: "user", fallbackReason: null }),
@@ -80,7 +85,14 @@ describe("private translation mode", () => {
     expect(JSON.stringify(translationMarkup)).toContain('"copy_text":{"text":"Hello"}');
     expect((translationMarkup as { inline_keyboard?: unknown[][] } | undefined)?.inline_keyboard?.[0]).toHaveLength(3);
 
-    await bot.handleUpdate(update(3, 3, "/ntr"));
+    await bot.handleUpdate(update(3, 3, "Hello"));
+
+    expect(structuredResponse).toHaveBeenCalledTimes(2);
+    const reverseTranslationMarkup = calls.find((call) => call.method === "sendMessage" && call.payload.text === "\u4f60\u597d")?.payload.reply_markup;
+    expect(JSON.stringify(reverseTranslationMarkup)).toContain('"copy_text":{"text":"\u4f60\u597d"}');
+    expect((reverseTranslationMarkup as { inline_keyboard?: unknown[][] } | undefined)?.inline_keyboard?.[0]).toHaveLength(3);
+
+    await bot.handleUpdate(update(4, 4, "/ntr"));
     expect(contexts.getActiveTranslationSession(42, 42)).toBeNull();
   });
 });

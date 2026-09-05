@@ -363,7 +363,7 @@ async function handleTranslationMessage(
       reply_markup: translationStatusKeyboard(
         message.from.id,
         locale,
-        value.source === "user_language" ? value.translated_text : undefined,
+        value.translated_text,
       ),
     });
     persistMessage(sent, dependencies);
