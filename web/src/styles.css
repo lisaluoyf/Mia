@@ -293,6 +293,7 @@ button { color: inherit; }
 .model-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .model-name { overflow-wrap: anywhere; font-size: 15px; font-weight: 700; line-height: 1.25; }
 .model-meta { overflow: hidden; color: var(--tg-hint); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.model-price { color: var(--tg-text); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.35; }
 .recommended {
   padding: 4px 7px;
   border-radius: 5px;

@@ -19,5 +19,10 @@
   "accountDisabled": "你的 APIMaster 帳號目前無法使用。",
   "noKey": "找不到可用的 APIMaster API Key。",
   "serviceUnavailable": "服務暫時無法使用。",
-  "saveFailed": "設定儲存失敗，請重試。"
+  "saveFailed": "設定儲存失敗，請重試。",
+  "priceInput": "輸入",
+  "priceDiscount": "折扣",
+  "priceUnavailable": "價格暫不可用",
+  "pricePerImage": "/ 張",
+  "pricePerSecond": "/ 秒"
 }

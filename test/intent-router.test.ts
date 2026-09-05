@@ -671,4 +671,13 @@ describe("Mia intent router", () => {
     });
     expect(followUpPrompt?.text).toContain(basePrompt?.text ?? "missing");
   });
+
+  it("does not classify short agreement as an automatic non-participation reason", () => {
+    const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
+    const participationPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.follow-up-participation");
+
+    expect(participationPrompt).toMatchObject({ version: 4 });
+    expect(routerPrompt?.text).not.toContain("简单附和");
+    expect(participationPrompt?.text).not.toContain("简单附和");
+  });
 });

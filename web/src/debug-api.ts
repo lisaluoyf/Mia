@@ -56,6 +56,15 @@ export interface DebugModelOption {
   recommended: boolean;
   supportsVision: boolean;
   visionRecommended: boolean;
+  pricing?: {
+    unit: "token_1m" | "image" | "second";
+    inputPrice?: number;
+    outputPrice?: number;
+    price?: number;
+    currency: string;
+    discountRatio?: number;
+    channelName?: string;
+  };
   videoCapabilities?: unknown;
 }
 export interface DebugModelConfigState {

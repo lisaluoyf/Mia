@@ -128,7 +128,6 @@ describe("developer debug snapshots", () => {
       { intent_router: "gpt-image-2" },
       { user_vision_default: "text-only" },
       { user_image_default: "minimax-h3" },
-      { user_video_default: "video-without-options" },
     ]) {
       const rejected = await app.inject({
         method: "PUT",
@@ -149,6 +148,15 @@ describe("developer debug snapshots", () => {
     expect(modelConfig.get("user_vision_default")).toBeNull();
     expect(modelConfig.get("user_image_default")).toBe("gpt-image-2");
     expect(modelConfig.get("user_video_default")).toBe("minimax-h3");
+
+    const validGenericVideo = await app.inject({
+      method: "PUT",
+      url: "/internal/debug/model-config?telegram_user_id=42",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { user_video_default: "video-without-options" },
+    });
+    expect(validGenericVideo.statusCode).toBe(200);
+    expect(modelConfig.get("user_video_default")).toBe("video-without-options");
 
     modelConfig.save({ guest_chat: "retired-chat-model" });
     const savesAroundUnavailable = await app.inject({

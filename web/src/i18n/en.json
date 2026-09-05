@@ -19,5 +19,10 @@
   "accountDisabled": "Your APIMaster account is unavailable.",
   "noKey": "No usable APIMaster API Key was found.",
   "serviceUnavailable": "The service is temporarily unavailable.",
-  "saveFailed": "Could not save your settings. Try again."
+  "saveFailed": "Could not save your settings. Try again.",
+  "priceInput": "Input",
+  "priceDiscount": "discount",
+  "priceUnavailable": "Price unavailable",
+  "pricePerImage": "/ image",
+  "pricePerSecond": "/ sec"
 }

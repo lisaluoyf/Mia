@@ -61,5 +61,6 @@ export function configureDocumentLocale(locale: Locale): void {
 }
 
 export function translator(locale: Locale) {
-  return (key: TranslationKey): string => messages[locale][key] ?? en[key];
+  return (key: TranslationKey): string =>
+    (messages[locale] as Partial<Record<TranslationKey, string>>)[key] ?? en[key];
 }

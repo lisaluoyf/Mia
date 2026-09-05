@@ -153,6 +153,7 @@ button, input { font: inherit; }
 .model-option strong { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; }
 .model-option strong em { padding: 2px 5px; border-radius: 3px; background: #e5f3ec; color: var(--debug-green); font-size: 9px; font-style: normal; }
 .model-option small { overflow: hidden; color: var(--debug-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.model-option small.model-price { color: var(--debug-ink); font-family: inherit; font-size: 11px; font-variant-numeric: tabular-nums; }
 .model-option > svg { flex: 0 0 auto; color: var(--debug-green); }
 .model-picker-empty { margin: 0; padding: 24px 12px; color: var(--debug-muted); font-size: 12px; text-align: center; }
 .model-config-table tr.invalid .model-picker-trigger { border-color: #d87c69; background: #fff9f7; }

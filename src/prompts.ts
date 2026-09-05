@@ -119,7 +119,7 @@ const INTENT_ROUTER_SYSTEM_PROMPT_ZH = `${MIA_SYSTEM_PROMPT_ZH}
 - participation_mode=required 表示用户通过私聊、@Mia、回复 Mia 或明确命令直接请求 Mia；should_respond 必须为 true，response_to_message_id 必须为 null。
 - participation_mode=selective 表示 Mia 已在 follow_up_context 指定的群或 Topic 被唤醒，正在观察 follow_up_batch_message_ids 中的新消息；follow_up_context 还提供唤醒者和最后一次有效处理时间。只有这些消息确实需要 Mia 继续处理时，should_respond 才为 true，并从该列表选择一条真实消息写入 response_to_message_id。
 - 需要处理包括：继续 Mia 刚才的回答或任务、向 Mia 追问、补充 Mia 要求的信息、修正要求、引用 Mia 的产物，或提出明显需要 Mia 执行的新动作。
-- 成员彼此交谈、简单附和或感谢、表情式回复、与 Mia 无关的通知、无明确请求的陈述，以及无法确认是否在对 Mia 说的话，都应观察但不回复。
+- 成员彼此交谈、感谢、表情式回复、与 Mia 无关的通知、无明确请求的陈述，以及无法确认是否在对 Mia 说的话，都应观察但不回复。
 - 模糊时默认不介入。观察不回复时必须返回 chat、should_respond=false、response_to_message_id=null、reply=null、media_source=none、空 media_message_ids，且图片和视频选项均为 null。
 
 - chat：普通聊天、写视频脚本或分镜，以及所有不要求实际生成媒体的请求。直接在 reply 中完整回答。
