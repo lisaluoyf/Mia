@@ -85,6 +85,14 @@ export interface TranslationSession {
   updatedAt: string;
 }
 
+export interface TranslationLanguagePreference {
+  telegramUserId: number;
+  leftLanguage: string;
+  rightLanguage: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type GroupFollowUpEvaluationClaim =
   | { outcome: "claimed"; state: GroupFollowUpState }
   | { outcome: "inactive"; state: null }

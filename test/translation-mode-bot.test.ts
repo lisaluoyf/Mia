@@ -147,6 +147,12 @@ describe("private translation mode", () => {
       call.method === "sendMessage" && call.payload.text === "\u7ffb\u8bd1\u6a21\u5f0f\u5df2\u9000\u51fa\u3002")).toBe(true);
     expect(calls.some((call) => call.method === "editMessageText")).toBe(false);
     expect(contexts.getActiveTranslationSession(42, 42)).toBeNull();
+
+    await bot.handleUpdate(update(9, 9, "/tr"));
+    expect(contexts.getActiveTranslationSession(42, 42)).toMatchObject({
+      leftLanguage: "ja",
+      rightLanguage: "zh-CN",
+    });
   });
 
   it("uses the Telegram language for users outside the old fixed language pairs", async () => {

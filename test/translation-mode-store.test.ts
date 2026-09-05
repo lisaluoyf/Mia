@@ -15,6 +15,10 @@ describe("translation mode store", () => {
     store.enterTranslationSession(42, 42, "zh-CN", "en", started);
     expect(store.getActiveTranslationSession(42, 42, new Date("2026-09-05T10:29:59.999Z"))).not.toBeNull();
     expect(store.getActiveTranslationSession(42, 42, new Date("2026-09-05T10:30:00.000Z"))).toBeNull();
+    expect(store.getTranslationLanguagePreference(42)).toMatchObject({
+      leftLanguage: "zh-CN",
+      rightLanguage: "en",
+    });
   });
 
   it("updates the pair and activity timestamp", () => {
@@ -28,6 +32,19 @@ describe("translation mode store", () => {
       leftLanguage: "zh-CN",
       rightLanguage: "ru",
       lastActivityAt: "2026-09-05T10:10:00.000Z",
+    });
+  });
+
+  it("keeps the last language pair after a session exits", () => {
+    store = new ContextStore(":memory:");
+    store.upsertUser({ telegramUserId: 42, firstName: "Liz", lastName: null, username: null, languageCode: "zh-CN", isBot: false });
+    store.upsertChat({ chatId: 42, type: "private", title: null, username: null, description: null, isForum: false });
+    store.enterTranslationSession(42, 42, "zh-CN", "ko");
+    expect(store.exitTranslationSession(42, 42)).toBe(true);
+    expect(store.getActiveTranslationSession(42, 42)).toBeNull();
+    expect(store.getTranslationLanguagePreference(42)).toMatchObject({
+      leftLanguage: "zh-CN",
+      rightLanguage: "ko",
     });
   });
 

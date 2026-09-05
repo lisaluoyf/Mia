@@ -35,7 +35,13 @@ import {
 import { onboardingMissingFields, type OnboardingEligibility, type OnboardingService } from "../onboarding/service.js";
 import { sameModelId, type ModelSettingsService, type SettingsSnapshot } from "../settings/service.js";
 import type { ContextStore } from "../storage/store.js";
-import type { ConversationScope, GroupConversationScope, GroupFollowUpState, TranslationSession } from "../storage/types.js";
+import type {
+  ConversationScope,
+  GroupConversationScope,
+  GroupFollowUpState,
+  TranslationLanguagePreference,
+  TranslationSession,
+} from "../storage/types.js";
 import { promptReference, promptText } from "../prompts.js";
 import { richMessagePlainText } from "../presentation/rich-message-text.js";
 import { miaResponseFromText, miaResponsePlainText, type MiaResponse } from "../presentation/schema.js";
@@ -77,7 +83,7 @@ interface BotDependencies {
       "markGroupFollowUpHandled" | "expireGroupFollowUp" |
       "markMessageAsTranslation" |
       "enterTranslationSession" | "getActiveTranslationSession" | "touchTranslationSession" |
-      "setTranslationLanguagePair" | "exitTranslationSession">>;
+      "getTranslationLanguagePreference" | "setTranslationLanguagePair" | "exitTranslationSession">>;
   compactor?: ContextCompactor;
   groupCompactor?: GroupContextCompactor;
   groupSummary?: GroupSummaryService;
@@ -125,7 +131,7 @@ type FollowUpStore = Pick<ContextStore,
 
 type TranslationStore = Pick<ContextStore,
   "enterTranslationSession" | "getActiveTranslationSession" | "touchTranslationSession" |
-  "setTranslationLanguagePair" | "exitTranslationSession">;
+  "getTranslationLanguagePreference" | "setTranslationLanguagePair" | "exitTranslationSession">;
 
 function followUpStore(dependencies: BotDependencies): FollowUpStore | null {
   const store = dependencies.contexts as Partial<FollowUpStore>;
@@ -136,7 +142,9 @@ function followUpStore(dependencies: BotDependencies): FollowUpStore | null {
 function translationStore(dependencies: BotDependencies): TranslationStore | null {
   const store = dependencies.contexts as Partial<TranslationStore>;
   return store.enterTranslationSession && store.getActiveTranslationSession && store.touchTranslationSession &&
-    store.setTranslationLanguagePair && store.exitTranslationSession ? store as TranslationStore : null;
+    store.getTranslationLanguagePreference && store.setTranslationLanguagePair && store.exitTranslationSession
+    ? store as TranslationStore
+    : null;
 }
 
 function mediaFromMessage(message: Message, position = 0): MediaInput | null {
@@ -408,7 +416,11 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
 
   const translations = translationStore(dependencies);
   if (message.chat.type === "private" && translations && explicit?.command === "tr") {
-    const pair = defaultTranslationLanguages(message.from.language_code, explicit.instruction);
+    const pair = defaultTranslationLanguages(
+      message.from.language_code,
+      explicit.instruction,
+      translations.getTranslationLanguagePreference(message.from.id),
+    );
     const session = translations.enterTranslationSession(message.from.id, message.chat.id, pair.leftLanguage, pair.rightLanguage);
     await replyPlainTo(ctx, message, translationStatusText(session, locale), {
       reply_markup: translationStatusKeyboard(message.from.id, locale),
@@ -2026,8 +2038,15 @@ const TRANSLATION_PAGE_SIZE = 8;
 function defaultTranslationLanguages(
   languageCode?: string | null,
   requestedTarget?: string,
+  preference?: Pick<TranslationLanguagePreference, "leftLanguage" | "rightLanguage"> | null,
 ): { leftLanguage: TranslationLanguage; rightLanguage: TranslationLanguage } {
-  const pair = defaultTranslationPair(languageCode);
+  const fallback = defaultTranslationPair(languageCode);
+  const leftLanguage = canonicalTranslationLanguage(preference?.leftLanguage) ?? fallback.leftLanguage;
+  const rightLanguage = canonicalTranslationLanguage(preference?.rightLanguage) ??
+    (leftLanguage === "en" ? "zh-CN" : "en");
+  const pair = leftLanguage === rightLanguage
+    ? fallback
+    : { leftLanguage, rightLanguage };
   const requestedLanguage = canonicalTranslationLanguage(requestedTarget);
   return requestedLanguage && requestedLanguage !== pair.leftLanguage
     ? { leftLanguage: pair.leftLanguage, rightLanguage: requestedLanguage }
