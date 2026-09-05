@@ -126,7 +126,12 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
       if (event.key === "Escape") onClose();
     };
     window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      document.body.style.overflow = previousOverflow;
+    };
   }, [onClose]);
 
   return (

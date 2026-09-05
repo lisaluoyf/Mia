@@ -15,8 +15,11 @@ interface TelegramWebApp {
   initDataUnsafe?: { user?: { id?: number; language_code?: string } };
   colorScheme?: "light" | "dark";
   themeParams?: TelegramThemeParams;
+  viewportHeight?: number;
+  viewportStableHeight?: number;
   ready(): void;
   expand(): void;
+  onEvent?(eventType: "viewportChanged", eventHandler: (isStateStable: boolean) => void): void;
   enableClosingConfirmation(): void;
   isVersionAtLeast?(version: string): boolean;
   HapticFeedback?: { notificationOccurred(type: "error" | "success" | "warning"): void };
@@ -36,6 +39,20 @@ export function initializeTelegram(): void {
   const app = telegramApp();
   app?.ready();
   app?.expand();
+  syncTelegramViewport();
+  app?.onEvent?.("viewportChanged", syncTelegramViewport);
+}
+
+function syncTelegramViewport(isStateStable = true): void {
+  const app = telegramApp();
+  if (!app) return;
+
+  const root = document.documentElement;
+  // Telegram updates viewportHeight while its sheet is moving. Keep dialog geometry
+  // anchored to the stable value until that movement has finished.
+  if (isStateStable && app.viewportStableHeight && Number.isFinite(app.viewportStableHeight)) {
+    root.style.setProperty("--mia-sheet-height", `${Math.floor(app.viewportStableHeight * 0.84)}px`);
+  }
 }
 
 export function enableClosingConfirmation(): void {
