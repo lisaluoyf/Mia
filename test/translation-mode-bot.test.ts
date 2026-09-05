@@ -126,18 +126,21 @@ describe("private translation mode", () => {
     expect(calls.some((call) => call.method === "editMessageReplyMarkup")).toBe(true);
 
     await bot.handleUpdate(callbackUpdate(5, "translation:pair:42:side:left", "\u9009\u62e9\u8bed\u8a00\u5bf9\uff1a"));
-    const picker = calls.find((call) =>
-      call.method === "sendMessage" && call.payload.text === "\u9009\u62e9\u5de6\u4fa7\u8bed\u8a00\uff1a");
-    const pickerRows = (picker?.payload.reply_markup as { inline_keyboard?: Array<Array<{ text?: string }>> } | undefined)?.inline_keyboard;
+    expect(calls.some((call) => call.method === "sendMessage" && call.payload.text === "\u9009\u62e9\u5de6\u4fa7\u8bed\u8a00\uff1a")).toBe(false);
+    const pickerEdit = calls.filter((call) => call.method === "editMessageReplyMarkup").at(-1);
+    const pickerRows = (pickerEdit?.payload.reply_markup as { inline_keyboard?: Array<Array<{ text?: string }>> } | undefined)?.inline_keyboard;
     expect(pickerRows?.slice(0, 4).flat()).toHaveLength(8);
 
-    await bot.handleUpdate(callbackUpdate(6, "translation:pair:42:page:left:1", "\u9009\u62e9\u5de6\u4fa7\u8bed\u8a00\uff1a"));
+    await bot.handleUpdate(callbackUpdate(6, "translation:pair:42:page:left:1", "\u9009\u62e9\u8bed\u8a00\u5bf9\uff1a"));
     const pageEdit = calls.filter((call) => call.method === "editMessageReplyMarkup").at(-1);
     const pageRows = (pageEdit?.payload.reply_markup as { inline_keyboard?: Array<Array<{ text?: string }>> } | undefined)?.inline_keyboard;
     expect(pageRows?.slice(0, 4).flat()).toHaveLength(8);
 
-    await bot.handleUpdate(callbackUpdate(7, "translation:pair:42:set:left:ja", "\u9009\u62e9\u5de6\u4fa7\u8bed\u8a00\uff1a"));
+    await bot.handleUpdate(callbackUpdate(7, "translation:pair:42:set:left:ja", "\u9009\u62e9\u8bed\u8a00\u5bf9\uff1a"));
     expect(contexts.getActiveTranslationSession(42, 42)).toMatchObject({ leftLanguage: "ja", rightLanguage: "zh-CN" });
+    const savedPairEdit = calls.filter((call) => call.method === "editMessageReplyMarkup").at(-1);
+    const savedPairRows = (savedPairEdit?.payload.reply_markup as { inline_keyboard?: Array<Array<{ text?: string }>> } | undefined)?.inline_keyboard;
+    expect(savedPairRows?.[0]?.map((button) => button.text)).toEqual(["\u65e5\u8bed", "\u4e2d\u6587"]);
 
     await bot.handleUpdate(callbackUpdate(8, "translation:exit:42", "\u9009\u62e9\u8bed\u8a00\u5bf9\uff1a"));
     expect(calls.some((call) =>

@@ -1346,7 +1346,7 @@ async function handleTranslationCallback(ctx: Context, dependencies: BotDependen
     await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
     return true;
   }
-  if (action.type === "switch" || action.type === "back") {
+  if (action.type === "switch") {
     await ctx.answerCallbackQuery();
     await sendTranslationCallbackState(
       ctx,
@@ -1356,14 +1356,18 @@ async function handleTranslationCallback(ctx: Context, dependencies: BotDependen
     );
     return true;
   }
+  if (action.type === "back") {
+    await ctx.answerCallbackQuery();
+    await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, {
+      reply_markup: translationPairKeyboard(action.ownerId, session, locale),
+    });
+    return true;
+  }
   if (action.type === "side") {
     await ctx.answerCallbackQuery();
-    await sendTranslationCallbackState(
-      ctx,
-      message,
-      botText(locale, action.side === "left" ? "translationChooseLeftLanguage" : "translationChooseRightLanguage"),
-      translationLanguageKeyboard(action.ownerId, action.side, action.page, locale),
-    );
+    await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, {
+      reply_markup: translationLanguageKeyboard(action.ownerId, action.side, action.page, locale),
+    });
     return true;
   }
   if (action.type === "page") {
@@ -1386,12 +1390,9 @@ async function handleTranslationCallback(ctx: Context, dependencies: BotDependen
     return true;
   }
   await ctx.answerCallbackQuery();
-  await sendTranslationCallbackState(
-    ctx,
-    message,
-    botText(locale, "translationChoosePair"),
-    translationPairKeyboard(action.ownerId, saved, locale),
-  );
+  await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, {
+    reply_markup: translationPairKeyboard(action.ownerId, saved, locale),
+  });
   return true;
 }
 
