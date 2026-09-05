@@ -78,8 +78,8 @@ export interface GroupFollowUpState {
 export interface TranslationSession {
   telegramUserId: number;
   chatId: number;
-  userLanguage: string;
-  foreignLanguage: string;
+  leftLanguage: string;
+  rightLanguage: string;
   lastActivityAt: string;
   createdAt: string;
   updatedAt: string;

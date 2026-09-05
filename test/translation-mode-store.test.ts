@@ -25,8 +25,8 @@ describe("translation mode store", () => {
     store.setTranslationLanguagePair(42, 42, "zh-CN", "ru");
     store.touchTranslationSession(42, 42, new Date("2026-09-05T10:10:00.000Z"));
     expect(store.getActiveTranslationSession(42, 42, new Date("2026-09-05T10:39:59.999Z"))).toMatchObject({
-      userLanguage: "zh-CN",
-      foreignLanguage: "ru",
+      leftLanguage: "zh-CN",
+      rightLanguage: "ru",
       lastActivityAt: "2026-09-05T10:10:00.000Z",
     });
   });

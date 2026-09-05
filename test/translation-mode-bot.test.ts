@@ -58,11 +58,11 @@ describe("private translation mode", () => {
   it("translates active private messages without invoking the normal router", async () => {
     const structuredResponse = vi.fn()
       .mockResolvedValueOnce({
-        data: { source: "user_language", translated_text: "Hello" },
+        data: { source: "left_language", translated_text: "Hello" },
         webSearch: { callCount: 0, queries: [], sources: [] },
       })
       .mockResolvedValueOnce({
-        data: { source: "foreign_language", translated_text: "\u4f60\u597d" },
+        data: { source: "right_language", translated_text: "\u4f60\u597d" },
         webSearch: { callCount: 0, queries: [], sources: [] },
       });
     const router = { classify: vi.fn(), model: "gpt-5.4" };
@@ -97,8 +97,8 @@ describe("private translation mode", () => {
 
     await bot.handleUpdate(update(1, 1, "/tr Japanese"));
     expect(contexts.getActiveTranslationSession(42, 42)).toMatchObject({
-      userLanguage: "Chinese (China)",
-      foreignLanguage: "Japanese",
+      leftLanguage: "zh-CN",
+      rightLanguage: "ja",
     });
     await bot.handleUpdate(update(2, 2, "你好"));
 
@@ -117,12 +117,28 @@ describe("private translation mode", () => {
 
     await bot.handleUpdate(callbackUpdate(4, "translation:switch:42", "\u4f60\u597d"));
 
-    expect(calls.some((call) =>
-      call.method === "sendMessage" && call.payload.text === "\u53d1\u9001 /tr \u52a0\u76ee\u6807\u8bed\u8a00\u5373\u53ef\u5207\u6362\u3002\u4f8b\u5982\uff1a/tr \u65e5\u8bed")).toBe(true);
+    const pairEditor = calls.find((call) =>
+      call.method === "sendMessage" && call.payload.text === "\u9009\u62e9\u8bed\u8a00\u5bf9\uff1a");
+    const pairEditorRows = (pairEditor?.payload.reply_markup as { inline_keyboard?: Array<Array<{ text?: string }>> } | undefined)?.inline_keyboard;
+    expect(pairEditorRows?.[0]?.map((button) => button.text)).toEqual(["\u4e2d\u6587", "\u65e5\u8bed"]);
     expect(calls.some((call) => call.method === "editMessageText")).toBe(false);
     expect(calls.some((call) => call.method === "editMessageReplyMarkup")).toBe(true);
 
-    await bot.handleUpdate(callbackUpdate(5, "translation:exit:42", "\u53d1\u9001 /tr \u52a0\u76ee\u6807\u8bed\u8a00\u5373\u53ef\u5207\u6362\u3002\u4f8b\u5982\uff1a/tr \u65e5\u8bed"));
+    await bot.handleUpdate(callbackUpdate(5, "translation:pair:42:side:left", "\u9009\u62e9\u8bed\u8a00\u5bf9\uff1a"));
+    const picker = calls.find((call) =>
+      call.method === "sendMessage" && call.payload.text === "\u9009\u62e9\u5de6\u4fa7\u8bed\u8a00\uff1a");
+    const pickerRows = (picker?.payload.reply_markup as { inline_keyboard?: Array<Array<{ text?: string }>> } | undefined)?.inline_keyboard;
+    expect(pickerRows?.slice(0, 4).flat()).toHaveLength(8);
+
+    await bot.handleUpdate(callbackUpdate(6, "translation:pair:42:page:left:1", "\u9009\u62e9\u5de6\u4fa7\u8bed\u8a00\uff1a"));
+    const pageEdit = calls.filter((call) => call.method === "editMessageReplyMarkup").at(-1);
+    const pageRows = (pageEdit?.payload.reply_markup as { inline_keyboard?: Array<Array<{ text?: string }>> } | undefined)?.inline_keyboard;
+    expect(pageRows?.slice(0, 4).flat()).toHaveLength(8);
+
+    await bot.handleUpdate(callbackUpdate(7, "translation:pair:42:set:left:ja", "\u9009\u62e9\u5de6\u4fa7\u8bed\u8a00\uff1a"));
+    expect(contexts.getActiveTranslationSession(42, 42)).toMatchObject({ leftLanguage: "ja", rightLanguage: "zh-CN" });
+
+    await bot.handleUpdate(callbackUpdate(8, "translation:exit:42", "\u9009\u62e9\u8bed\u8a00\u5bf9\uff1a"));
     expect(calls.some((call) =>
       call.method === "sendMessage" && call.payload.text === "\u7ffb\u8bd1\u6a21\u5f0f\u5df2\u9000\u51fa\u3002")).toBe(true);
     expect(calls.some((call) => call.method === "editMessageText")).toBe(false);
@@ -150,8 +166,50 @@ describe("private translation mode", () => {
     await bot.handleUpdate(update(1, 1, "/tr", "es"));
 
     expect(contexts.getActiveTranslationSession(42, 42)).toMatchObject({
-      userLanguage: "Spanish",
-      foreignLanguage: "English",
+      leftLanguage: "es",
+      rightLanguage: "en",
     });
+  });
+
+  it("normalizes legacy language names before translating an existing session", async () => {
+    contexts.upsertUser({ telegramUserId: 42, firstName: "Liz", lastName: null, username: null, languageCode: "zh-CN", isBot: false });
+    contexts.upsertChat({ chatId: 42, type: "private", title: null, username: null, description: null, isForum: false });
+    contexts.enterTranslationSession(42, 42, "Simplified Chinese", "English");
+    const requestContents: string[] = [];
+    const structuredResponse = vi.fn((_apiKey: string, _model: string, messages: Array<{ content: string }>) => {
+      requestContents.push(messages.at(-1)?.content ?? "");
+      return Promise.resolve({
+        data: { source: "left_language", translated_text: "Hello" },
+        webSearch: { callCount: 0, queries: [], sources: [] },
+      });
+    });
+    const credentials: ChatCredentialProvider = {
+      resolve: vi.fn().mockResolvedValue({ apiKey: "user-key", model: "gpt-5.4", source: "user", fallbackReason: null }),
+    };
+    const bot = createBot("123:test", {
+      client: { structuredResponse, resolveAPIKey: vi.fn() } as unknown as APIMasterClient,
+      chatCredentials: credentials,
+      logger: createLogger("silent"),
+      settings: { getPreferences: vi.fn().mockReturnValue({ chatModel: "gpt-5.4" }) },
+      contexts,
+      mediaStore,
+      botToken: "123:test",
+    });
+    bot.botInfo = botInfo as never;
+    bot.api.config.use((_previous, method, payload) => {
+      if (method === "sendChatAction") return Promise.resolve({ ok: true, result: true } as never);
+      return Promise.resolve({ ok: true, result: {
+        message_id: 400,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 42, type: "private", first_name: "Liz" },
+        from: botInfo,
+        text: typeof (payload as { text?: unknown }).text === "string" ? (payload as { text: string }).text : "",
+      } } as never);
+    });
+
+    await bot.handleUpdate(update(1, 1, "\u4f60\u597d"));
+
+    expect(requestContents.join("\n")).toContain('"left_language":"zh-CN"');
+    expect(contexts.getActiveTranslationSession(42, 42)).toMatchObject({ leftLanguage: "zh-CN", rightLanguage: "en" });
   });
 });

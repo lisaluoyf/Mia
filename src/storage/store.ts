@@ -298,8 +298,8 @@ function translationSessionFromRow(row: TranslationSessionRow): TranslationSessi
   return {
     telegramUserId: row.telegram_user_id,
     chatId: row.chat_id,
-    userLanguage: row.user_language,
-    foreignLanguage: row.foreign_language,
+    leftLanguage: row.user_language,
+    rightLanguage: row.foreign_language,
     lastActivityAt: row.last_activity_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -511,8 +511,8 @@ export class ContextStore {
   enterTranslationSession(
     telegramUserId: number,
     chatId: number,
-    userLanguage: string,
-    foreignLanguage: string,
+    leftLanguage: string,
+    rightLanguage: string,
     now = new Date(),
   ): TranslationSession {
     requireSafeInteger(telegramUserId, "telegramUserId");
@@ -527,7 +527,7 @@ export class ContextStore {
         foreign_language = excluded.foreign_language,
         last_activity_at = excluded.last_activity_at,
         updated_at = CURRENT_TIMESTAMP
-    `).run(telegramUserId, chatId, userLanguage, foreignLanguage, timestamp);
+    `).run(telegramUserId, chatId, leftLanguage, rightLanguage, timestamp);
     const row = this.getTranslationSessionRow(telegramUserId, chatId);
     if (!row) throw new Error("Failed to enter translation session");
     return translationSessionFromRow(row);
@@ -559,13 +559,13 @@ export class ContextStore {
   setTranslationLanguagePair(
     telegramUserId: number,
     chatId: number,
-    userLanguage: string,
-    foreignLanguage: string,
+    leftLanguage: string,
+    rightLanguage: string,
   ): TranslationSession | null {
     this.database.prepare(`
       UPDATE mia_translation_sessions SET user_language = ?, foreign_language = ?, updated_at = CURRENT_TIMESTAMP
       WHERE telegram_user_id = ? AND chat_id = ?
-    `).run(userLanguage, foreignLanguage, telegramUserId, chatId);
+    `).run(leftLanguage, rightLanguage, telegramUserId, chatId);
     const row = this.getTranslationSessionRow(telegramUserId, chatId);
     return row ? translationSessionFromRow(row) : null;
   }

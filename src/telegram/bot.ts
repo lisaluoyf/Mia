@@ -35,13 +35,20 @@ import {
 import { onboardingMissingFields, type OnboardingEligibility, type OnboardingService } from "../onboarding/service.js";
 import { sameModelId, type ModelSettingsService, type SettingsSnapshot } from "../settings/service.js";
 import type { ContextStore } from "../storage/store.js";
-import type { ConversationScope, GroupConversationScope, GroupFollowUpState } from "../storage/types.js";
+import type { ConversationScope, GroupConversationScope, GroupFollowUpState, TranslationSession } from "../storage/types.js";
 import { promptReference, promptText } from "../prompts.js";
 import { richMessagePlainText } from "../presentation/rich-message-text.js";
 import { miaResponseFromText, miaResponsePlainText, type MiaResponse } from "../presentation/schema.js";
 import { renderTelegramRich, type TelegramRichPresentationChunk } from "../presentation/telegram-rich.js";
 import { stickerPrompt, stickerSetTitle } from "../stickers/service.js";
 import { botText, mediaJobLocale, resolveBotLocale, type BotLocale } from "./localization.js";
+import {
+  TRANSLATION_PICKER_LANGUAGES,
+  canonicalTranslationLanguage,
+  defaultTranslationPair,
+  translationLanguageLabel,
+  type TranslationLanguage,
+} from "./translation-languages.js";
 import { groupSummaryPresentation } from "./group-summary-html.js";
 import {
   miaIntroductionActionPrompt,
@@ -70,7 +77,7 @@ interface BotDependencies {
       "markGroupFollowUpHandled" | "expireGroupFollowUp" |
       "markMessageAsTranslation" |
       "enterTranslationSession" | "getActiveTranslationSession" | "touchTranslationSession" |
-      "exitTranslationSession">>;
+      "setTranslationLanguagePair" | "exitTranslationSession">>;
   compactor?: ContextCompactor;
   groupCompactor?: GroupContextCompactor;
   groupSummary?: GroupSummaryService;
@@ -89,7 +96,7 @@ const TRANSLATION_RESULT_SCHEMA = {
   additionalProperties: false,
   required: ["source", "translated_text"],
   properties: {
-    source: { type: "string", enum: ["user_language", "foreign_language"] },
+    source: { type: "string", enum: ["left_language", "right_language"] },
     translated_text: { type: "string", minLength: 1, maxLength: 20_000 },
   },
 } as const;
@@ -118,7 +125,7 @@ type FollowUpStore = Pick<ContextStore,
 
 type TranslationStore = Pick<ContextStore,
   "enterTranslationSession" | "getActiveTranslationSession" | "touchTranslationSession" |
-  "exitTranslationSession">;
+  "setTranslationLanguagePair" | "exitTranslationSession">;
 
 function followUpStore(dependencies: BotDependencies): FollowUpStore | null {
   const store = dependencies.contexts as Partial<FollowUpStore>;
@@ -129,7 +136,7 @@ function followUpStore(dependencies: BotDependencies): FollowUpStore | null {
 function translationStore(dependencies: BotDependencies): TranslationStore | null {
   const store = dependencies.contexts as Partial<TranslationStore>;
   return store.enterTranslationSession && store.getActiveTranslationSession && store.touchTranslationSession &&
-    store.exitTranslationSession ? store as TranslationStore : null;
+    store.setTranslationLanguagePair && store.exitTranslationSession ? store as TranslationStore : null;
 }
 
 function mediaFromMessage(message: Message, position = 0): MediaInput | null {
@@ -320,7 +327,7 @@ async function handleTranslationMessage(
   ctx: Context,
   message: Message,
   text: string,
-  session: { userLanguage: string; foreignLanguage: string },
+  session: TranslationSession,
   dependencies: BotDependencies,
 ): Promise<void> {
   if (!message.from || message.chat.type !== "private") return;
@@ -337,8 +344,8 @@ async function handleTranslationMessage(
         { role: "system", content: promptText("mia.translation-mode", locale) },
         { role: "user", content: JSON.stringify({
           source_text: text,
-          language_pair: { user_language: session.userLanguage, foreign_language: session.foreignLanguage },
-          instruction: "Translate source_text between the two languages. Return only the structured result.",
+          language_pair: { left_language: session.leftLanguage, right_language: session.rightLanguage },
+          instruction: "Identify which side source_text belongs to and translate it into the other language. Return only the structured result.",
         }) },
       ],
       "mia_translation",
@@ -347,7 +354,7 @@ async function handleTranslationMessage(
       { webSearch: false },
     );
     const value = result.data as { source?: unknown; translated_text?: unknown };
-    if ((value.source !== "user_language" && value.source !== "foreign_language") ||
+    if ((value.source !== "left_language" && value.source !== "right_language") ||
         typeof value.translated_text !== "string" || !value.translated_text.trim()) {
       throw new Error("invalid_translation_result");
     }
@@ -395,8 +402,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
 
   const translations = translationStore(dependencies);
   if (message.chat.type === "private" && translations && explicit?.command === "tr") {
-    const languages = defaultTranslationLanguages(message.from.language_code, explicit.instruction);
-    const session = translations.enterTranslationSession(message.from.id, message.chat.id, languages.userLanguage, languages.targetLanguage);
+    const pair = defaultTranslationLanguages(message.from.language_code, explicit.instruction);
+    const session = translations.enterTranslationSession(message.from.id, message.chat.id, pair.leftLanguage, pair.rightLanguage);
     await replyTo(ctx, message, translationStatusText(session, locale), {
       reply_markup: translationStatusKeyboard(message.from.id, locale),
     });
@@ -412,7 +419,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     return;
   }
   if (message.chat.type === "private" && translations) {
-    const activeTranslation = translations.getActiveTranslationSession(message.from.id, message.chat.id);
+    const activeTranslation = getNormalizedTranslationSession(translations, message.from.id, message.chat.id);
     if (activeTranslation && explicit?.command === "new") translations.exitTranslationSession(message.from.id, message.chat.id);
     else if (activeTranslation && explicit) {
       await replyTo(ctx, message, botText(locale, "translationExitButton"));
@@ -1315,31 +1322,72 @@ async function handleTranslationCallback(ctx: Context, dependencies: BotDependen
   const query = ctx.callbackQuery;
   const message = query?.message;
   if (!query?.data || !query.from || !message) return false;
-  const match = /^translation:(switch|exit):(\d+)$/.exec(query.data);
-  if (!match) return false;
-  const ownerId = Number(match[2]);
+  const action = parseTranslationCallback(query.data);
+  if (!action) return false;
   const translations = translationStore(dependencies);
   const locale = resolveBotLocale(query.from.language_code);
-  if (ownerId !== query.from.id || message.chat.type !== "private" || !translations) {
+  if (action.ownerId !== query.from.id || message.chat.type !== "private" || !translations) {
     await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
     return true;
   }
-  if (match[1] === "exit") {
-    translations.exitTranslationSession(ownerId, message.chat.id);
+  if (action.type === "exit") {
+    translations.exitTranslationSession(action.ownerId, message.chat.id);
     await ctx.answerCallbackQuery();
     await sendTranslationCallbackState(ctx, message, botText(locale, "translationModeDisabled"));
     return true;
   }
-  if (match[1] === "switch") {
-    if (!translations.getActiveTranslationSession(ownerId, message.chat.id)) {
-      await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
-      return true;
-    }
-    await ctx.answerCallbackQuery();
-    await sendTranslationCallbackState(ctx, message, botText(locale, "translationChooseTarget"));
+  const session = getNormalizedTranslationSession(translations, action.ownerId, message.chat.id);
+  if (!session) {
+    await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
     return true;
   }
-  return false;
+  if (action.type === "switch" || action.type === "back") {
+    await ctx.answerCallbackQuery();
+    await sendTranslationCallbackState(
+      ctx,
+      message,
+      botText(locale, "translationChoosePair"),
+      translationPairKeyboard(action.ownerId, session, locale),
+    );
+    return true;
+  }
+  if (action.type === "side") {
+    await ctx.answerCallbackQuery();
+    await sendTranslationCallbackState(
+      ctx,
+      message,
+      botText(locale, action.side === "left" ? "translationChooseLeftLanguage" : "translationChooseRightLanguage"),
+      translationLanguageKeyboard(action.ownerId, action.side, action.page, locale),
+    );
+    return true;
+  }
+  if (action.type === "page") {
+    await ctx.answerCallbackQuery();
+    await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, {
+      reply_markup: translationLanguageKeyboard(action.ownerId, action.side, action.page, locale),
+    });
+    return true;
+  }
+  if (action.type !== "set") return true;
+  const updated = updateTranslationPair(session, action.side, action.language);
+  const saved = translations.setTranslationLanguagePair(
+    action.ownerId,
+    message.chat.id,
+    updated.leftLanguage,
+    updated.rightLanguage,
+  );
+  if (!saved) {
+    await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
+    return true;
+  }
+  await ctx.answerCallbackQuery();
+  await sendTranslationCallbackState(
+    ctx,
+    message,
+    botText(locale, "translationChoosePair"),
+    translationPairKeyboard(action.ownerId, saved, locale),
+  );
+  return true;
 }
 
 async function handleCallback(ctx: Context, dependencies: BotDependencies): Promise<void> {
@@ -1960,30 +2008,87 @@ function parseExplicitCommand(text: string): { command: string; instruction: str
   return match ? { command: match[1]?.toLowerCase() ?? "", instruction: match[2]?.trim() ?? "" } : null;
 }
 
+type TranslationSide = "left" | "right";
+
+type TranslationCallback =
+  | { type: "switch" | "exit" | "back"; ownerId: number }
+  | { type: "side" | "page"; ownerId: number; side: TranslationSide; page: number }
+  | { type: "set"; ownerId: number; side: TranslationSide; language: TranslationLanguage };
+
+const TRANSLATION_PAGE_SIZE = 8;
+
 function defaultTranslationLanguages(
   languageCode?: string | null,
   requestedTarget?: string,
-): { userLanguage: string; targetLanguage: string } {
-  const userLanguage = languageNameFromCode(languageCode);
-  const targetLanguage = normalizeTranslationTarget(requestedTarget) ||
-    (languageCode?.trim().toLowerCase().startsWith("en") ? "Chinese" : "English");
-  return { userLanguage, targetLanguage };
+): { leftLanguage: TranslationLanguage; rightLanguage: TranslationLanguage } {
+  const pair = defaultTranslationPair(languageCode);
+  const requestedLanguage = canonicalTranslationLanguage(requestedTarget);
+  return requestedLanguage && requestedLanguage !== pair.leftLanguage
+    ? { leftLanguage: pair.leftLanguage, rightLanguage: requestedLanguage }
+    : pair;
 }
 
-function normalizeTranslationTarget(value?: string): string | null {
-  const target = value?.normalize("NFKC").replace(/\s+/g, " ").trim();
-  return target && target.length <= 80 ? target : null;
+function getNormalizedTranslationSession(
+  store: TranslationStore,
+  telegramUserId: number,
+  chatId: number,
+): TranslationSession | null {
+  const session = store.getActiveTranslationSession(telegramUserId, chatId);
+  if (!session) return null;
+  const leftLanguage = canonicalTranslationLanguage(session.leftLanguage) ?? "en";
+  const rightLanguage = canonicalTranslationLanguage(session.rightLanguage) ??
+    (leftLanguage === "en" ? "zh-CN" : "en");
+  const pair = leftLanguage === rightLanguage
+    ? { leftLanguage, rightLanguage: leftLanguage === "en" ? "zh-CN" as const : "en" as const }
+    : { leftLanguage, rightLanguage };
+  if (pair.leftLanguage === session.leftLanguage && pair.rightLanguage === session.rightLanguage) return session;
+  return store.setTranslationLanguagePair(telegramUserId, chatId, pair.leftLanguage, pair.rightLanguage) ?? null;
 }
 
-function languageNameFromCode(languageCode?: string | null): string {
-  const code = languageCode?.trim();
-  if (!code) return "English";
-  try {
-    const locale = new Intl.Locale(code).toString();
-    return new Intl.DisplayNames(["en"], { type: "language" }).of(locale) ?? locale;
-  } catch {
-    return code;
+function updateTranslationPair(
+  session: TranslationSession,
+  side: TranslationSide,
+  language: TranslationLanguage,
+): Pick<TranslationSession, "leftLanguage" | "rightLanguage"> {
+  if (side === "left") {
+    return language === session.rightLanguage
+      ? { leftLanguage: session.rightLanguage, rightLanguage: session.leftLanguage }
+      : { leftLanguage: language, rightLanguage: session.rightLanguage };
   }
+  return language === session.leftLanguage
+    ? { leftLanguage: session.rightLanguage, rightLanguage: session.leftLanguage }
+    : { leftLanguage: session.leftLanguage, rightLanguage: language };
+}
+
+function parseTranslationCallback(data: string): TranslationCallback | null {
+  const parts = data.split(":");
+  if (parts[0] !== "translation") return null;
+  if ((parts[1] === "switch" || parts[1] === "exit") && parts.length === 3) {
+    const ownerId = Number(parts[2]);
+    return Number.isSafeInteger(ownerId) ? { type: parts[1], ownerId } : null;
+  }
+  if (parts[1] !== "pair" || parts.length < 4) return null;
+  const ownerId = Number(parts[2]);
+  if (!Number.isSafeInteger(ownerId)) return null;
+  if (parts[3] === "back" && parts.length === 4) return { type: "back", ownerId };
+  const side = parts[4] === "left" || parts[4] === "right" ? parts[4] : null;
+  if (!side) return null;
+  if (parts[3] === "side" && parts.length === 5) return { type: "side", ownerId, side, page: 0 };
+  if (parts[3] === "page" && parts.length === 6) {
+    const page = Number(parts[5]);
+    return Number.isInteger(page) && page >= 0 && page < translationPageCount()
+      ? { type: "page", ownerId, side, page }
+      : null;
+  }
+  if (parts[3] === "set" && parts.length === 6) {
+    const language = canonicalTranslationLanguage(parts[5]);
+    return language ? { type: "set", ownerId, side, language } : null;
+  }
+  return null;
+}
+
+function translationPageCount(): number {
+  return Math.ceil(TRANSLATION_PICKER_LANGUAGES.length / TRANSLATION_PAGE_SIZE);
 }
 
 function translationStatusKeyboard(userId: number, locale: BotLocale, includeCopyText?: string): InlineKeyboard {
@@ -1996,9 +2101,39 @@ function translationStatusKeyboard(userId: number, locale: BotLocale, includeCop
     .text(botText(locale, "translationExitButton"), `translation:exit:${userId}`);
 }
 
-function translationStatusText(session: { userLanguage: string; foreignLanguage: string }, locale: BotLocale): string {
+function translationPairKeyboard(userId: number, session: TranslationSession, locale: BotLocale): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(translationLanguageLabel(session.leftLanguage as TranslationLanguage, locale), `translation:pair:${userId}:side:left`)
+    .text(translationLanguageLabel(session.rightLanguage as TranslationLanguage, locale), `translation:pair:${userId}:side:right`)
+    .row()
+    .text(botText(locale, "translationExitButton"), `translation:exit:${userId}`);
+}
+
+function translationLanguageKeyboard(
+  userId: number,
+  side: TranslationSide,
+  page: number,
+  locale: BotLocale,
+): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  const start = page * TRANSLATION_PAGE_SIZE;
+  const languages = TRANSLATION_PICKER_LANGUAGES.slice(start, start + TRANSLATION_PAGE_SIZE);
+  for (let index = 0; index < languages.length; index += 2) {
+    const first = languages[index];
+    const second = languages[index + 1];
+    if (first) keyboard.text(translationLanguageLabel(first, locale, { picker: true }), `translation:pair:${userId}:set:${side}:${first}`);
+    if (second) keyboard.text(translationLanguageLabel(second, locale, { picker: true }), `translation:pair:${userId}:set:${side}:${second}`);
+    keyboard.row();
+  }
+  if (page > 0) keyboard.text(botText(locale, "translationPreviousButton"), `translation:pair:${userId}:page:${side}:${page - 1}`);
+  if (page < translationPageCount() - 1) keyboard.text(botText(locale, "translationNextButton"), `translation:pair:${userId}:page:${side}:${page + 1}`);
+  if (page > 0 || page < translationPageCount() - 1) keyboard.row();
+  return keyboard.text(botText(locale, "translationBackButton"), `translation:pair:${userId}:back`);
+}
+
+function translationStatusText(session: TranslationSession, locale: BotLocale): string {
   return botText(locale, "translationModeEnabled", {
-    pair: `${session.userLanguage} ↔ ${session.foreignLanguage}`,
+    pair: `${translationLanguageLabel(session.leftLanguage as TranslationLanguage, locale)} ↔ ${translationLanguageLabel(session.rightLanguage as TranslationLanguage, locale)}`,
   });
 }
 
