@@ -136,6 +136,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] 身份服务地址修复（2026-09-05）：发现 Mia 的 `baseUrl` 和 `internalBaseUrl` 均为 new-api `127.0.0.1:3001`；深链确认改为强制使用独立的 `APIMASTER_IDENTITY_BASE_URL=127.0.0.1:3000`，提交 `901539b` 已发布。确认失败现在区分真实过期和服务暂时不可用，并只记录 Telegram 用户 ID 与 HTTP 状态。生产生成测试码后，经运行中的身份服务确认返回成功、数据库状态为 `confirmed`；Mia 健康检查 `200`。new-api 未修改、未重启。
 - [x] 已绑定账户登录修复与文案更新（2026-09-05）：Telegram 身份已绑定 APIMaster 用户时，控制台侧遗留的 Telegram 字段冲突不再拦截 APIMaster 登录；新 TG-only 账号仍保留控制台绑定失败保护。网页登录回调和 Bot 深链完成回调使用同一规则。APIMaster 修复提交 `6059b7f` 已包含在生产 Web `4c5941`，服务器生产构建、PM2 滚动 reload 与本机 HTTP `200` 已验证。Mia 确认消息更新为“马上开始 AI 之旅 / 点击按钮，马上登录”，按钮为“登录 APIMaster”；提交 `0eeb4e7` 已包含在生产 Mia `1eb153a`，原子发布健康检查通过，上一版 release 保留为回滚点。new-api 未修改、未重启。
 - [x] 深链复用旧账号与误建账号清理（2026-09-05）：移除 Bot 深链对旧 Telegram 绑定查询的跳过逻辑，统一先查 APIMaster 绑定和历史 `new-api` Telegram 绑定，确认后才创建 TG-only 账号。生产提交 `7768f70` 已构建并发布，服务器 Web PM2 滚动 reload 后 HTTP `200`；验证旧邮箱账号与 `new-api` 绑定一致，删除本次误建的唯一无邮箱 TG-only APIMaster 账号及其未领取体验记录，未发现对应控制台镜像，旧账号与 `new-api` 均未删除或修改。
+- [x] 解绑联动修复（2026-09-05）：`new-api` 提交 `a7a7fc8` 已按精确 SHA 构建 GHCR 镜像并完成蓝绿发布；点击控制台“解绑”时，同时清除 `new-api` 的 Telegram 入群验证和 APIMaster `user_social_bindings(provider=telegram)` 登录绑定，不删除邮箱账号、余额、API Key 或订阅。生产 `api.apimaster.ai/api/status` 与 `apimaster.ai/api/status` 均返回 `200`，版本探针为 `a7a7fc8e...`，新实例健康、旧实例已排空停止；APIMaster Web 与 Mia 未修改、未重启。
 - [ ] 使用真实 Telegram 客户端走完“网页点击 -> Telegram 打开 Bot -> Start -> 立即登录 -> 浏览器登录完成”人工验收，并检查已绑定账户、新 TG-only 账户和重复点击的体验。
 
 ## 私聊助手
