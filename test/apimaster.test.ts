@@ -9,6 +9,7 @@ function createClient(fetcher: typeof fetch): APIMasterClient {
   return new APIMasterClient({
     baseUrl: "https://apimaster.example",
     internalBaseUrl: "http://127.0.0.1:3000",
+    identityBaseUrl: "http://127.0.0.1:3000",
     serviceKey: "internal-secret-value",
     timeoutMs: 5000,
     fetcher,
@@ -41,11 +42,15 @@ describe("APIMaster client", () => {
       data: { login_url: "https://apimaster.example/api/auth/telegram/deep-link/complete?code=abc" },
     }));
     const client = createClient(fetcher);
-    await expect(client.confirmTelegramDeepLinkLogin({
+    const confirmation = await client.confirmTelegramDeepLinkLogin({
       code: "abc", telegramUserId: 123456, firstName: "Lisa", username: "lisa", languageCode: "zh-CN",
-    })).resolves.toContain("deep-link/complete");
+    });
+    expect(confirmation.kind).toBe("confirmed");
+    if (confirmation.kind === "confirmed") {
+      expect(confirmation.loginUrl).toContain("deep-link/complete");
+    }
     expect(fetcher.mock.calls[0]?.[0]).toBe(
-      "https://apimaster.example/api/auth/telegram/deep-link/confirm",
+      "http://127.0.0.1:3000/api/auth/telegram/deep-link/confirm",
     );
     const [, init] = fetcher.mock.calls[0] ?? [];
     const body: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;

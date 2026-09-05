@@ -5,6 +5,7 @@ import { loadConfig } from "../src/config.js";
 const requiredEnvironment = {
   TELEGRAM_BOT_TOKEN: "123:test-token",
   APIMASTER_BASE_URL: "https://apimaster.example",
+  APIMASTER_IDENTITY_BASE_URL: "http://127.0.0.1:3000",
   MIA_INTERNAL_SERVICE_KEY: "internal-test-key-long-enough",
 };
 

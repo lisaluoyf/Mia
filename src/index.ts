@@ -30,6 +30,7 @@ async function main(): Promise<void> {
   const client = new APIMasterClient({
     baseUrl: config.apimasterBaseUrl,
     internalBaseUrl: config.apimasterInternalBaseUrl,
+    identityBaseUrl: config.apimasterIdentityBaseUrl,
     serviceKey: config.miaInternalServiceKey,
     timeoutMs: config.requestTimeoutMs,
   });

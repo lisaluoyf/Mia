@@ -196,6 +196,11 @@ export interface StructuredResponseResult {
   webSearch: WebSearchUsage;
 }
 
+export type TelegramDeepLinkConfirmation =
+  | { kind: "confirmed"; loginUrl: string }
+  | { kind: "expired" }
+  | { kind: "unavailable"; status: number | null };
+
 export interface MediaBinary {
   bytes: Uint8Array;
   mimeType: string;
@@ -226,6 +231,7 @@ export interface VideoSubmitInput {
 interface ClientOptions {
   baseUrl: string;
   internalBaseUrl: string;
+  identityBaseUrl: string;
   serviceKey: string;
   timeoutMs: number;
   fetcher?: Fetcher;
@@ -285,11 +291,11 @@ export class APIMasterClient {
     lastName?: string | null;
     username?: string | null;
     languageCode?: string | null;
-  }): Promise<string | null> {
+  }): Promise<TelegramDeepLinkConfirmation> {
     let response: Response;
     try {
       response = await this.fetcher(
-        `${this.options.baseUrl}/api/auth/telegram/deep-link/confirm`,
+        `${this.options.identityBaseUrl}/api/auth/telegram/deep-link/confirm`,
         {
           method: "POST",
           headers: {
@@ -308,12 +314,20 @@ export class APIMasterClient {
         },
       );
     } catch {
-      return null;
+      return { kind: "unavailable", status: null };
     }
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch(() => undefined);
+      const parsedError = errorResponseSchema.safeParse(payload);
+      return response.status === 400 && parsedError.success && parsedError.data.code === "expired_or_invalid"
+        ? { kind: "expired" }
+        : { kind: "unavailable", status: response.status };
+    }
     const payload: unknown = await response.json().catch(() => undefined);
     const parsed = telegramDeepLinkLoginResponseSchema.safeParse(payload);
-    return parsed.success ? parsed.data.data.login_url : null;
+    return parsed.success
+      ? { kind: "confirmed", loginUrl: parsed.data.data.login_url }
+      : { kind: "unavailable", status: response.status };
   }
 
   async resolveDebugTelegramUsers(emails: readonly string[]): Promise<number[]> {

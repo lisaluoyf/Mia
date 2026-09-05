@@ -2182,7 +2182,7 @@ async function handleTelegramDeepLinkLogin(
 ): Promise<void> {
   if (!message.from || message.chat.type !== "private") return;
   const locale = resolveBotLocale(message.from.language_code);
-  const loginUrl = await dependencies.client.confirmTelegramDeepLinkLogin({
+  const confirmation = await dependencies.client.confirmTelegramDeepLinkLogin({
     code,
     telegramUserId: message.from.id,
     firstName: message.from.first_name,
@@ -2190,12 +2190,20 @@ async function handleTelegramDeepLinkLogin(
     ...(message.from.username ? { username: message.from.username } : {}),
     ...(message.from.language_code ? { languageCode: message.from.language_code } : {}),
   });
-  if (!loginUrl) {
+  if (confirmation.kind === "expired") {
     await replyPlainTo(ctx, message, botText(locale, "telegramLoginExpired"));
     return;
   }
+  if (confirmation.kind === "unavailable") {
+    dependencies.logger.warn(
+      { telegramUserId: message.from.id, status: confirmation.status },
+      "Telegram deep-link confirmation is unavailable",
+    );
+    await replyPlainTo(ctx, message, botText(locale, "telegramLoginUnavailable"));
+    return;
+  }
   await replyPlainTo(ctx, message, botText(locale, "telegramLoginConfirmed"), {
-    reply_markup: new InlineKeyboard().url(botText(locale, "telegramLoginButton"), loginUrl),
+    reply_markup: new InlineKeyboard().url(botText(locale, "telegramLoginButton"), confirmation.loginUrl),
   });
 }
 

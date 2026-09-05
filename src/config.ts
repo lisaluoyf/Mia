@@ -4,6 +4,7 @@ const environmentSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().trim().min(1),
   APIMASTER_BASE_URL: z.url(),
   APIMASTER_INTERNAL_BASE_URL: z.url().optional(),
+  APIMASTER_IDENTITY_BASE_URL: z.url(),
   MIA_INTERNAL_SERVICE_KEY: z.string().trim().min(16),
   HOST: z.string().trim().min(1).default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3010),
@@ -28,6 +29,7 @@ export interface AppConfig {
   telegramBotToken: string;
   apimasterBaseUrl: string;
   apimasterInternalBaseUrl: string;
+  apimasterIdentityBaseUrl: string;
   miaInternalServiceKey: string;
   host: string;
   port: number;
@@ -58,6 +60,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     apimasterInternalBaseUrl: withoutTrailingSlash(
       parsed.APIMASTER_INTERNAL_BASE_URL ?? parsed.APIMASTER_BASE_URL,
     ),
+    apimasterIdentityBaseUrl: withoutTrailingSlash(parsed.APIMASTER_IDENTITY_BASE_URL),
     miaInternalServiceKey: parsed.MIA_INTERNAL_SERVICE_KEY,
     host: parsed.HOST,
     port: parsed.PORT,

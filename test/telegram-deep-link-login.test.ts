@@ -24,9 +24,10 @@ describe("Telegram deep-link login", () => {
   });
 
   it("confirms a private login start and never sends the code to the model router", async () => {
-    const confirmTelegramDeepLinkLogin = vi.fn().mockResolvedValue(
-      "https://apimaster.example/api/auth/telegram/deep-link/complete?code=test",
-    );
+    const confirmTelegramDeepLinkLogin = vi.fn().mockResolvedValue({
+      kind: "confirmed",
+      loginUrl: "https://apimaster.example/api/auth/telegram/deep-link/complete?code=test",
+    });
     const classify = vi.fn();
     mediaStore = new MediaStore(":memory:");
     const bot = createBot("123:test", {
