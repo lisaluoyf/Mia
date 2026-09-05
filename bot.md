@@ -64,9 +64,9 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 
 | 组件 | 当前基线 | 状态 |
 | --- | --- | --- |
-| Mia | `57772e6` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、精简版专用群聊总结、结构化 Telegram 回复、群聊唤醒后智能连续跟进、媒体与贴纸能力、Responses 自动 Web Search 和开发者 Debug 控制台 |
+| Mia | `2499e2e` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、精简版专用群聊总结、结构化 Telegram 回复、群聊唤醒后智能连续跟进、媒体与贴纸能力、Responses 自动 Web Search、开发者 Debug 控制台和 Telegram Bot 深链登录确认 |
 | APIMaster new-api | `9130c1d` | GHCR 镜像蓝绿部署，提供 Telegram 用户 Key 解析、规范化 Mia 模型目录、产品名和 Debug 身份解析 |
-| APIMaster Web | `b1d5573` | Next.js PM2 双实例运行，提供 Telegram 登录与 TG-only 账号、登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
+| APIMaster Web | `08b95e5` | Next.js PM2 双实例运行，提供 Telegram 登录与 TG-only 账号、登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
 | Mini App | `/mia/` | 已由 Nginx 公开，Telegram 默认菜单按钮 `Mia` 已配置 |
 | 持久化 | `/var/lib/mia/mia.sqlite` | schema v2，保存用户模型设置与分作用域的会话数据，WAL 模式 |
 
@@ -123,6 +123,16 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 生产模型目录只展示用户现有 Key、分组和启用通道交集中实际可调用的模型。当前只读探针可见 `Nano Banana 2`、`GPT Image 2` 两个图片模型，以及推荐视频模型 `MiniMax H3`；`Nano Banana` 和 `Nano Banana Pro` 的分类与产品名映射已经实现，但生产通道/分组尚未使其实际可用，因此不会在 Mini App 中虚假展示。
 
 当前能力边界：聊天、图片、视觉和视频模型偏好均已接入生产实现。媒体执行链路、连续上下文和长期记忆已经部署，但尚未完成真实 Telegram 媒体生成、多轮图片追问和 10 轮记忆整理验收。
+
+### Telegram Bot 深链登录（已部署，待真实客户端验收）
+
+- [x] APIMaster 登录/注册页的 Telegram 入口改为直接打开 `t.me/apimasterai_bot?start=login_<一次性码>`；不再加载 Telegram 网页组件、弹出手机号授权页或显示入口加载转圈。
+- [x] 一次性码只在 APIMaster 保存哈希，5 分钟有效；确认、完成和已消费状态均由服务端原子更新，重复 Bot `/start` 只对同一 Telegram 用户幂等确认，浏览器完成链接只能使用一次。
+- [x] Mia 仅在私聊处理 `/start login_<码>`，先通过内部服务鉴权向 APIMaster 确认 Telegram 身份，再发出原生“立即登录 / Log in now”内联按钮；该启动载荷不进入翻译、意图路由或大模型。
+- [x] 最终网页回跳复用现有 TG-only 账号创建、账号冲突校验、new-api 控制台会话、Telegram 绑定、显示名同步、试用风控和 APIMaster Session Cookie 链路；不修改或重启 new-api。
+- [x] 本地验证：Mia 267/267 测试、ESLint、前后端 TypeScript、生产构建；APIMaster Telegram 登录签名回归测试、ESLint、生产构建与差异检查通过。
+- [x] 生产验证（2026-09-05）：APIMaster `08b95e5` 和 Mia `2499e2e` 均按精确 GitHub SHA 发布；APIMaster 登录页返回 `200`，未登录认证接口返回预期 `401`，深链入口实际生成 `t.me/...start=login_...`，内部确认接口未授权返回 `401`，Mia `/health` 返回 `200`、PM2 `online`。
+- [ ] 使用真实 Telegram 客户端走完“网页点击 -> Telegram 打开 Bot -> Start -> 立即登录 -> 浏览器登录完成”人工验收，并检查已绑定账户、新 TG-only 账户和重复点击的体验。
 
 ## 私聊助手
 
