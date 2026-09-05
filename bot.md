@@ -254,7 +254,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 
 生产发布 `57772e6` 已完成精确 SHA 部署；服务器现场构建、内部 `/health`、PM2 `online`/零重启、SQLite 完整性、新状态表 schema、空错误日志、3 版本保留及 APIMaster 公共状态探针均通过（2026-09-03）。真实 Telegram 群中的分段补充、成员闲聊静默、成功处理续期、10 分钟休眠和 Topic 隔离仍需客户端人工验收。
 
-### 私聊翻译模式（本地开发完成，待发布）
+### 私聊翻译模式（已部署，待真实 Telegram 验收）
 
 - [x] `/tr` 进入、`/ntr` 退出；翻译模式只处理私聊文字，不进入普通意图路由或媒体流程。
 - [x] 翻译 Prompt 独立存放为 `mia.translation-mode`，自动识别来源语言，在当前语言对之间互译，只输出译文。
@@ -263,7 +263,8 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - [x] 翻译输入和输出标记为 `translation`，不进入普通会话上下文和长期记忆整理，避免把他人内容提取为用户目标或偏好。
 - [x] 本地验证通过：翻译状态过期、语言对切换、`/tr` 分流、普通路由不调用、复制按钮和 `/ntr` 退出。
 - [x] 已补充验证：`translation` 消息从普通上下文查询中排除。
-- [ ] 生产发布后验证真实 Telegram 私聊中的中英、中俄互译、复制按钮和 30 分钟自动退出。
+- [x] 生产发布 `c1e0749` 已完成精确 SHA 部署；`/health`、PM2、SQLite 完整性和 `mia_translation_sessions` 表检查通过（2026-09-05）。
+- [ ] 真实 Telegram 私聊中验证中英、中俄互译、复制按钮和 30 分钟自动退出。
 
 存储底座提交：`f69dd98`；Telegram 消息采集接入提交：`57ca489`。两者与 Mini App 共用同一个 `DATABASE_PATH` SQLite 文件，但通过表、联合主键和作用域约束逻辑隔离。`9fff043` 已把历史上下文、回复关系和相关图片接入生产模型请求。
 
