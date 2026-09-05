@@ -32,7 +32,7 @@ export const INTENT_ROUTER_SYSTEM_PROMPT = `${MIA_SYSTEM_PROMPT}
 - participation_mode=required 表示用户通过私聊、@Mia、回复 Mia 或明确命令直接请求 Mia；should_respond 必须为 true，response_to_message_id 必须为 null。
 - participation_mode=selective 表示 Mia 已在 follow_up_context 指定的群或 Topic 被唤醒，正在观察 follow_up_batch_message_ids 中的新消息；follow_up_context 还提供唤醒者和最后一次有效处理时间。只有这些消息确实需要 Mia 继续处理时，should_respond 才为 true，并从该列表选择一条真实消息写入 response_to_message_id。
 - 需要处理包括：继续 Mia 刚才的回答或任务、向 Mia 追问、补充 Mia 要求的信息、修正要求、引用 Mia 的产物，或提出明显需要 Mia 执行的新动作。
-- 成员彼此交谈、简单附和或感谢、表情式回复、与 Mia 无关的通知、无明确请求的陈述，以及无法确认是否在对 Mia 说的话，都应观察但不回复。
+- 成员彼此交谈、感谢、表情式回复、与 Mia 无关的通知、无明确请求的陈述，以及无法确认是否在对 Mia 说的话，都应观察但不回复。
 - 模糊时默认不介入。观察不回复时必须返回 chat、should_respond=false、response_to_message_id=null、reply=null、media_source=none、空 media_message_ids，且图片和视频选项均为 null。
 
 - chat：普通聊天、写视频脚本或分镜，以及所有不要求实际生成媒体的请求。直接在 reply 中完整回答。
@@ -80,7 +80,7 @@ export const FOLLOW_UP_PARTICIPATION_SYSTEM_PROMPT = `你只负责判断一个�
 
 规则：
 - 需要介入：继续 Mia 刚才的回答或任务、追问 Mia、补充 Mia 要求的信息、修正要求、引用 Mia 的产物，或明确提出需要 Mia 执行的新动作。
-- 不介入：成员之间交谈、简单附和或感谢、表情式回复、与 Mia 无关的通知、无明确请求的陈述，以及无法确认是在对 Mia 说的话。
+- 不介入：成员之间交谈、感谢、表情式回复、与 Mia 无关的通知、无明确请求的陈述，以及无法确认是在对 Mia 说的话。
 - 短追问和省略句必须结合最近对话判断。例如 Mia 刚回答“明天天气”，随后同一成员问“后天呢？”，这是明确追问，应介入。
 - 模糊时不介入，不要在群聊里抢话。
 - should_respond=true 时，response_to_message_id 必须从 follow_up_batch_message_ids 中选择最适合回复的一条；否则必须为 null。
@@ -265,7 +265,7 @@ export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
   },
   {
     id: "mia.intent-router",
-    version: 8,
+    version: 9,
     name: "意图路由",
     purpose: "实际发送的组合 Prompt：包含 mia.system，并判断意图、实时搜索、闲聊机会和明确画像更新",
     text: INTENT_ROUTER_SYSTEM_PROMPT,
@@ -274,7 +274,7 @@ export const PROMPT_LIBRARY: readonly PromptDefinition[] = [
   },
   {
     id: "mia.follow-up-participation",
-    version: 1,
+    version: 2,
     name: "群聊连续跟进参与判断",
     purpose: "快速判断已唤醒群聊中的新消息是否需要 Mia 介入，并选择回复目标",
     text: FOLLOW_UP_PARTICIPATION_SYSTEM_PROMPT,

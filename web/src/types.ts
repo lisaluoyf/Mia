@@ -1,6 +1,16 @@
 export type Capability = "chat" | "image" | "video";
 export type PreferenceCapability = Capability | "vision";
 
+export interface ModelPricing {
+  unit: "token_1m" | "image" | "second";
+  inputPrice?: number;
+  outputPrice?: number;
+  price?: number;
+  currency: string;
+  discountRatio?: number;
+  channelName?: string;
+}
+
 export interface ModelOption {
   id: string;
   displayName: string;
@@ -9,6 +19,7 @@ export interface ModelOption {
   recommended: boolean;
   supportsVision: boolean;
   visionRecommended: boolean;
+  pricing?: ModelPricing;
   videoCapabilities?: {
     modes: string[];
     durationSeconds: { min: number; max: number; default: number };

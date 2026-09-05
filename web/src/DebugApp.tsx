@@ -53,6 +53,22 @@ function ago(value: string): string {
   return new Date(value).toLocaleString("zh-CN");
 }
 
+function formatDebugModelPrice(model: DebugModelOption): string {
+  const pricing = model.pricing;
+  if (!pricing) return "价格暂不可用";
+  const format = (value: number | undefined) => {
+    if (value === undefined || !Number.isFinite(value)) return "-";
+    const digits = value >= 1 ? 2 : value >= 0.1 ? 3 : 4;
+    return `$${value.toFixed(digits)}`;
+  };
+  const text = pricing.unit === "token_1m"
+    ? `输入 ${format(pricing.inputPrice)}`
+    : pricing.unit === "image" ? `${format(pricing.price)} / 张` : `${format(pricing.price)} / 秒`;
+  return pricing.discountRatio === undefined
+    ? text
+    : `${text} · 折扣 ${(pricing.discountRatio * 100).toFixed(0)}%`;
+}
+
 function JsonBlock({ value }: { value: unknown }) {
   return <pre className="debug-code">{typeof value === "string" ? value : JSON.stringify(value, null, 2)}</pre>;
 }
@@ -222,7 +238,7 @@ function ModelPicker({ config, models, value, onChange }: { config: DebugModelCo
     config.capability === "vision"
       ? model.capability === "chat" && model.supportsVision
       : config.capability === "video"
-        ? model.capability === "video" && model.videoCapabilities !== undefined
+        ? model.capability === "video"
         : model.capability === config.capability
   )).sort((left, right) => Number(right.recommended) - Number(left.recommended) || left.displayName.localeCompare(right.displayName)), [config.capability, models]);
   const selected = candidates.find((model) => model.id.toLowerCase() === value.toLowerCase());
@@ -252,7 +268,7 @@ function ModelPicker({ config, models, value, onChange }: { config: DebugModelCo
       <div className="model-picker-options">
         {config.capability === "vision" && normalizedQuery === "" && <button type="button" className="model-option" onClick={() => choose("")}><span><strong>自动选择</strong><small>优先使用推荐的视觉模型</small></span>{value === "" && <Check size={16} />}</button>}
         {visible.map((model) => <button type="button" className="model-option" key={model.id} onClick={() => choose(model.id)}>
-          <span><strong>{model.displayName}{(model.recommended || (config.capability === "vision" && model.visionRecommended)) && <em>推荐</em>}</strong><small>{model.vendor} · {model.id}</small></span>
+          <span><strong>{model.displayName}{(model.recommended || (config.capability === "vision" && model.visionRecommended)) && <em>推荐</em>}</strong><small>{model.vendor} · {model.id}</small><small className="model-price">{formatDebugModelPrice(model)}</small></span>
           {model.id.toLowerCase() === value.toLowerCase() && <Check size={16} />}
         </button>)}
         {visible.length === 0 && normalizedQuery !== "" && <p className="model-picker-empty">没有匹配的模型</p>}

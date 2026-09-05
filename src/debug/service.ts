@@ -96,7 +96,7 @@ export class DebugService {
         definition.capability === "vision"
           ? model.capability === "chat" && model.supportsVision
           : definition.capability === "video"
-            ? model.capability === "video" && model.videoCapabilities !== undefined
+            ? model.capability === "video"
             : model.capability === definition.capability
       );
       if (!valid) throw new InvalidModelConfigError();

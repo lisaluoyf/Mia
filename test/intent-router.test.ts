@@ -466,8 +466,17 @@ describe("Mia intent router", () => {
     const basePrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.system");
     const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
     expect(basePrompt).toMatchObject({ kind: "base" });
-    expect(routerPrompt).toMatchObject({ version: 8, kind: "composed", includes: ["mia.system"] });
+    expect(routerPrompt).toMatchObject({ version: 9, kind: "composed", includes: ["mia.system"] });
     expect(routerPrompt?.text).toContain(basePrompt?.text ?? "missing");
     expect(routerPrompt?.text).toContain("不得把段落正文放进 paragraph.items");
+  });
+
+  it("does not classify short agreement as an automatic non-participation reason", () => {
+    const routerPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.intent-router");
+    const participationPrompt = PROMPT_LIBRARY.find((prompt) => prompt.id === "mia.follow-up-participation");
+
+    expect(participationPrompt).toMatchObject({ version: 2 });
+    expect(routerPrompt?.text).not.toContain("简单附和");
+    expect(participationPrompt?.text).not.toContain("简单附和");
   });
 });

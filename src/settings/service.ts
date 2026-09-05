@@ -29,7 +29,7 @@ function candidatesFor(capability: ModelPreferenceCapability, catalog: ModelCata
     capability === "vision"
       ? model.capability === "chat" && model.supportsVision
       : capability === "video"
-        ? model.capability === "video" && model.videoCapabilities !== undefined
+        ? model.capability === "video"
         : model.capability === capability
   ));
 }

@@ -3,6 +3,16 @@ import { DEFAULT_MODELS } from "../constants.js";
 export type ModelCapability = "chat" | "image" | "video";
 export type ModelPreferenceCapability = ModelCapability | "vision";
 
+export interface ModelPricing {
+  unit: "token_1m" | "image" | "second";
+  inputPrice?: number;
+  outputPrice?: number;
+  price?: number;
+  currency: string;
+  discountRatio?: number;
+  channelName?: string;
+}
+
 export interface ModelOption {
   id: string;
   displayName: string;
@@ -11,6 +21,7 @@ export interface ModelOption {
   recommended: boolean;
   supportsVision: boolean;
   visionRecommended: boolean;
+  pricing?: ModelPricing;
   videoCapabilities?: {
     modes: Array<"text_to_video" | "image_to_video">;
     durationSeconds: { min: number; max: number; default: number };

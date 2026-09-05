@@ -55,6 +55,28 @@ function sameModelId(left: string | null, right: string | null): boolean {
   return left !== null && right !== null && left.toLowerCase() === right.toLowerCase();
 }
 
+function formatModelPrice(model: ModelOption, t: AppProps["t"]): string {
+  const pricing = model.pricing;
+  if (!pricing) return t("priceUnavailable");
+  const format = (value: number | undefined) => {
+    if (value === undefined || !Number.isFinite(value)) return "-";
+    const digits = value >= 1 ? 2 : value >= 0.1 ? 3 : 4;
+    return `$${value.toFixed(digits)}`;
+  };
+  let text: string;
+  if (pricing.unit === "token_1m") {
+    text = `${t("priceInput")} ${format(pricing.inputPrice)}`;
+  } else if (pricing.unit === "image") {
+    text = `${format(pricing.price)} ${t("pricePerImage")}`;
+  } else {
+    text = `${format(pricing.price)} ${t("pricePerSecond")}`;
+  }
+  if (pricing.discountRatio !== undefined && Number.isFinite(pricing.discountRatio)) {
+    text += ` · ${t("priceDiscount")} ${(pricing.discountRatio * 100).toFixed(0)}%`;
+  }
+  return text;
+}
+
 interface ModelSheetProps {
   capability: PreferenceCapability;
   models: ModelOption[];
@@ -128,6 +150,7 @@ function ModelSheet({ capability, models, selected, saving, t, onSelect, onClose
                 {model.vendor && model.vendor.toLowerCase() !== "custom" && (
                   <span className="model-meta">{model.vendor}</span>
                 )}
+                <span className="model-price">{formatModelPrice(model, t)}</span>
               </span>
               {(capability === "vision" ? model.visionRecommended : model.recommended)
                 && <span className="recommended">{t("recommended")}</span>}
@@ -244,7 +267,7 @@ export function App({ t }: AppProps) {
             const options = data.models.filter((model) => capability === "vision"
               ? model.capability === "chat" && model.supportsVision
               : capability === "video"
-                ? model.capability === "video" && model.videoCapabilities !== undefined
+                ? model.capability === "video"
                 : model.capability === capability);
             const selected = options.find((model) => sameModelId(model.id, settings[key]));
             return (
@@ -272,7 +295,7 @@ export function App({ t }: AppProps) {
           models={data.models.filter((model) => active === "vision"
             ? model.capability === "chat" && model.supportsVision
             : active === "video"
-              ? model.capability === "video" && model.videoCapabilities !== undefined
+              ? model.capability === "video"
               : model.capability === active)}
           selected={settings[preferenceKeys[active]]}
           saving={saving === active}

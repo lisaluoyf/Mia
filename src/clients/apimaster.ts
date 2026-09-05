@@ -104,6 +104,15 @@ const modelCatalogResponseSchema = z.object({
       recommended: z.boolean(),
       supports_vision: z.boolean().optional().default(false),
       vision_recommended: z.boolean().optional().default(false),
+      pricing: z.object({
+        unit: z.enum(["token_1m", "image", "second"]),
+        input_price: z.number().optional(),
+        output_price: z.number().optional(),
+        price: z.number().optional(),
+        currency: z.string().default("USD"),
+        discount_ratio: z.number().optional(),
+        channel_name: z.string().optional(),
+      }).optional(),
       video_capabilities: z.object({
         modes: z.array(z.enum(["text_to_video", "image_to_video"])),
         duration_seconds: z.object({ min: z.number().int(), max: z.number().int(), default: z.number().int() }),
@@ -332,6 +341,15 @@ export class APIMasterClient {
         recommended: model.recommended,
         supportsVision: model.supports_vision,
         visionRecommended: model.vision_recommended,
+        ...(model.pricing === undefined ? {} : { pricing: {
+          unit: model.pricing.unit,
+          ...(model.pricing.input_price === undefined ? {} : { inputPrice: model.pricing.input_price }),
+          ...(model.pricing.output_price === undefined ? {} : { outputPrice: model.pricing.output_price }),
+          ...(model.pricing.price === undefined ? {} : { price: model.pricing.price }),
+          currency: model.pricing.currency,
+          ...(model.pricing.discount_ratio === undefined ? {} : { discountRatio: model.pricing.discount_ratio }),
+          ...(model.pricing.channel_name === undefined ? {} : { channelName: model.pricing.channel_name }),
+        } }),
         videoCapabilities: model.video_capabilities === undefined ? undefined : {
           modes: model.video_capabilities.modes,
           durationSeconds: model.video_capabilities.duration_seconds,

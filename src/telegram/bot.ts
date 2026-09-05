@@ -829,10 +829,6 @@ async function createVideoDraft(
   const model = snapshot?.settings.videoModel ?? dependencies.settings.getPreferences(message.from.id).videoModel ?? DEFAULT_MODELS.video;
   const modelOption = snapshot?.models.find((item) => sameModelId(item.id, model));
   const caps = modelOption?.videoCapabilities;
-  if (snapshot && !caps) {
-    await replyTo(ctx, message, botText(locale, "videoMetadataMissing"));
-    return true;
-  }
   const duration = routed.video_options?.duration_seconds ?? caps?.durationSeconds.default ?? 4;
   const ratio = routed.video_options?.aspect_ratio ?? caps?.defaultAspectRatio ?? "16:9";
   const resolution = routed.video_options?.resolution ?? caps?.defaultResolution ?? "768P";
