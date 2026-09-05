@@ -66,7 +66,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 | --- | --- | --- |
 | Mia | `57772e6` | Node.js 20、PM2 运行，包含消费级 Mini App、连续上下文、长期记忆、私聊用户画像引导、群聊上下文压缩、精简版专用群聊总结、结构化 Telegram 回复、群聊唤醒后智能连续跟进、媒体与贴纸能力、Responses 自动 Web Search 和开发者 Debug 控制台 |
 | APIMaster new-api | `9130c1d` | GHCR 镜像蓝绿部署，提供 Telegram 用户 Key 解析、规范化 Mia 模型目录、产品名和 Debug 身份解析 |
-| APIMaster Web | `6e258b5` | Next.js PM2 双实例运行，提供 Telegram 登录与 TG-only 账号、登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
+| APIMaster Web | `b1d5573` | Next.js PM2 双实例运行，提供 Telegram 登录与 TG-only 账号、登录态校验、Lisa 白名单和 Mia Debug 安全代理 |
 | Mini App | `/mia/` | 已由 Nginx 公开，Telegram 默认菜单按钮 `Mia` 已配置 |
 | 持久化 | `/var/lib/mia/mia.sqlite` | schema v2，保存用户模型设置与分作用域的会话数据，WAL 模式 |
 
@@ -361,6 +361,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 | `2a684df` | `lisaluoyf/Mia` | 核心意图与文字回复迁移到 Responses、自动 Web Search 和 Debug 搜索审计 |
 | `72acb20` | `lisaluoyf/Mia` | 未绑定媒体请求统一跳转 APIMaster 一键 Telegram 连接入口 |
 | `588a5a8` | `RomaCredit/apimaster-workspace` | APIMaster Telegram 登录、TG-only 无邮箱账号、统一用户资料、邮箱补绑与体验卡身份兼容 |
+| `b1d5573` | `RomaCredit/apimaster-workspace` | 修复 Telegram 公网回跳并加固验签、旧账号解析、IP 信任、错误反馈和邮箱验证码限制 |
 
 ## 当前验证状态
 
@@ -393,6 +394,7 @@ Mia (Node.js / TypeScript / Fastify / Grammy)
 - Mia Prompt 翻译清理：提交 `0000bad` 已从 GitHub 精确 SHA 发布到 `/srv/mia/releases/mia-git-0000badae2cc-20260904T154046Z`；修复英文/俄语 prompt 中的中文空占位泄漏，清理俄语 prompt 与产品 facts 中的中文残留和中英混杂术语，并补上对应回归测试；同时修正 `test/apimaster.test.ts` 的类型安全断言以满足当前 ESLint 规则。251/251 测试、ESLint、前后端 TypeScript、生产构建和 `git diff --check` 通过。因本机直连生产机 `188.245.245.213:22` 被远端关闭，本次按标准 GitHub 精确 SHA 发版流程经 `roma-prod` 跳板执行服务器构建；生产 release 元数据指向 `0000badae2cc7b1a76e7eb3af598ed38da7dd3d6`，Node.js `v20.20.2`、PM2 `online`、健康检查 `ok`，耗时 8 秒，回滚目标保留为 `mia-git-d3b908584556-20260904T153304Z`；未修改或重启 APIMaster Web、new-api 或 Flask（2026-09-04）。
 
 - APIMaster Telegram 登录与 TG-only 账号：功能提交 `588a5a8` 已随精确 GitHub SHA `6e258b5` 发布到 APIMaster Web。登录/注册页均已提供 Telegram，验签用户可创建 `email = NULL` 的 APIMaster 账号并同步 new-api 镜像账号；已有账号必须先登录后绑定，不按昵称或手机号自动合并；账号页支持补绑真实邮箱，体验卡继续保留 IP、设备、领取记录、社交身份和入群条件风控。数据库迁移前已备份 `users`、`user_social_bindings` 和 `trial_claims`，迁移后确认邮箱可空、Telegram 唯一索引和体验卡验证字段存在。12/12 可执行测试、定向 ESLint、15 个 locale JSON、生产构建和提交检查通过；生产正常回跳保留 `/connect/telegram`，危险外链回跳被清空，nonce Cookie 为 HttpOnly，官方 Widget 成功渲染。APIMaster 两个 PM2 worker 在线、生产代码为 `6e258b5`，只读生产冒烟 21/21 通过；发布未修改、构建或重启 new-api。尚待真实 Telegram 账号完成一次登录/创建/回跳人工验收（2026-09-05）。
+- APIMaster Telegram 登录加固：提交 `b1d5573` 已发布到 APIMaster Web。TG 登录初始化不再从 Next.js 内部请求推导 origin；生产实测即使内部 Host 为 `0.0.0.0:3000`，也会返回 `https://apimaster.ai/auth/telegram`，注册来源同步保持公网地址，`next=/connect/telegram` 与受保护 nonce Cookie 均保留。补充 `allows_write_to_pm` 验签兼容、旧绑定查询的 `found/not_found/unavailable/conflict` 区分、new-api 不可用时停止创建潜在重复用户、可信代理 IP 解析、三类可恢复错误提示，以及邮箱补绑验证码五次失败限制；移除 TG 登录请求中的专用运行时 DDL。19/19 Node 测试、定向 ESLint、15 个 locale JSON、两次生产构建、路由回归和 19/19 线上只读冒烟通过；全仓 ESLint 仍被既有无关页面的 27 个错误阻断。生产 SHA 为 `b1d5573`，两个 PM2 worker 在线，相关错误日志为 0，TG 用户与绑定均为 0；本次发布未触发 new-api 构建或重启。尚待真实 Telegram 账号完成授权、TG-only 创建、镜像账号同步和返回 Mia 的最终人工验收（2026-09-05）。
 
 ## 下一阶段优先级
 
