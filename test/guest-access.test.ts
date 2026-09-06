@@ -331,7 +331,10 @@ I can:
     const sent = calls.find((call) => call.method === "sendMessage");
     expect(sent?.payload.text).toContain("APIMaster 账号");
     expect(JSON.stringify(sent?.payload.reply_markup)).toContain(
-      "https://apimaster.ai/api/auth/telegram/deep-link/start?next=%2Fmia%2F",
+      "https://apimaster.ai/api/auth/telegram/deep-link/start?intent=login&next=%2Fmia%2F",
+    );
+    expect(JSON.stringify(sent?.payload.reply_markup)).toContain(
+      "https://apimaster.ai/api/auth/telegram/deep-link/start?intent=bind_existing&next=%2Fmia%2F",
     );
   });
 

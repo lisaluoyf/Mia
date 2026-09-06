@@ -4,7 +4,10 @@ import type { Logger } from "pino";
 
 import type { APIMasterClient, ImageSubmitResult, NormalizedTaskStatus } from "../clients/apimaster.js";
 import { MediaAPIError, ResolverError } from "../clients/apimaster.js";
-import { APIMASTER_TELEGRAM_LOGIN_URL } from "../constants.js";
+import {
+  APIMASTER_TELEGRAM_BIND_EXISTING_URL,
+  APIMASTER_TELEGRAM_LOGIN_URL,
+} from "../constants.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { ContextStore } from "../storage/store.js";
 import type { MediaStore } from "./store.js";
@@ -505,10 +508,10 @@ function submissionAccessFailure(error: unknown, locale: string): { text: string
   if (error instanceof ResolverError && error.code === "telegram_not_bound") {
     return {
       text: botText(locale, "mediaBindRequired"),
-      keyboard: new InlineKeyboard().url(
-        botText(locale, "registerAndBindButton"),
-        APIMASTER_TELEGRAM_LOGIN_URL,
-      ),
+      keyboard: new InlineKeyboard()
+        .url(botText(locale, "telegramCreateOrLoginButton"), APIMASTER_TELEGRAM_LOGIN_URL)
+        .row()
+        .url(botText(locale, "telegramBindExistingButton"), APIMASTER_TELEGRAM_BIND_EXISTING_URL),
     };
   }
   if (error instanceof ResolverError && error.code === "no_usable_api_key") {

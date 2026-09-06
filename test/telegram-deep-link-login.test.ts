@@ -66,8 +66,8 @@ describe("Telegram deep-link login", () => {
 
     expect(confirmTelegramDeepLinkLogin).toHaveBeenCalledWith(expect.objectContaining({ code, telegramUserId: 42 }));
     expect(classify).not.toHaveBeenCalled();
-    expect(replyText).toBe("已确认 Telegram。点击下方按钮登录 APIMaster。\n\n✨ 马上开始 AI 之旅\n👇 点击按钮，马上登录");
-    expect(JSON.stringify(replyMarkup)).toContain("🔐 登录 APIMaster");
+    expect(replyText).toBe("💳 登录 APIMaster\n🌈 马上开始 AI 之旅 ⚡️⚡️⚡️\n👇 点击按钮，马上登录");
+    expect(JSON.stringify(replyMarkup)).toContain("登录 APIMaster");
     expect(JSON.stringify(replyMarkup)).toContain("complete?code=test");
   });
 });

@@ -4,7 +4,11 @@ import type { Logger } from "pino";
 
 import type { APIMasterClient } from "../clients/apimaster.js";
 import { ChatCompletionError, ResolverError } from "../clients/apimaster.js";
-import { APIMASTER_TELEGRAM_LOGIN_URL, DEFAULT_MODELS } from "../constants.js";
+import {
+  APIMASTER_TELEGRAM_BIND_EXISTING_URL,
+  APIMASTER_TELEGRAM_LOGIN_URL,
+  DEFAULT_MODELS,
+} from "../constants.js";
 import type { ChatCredential, ChatCredentialProvider } from "../credentials/chat.js";
 import { buildConversationMessages, loadConversationContext, type ConversationContext } from "../context/conversation.js";
 import type { ContextCompactor } from "../context/compactor.js";
@@ -2444,10 +2448,10 @@ async function replyMediaAccessError(
   locale: BotLocale,
 ): Promise<void> {
   if (error instanceof ResolverError && error.code === "telegram_not_bound") {
-    const keyboard = new InlineKeyboard().url(
-      botText(locale, "registerAndBindButton"),
-      APIMASTER_TELEGRAM_LOGIN_URL,
-    );
+    const keyboard = new InlineKeyboard()
+      .url(botText(locale, "telegramCreateOrLoginButton"), APIMASTER_TELEGRAM_LOGIN_URL)
+      .row()
+      .url(botText(locale, "telegramBindExistingButton"), APIMASTER_TELEGRAM_BIND_EXISTING_URL);
     await replyTo(ctx, message, botText(locale, "mediaBindRequired"), { reply_markup: keyboard });
     return;
   }

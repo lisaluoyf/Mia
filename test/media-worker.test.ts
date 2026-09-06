@@ -230,7 +230,10 @@ describe("media worker transient regeneration status", () => {
       expect.anything(),
     );
     expect(JSON.stringify(editMessageText.mock.calls[0]?.[3])).toContain(
-      "https://apimaster.ai/api/auth/telegram/deep-link/start?next=%2Fmia%2F",
+      "https://apimaster.ai/api/auth/telegram/deep-link/start?intent=login&next=%2Fmia%2F",
+    );
+    expect(JSON.stringify(editMessageText.mock.calls[0]?.[3])).toContain(
+      "https://apimaster.ai/api/auth/telegram/deep-link/start?intent=bind_existing&next=%2Fmia%2F",
     );
   });
 

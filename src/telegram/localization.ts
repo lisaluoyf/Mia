@@ -73,6 +73,8 @@ const ENGLISH = {
   mediaTokenRequired: "Images and videos require your own APIMaster API Token. Create a Token first.",
   mediaTopUpRequired: "Your APIMaster balance is insufficient for this media request. Add funds and try again.",
   registerAndBindButton: "Sign up and connect",
+  telegramCreateOrLoginButton: "Create or sign in with Telegram",
+  telegramBindExistingButton: "I already have an APIMaster account",
   createTokenButton: "Create API Token",
   topUpButton: "Add funds",
   serviceUnavailable: "The service is temporarily unavailable. Please try again later.",
@@ -185,6 +187,8 @@ const CHINESE_SIMPLIFIED: MessageOverrides = {
   mediaTokenRequired: "图片和视频需要使用你自己的 APIMaster API Token，请先创建 Token。",
   mediaTopUpRequired: "你的 APIMaster 余额不足以完成本次媒体请求，请充值后重试。",
   registerAndBindButton: "注册并绑定",
+  telegramCreateOrLoginButton: "用 Telegram 创建/登录",
+  telegramBindExistingButton: "我已有 APIMaster 账号",
   createTokenButton: "创建 API Token",
   topUpButton: "去充值",
   serviceUnavailable: "服务暂时不可用，请稍后再试。",
@@ -220,8 +224,8 @@ const CHINESE_SIMPLIFIED: MessageOverrides = {
   translationNextButton: "下一页",
   translationBackButton: "返回",
   translationPrivateOnly: "翻译模式仅支持私聊。",
-  telegramLoginConfirmed: "已确认 Telegram。点击下方按钮登录 APIMaster。\n\n✨ 马上开始 AI 之旅\n👇 点击按钮，马上登录",
-  telegramLoginButton: "🔐 登录 APIMaster",
+  telegramLoginConfirmed: "💳 登录 APIMaster\n🌈 马上开始 AI 之旅 ⚡️⚡️⚡️\n👇 点击按钮，马上登录",
+  telegramLoginButton: "登录 APIMaster",
   telegramLoginExpired: "这个登录链接已过期，请返回 APIMaster 后重试。",
   telegramLoginUnavailable: "登录确认暂时不可用，请稍后重试。",
 };
@@ -251,6 +255,8 @@ const CHINESE_TRADITIONAL: MessageOverrides = {
   mediaTokenRequired: "圖片和影片需要使用你自己的 APIMaster API Token，請先建立 Token。",
   mediaTopUpRequired: "你的 APIMaster 餘額不足以完成這次媒體請求，請儲值後再試。",
   registerAndBindButton: "註冊並綁定",
+  telegramCreateOrLoginButton: "用 Telegram 建立/登入",
+  telegramBindExistingButton: "我已有 APIMaster 帳號",
   createTokenButton: "建立 API Token",
   topUpButton: "去儲值",
 };
@@ -335,6 +341,36 @@ const ACCESS_TRANSLATIONS: Record<Exclude<BotLocale, "en" | "zh-CN" | "zh-TW">, 
   vi: { mediaBindRequired: "Hình ảnh và video cần tài khoản APIMaster. Hãy đăng ký hoặc đăng nhập rồi liên kết Telegram.", mediaTokenRequired: "Hình ảnh và video cần Token API APIMaster của riêng bạn. Hãy tạo Token trước.", mediaTopUpRequired: "Số dư APIMaster không đủ. Hãy nạp thêm tiền rồi thử lại.", registerAndBindButton: "Đăng ký và liên kết", createTokenButton: "Tạo Token API", topUpButton: "Nạp tiền" },
 };
 
+type TelegramAccountButtonKey = "telegramCreateOrLoginButton" | "telegramBindExistingButton";
+
+const TELEGRAM_ACCOUNT_TRANSLATIONS: Record<
+  Exclude<BotLocale, "en" | "zh-CN" | "zh-TW">,
+  Record<TelegramAccountButtonKey, string>
+> = {
+  ar: { telegramCreateOrLoginButton: "إنشاء حساب أو تسجيل الدخول عبر Telegram", telegramBindExistingButton: "لدي حساب APIMaster بالفعل" },
+  cs: { telegramCreateOrLoginButton: "Vytvořit účet nebo se přihlásit přes Telegram", telegramBindExistingButton: "Už mám účet APIMaster" },
+  de: { telegramCreateOrLoginButton: "Mit Telegram erstellen oder anmelden", telegramBindExistingButton: "Ich habe bereits ein APIMaster-Konto" },
+  es: { telegramCreateOrLoginButton: "Crear cuenta o entrar con Telegram", telegramBindExistingButton: "Ya tengo una cuenta APIMaster" },
+  fa: { telegramCreateOrLoginButton: "ساخت حساب یا ورود با تلگرام", telegramBindExistingButton: "از قبل حساب APIMaster دارم" },
+  fr: { telegramCreateOrLoginButton: "Créer un compte ou se connecter avec Telegram", telegramBindExistingButton: "J’ai déjà un compte APIMaster" },
+  hi: { telegramCreateOrLoginButton: "Telegram से बनाएँ या साइन इन करें", telegramBindExistingButton: "मेरे पास APIMaster खाता है" },
+  id: { telegramCreateOrLoginButton: "Buat akun atau masuk dengan Telegram", telegramBindExistingButton: "Saya sudah punya akun APIMaster" },
+  it: { telegramCreateOrLoginButton: "Crea un account o accedi con Telegram", telegramBindExistingButton: "Ho già un account APIMaster" },
+  ja: { telegramCreateOrLoginButton: "Telegram で作成・ログイン", telegramBindExistingButton: "APIMaster アカウントを持っています" },
+  ko: { telegramCreateOrLoginButton: "Telegram으로 만들기 또는 로그인", telegramBindExistingButton: "기존 APIMaster 계정이 있어요" },
+  ms: { telegramCreateOrLoginButton: "Cipta akaun atau log masuk dengan Telegram", telegramBindExistingButton: "Saya sudah ada akaun APIMaster" },
+  nl: { telegramCreateOrLoginButton: "Maken of aanmelden met Telegram", telegramBindExistingButton: "Ik heb al een APIMaster-account" },
+  pl: { telegramCreateOrLoginButton: "Utwórz konto lub zaloguj się przez Telegram", telegramBindExistingButton: "Mam już konto APIMaster" },
+  pt: { telegramCreateOrLoginButton: "Criar conta ou entrar com Telegram", telegramBindExistingButton: "Já tenho uma conta APIMaster" },
+  "pt-BR": { telegramCreateOrLoginButton: "Criar conta ou entrar com Telegram", telegramBindExistingButton: "Já tenho uma conta APIMaster" },
+  ru: { telegramCreateOrLoginButton: "Создать аккаунт или войти через Telegram", telegramBindExistingButton: "У меня уже есть аккаунт APIMaster" },
+  th: { telegramCreateOrLoginButton: "สร้างบัญชีหรือเข้าสู่ระบบด้วย Telegram", telegramBindExistingButton: "ฉันมีบัญชี APIMaster อยู่แล้ว" },
+  tr: { telegramCreateOrLoginButton: "Telegram ile hesap oluştur veya giriş yap", telegramBindExistingButton: "Zaten APIMaster hesabım var" },
+  uk: { telegramCreateOrLoginButton: "Створити акаунт або увійти через Telegram", telegramBindExistingButton: "У мене вже є акаунт APIMaster" },
+  uz: { telegramCreateOrLoginButton: "Telegram orqali yarating yoki kiring", telegramBindExistingButton: "Menda APIMaster hisobi bor" },
+  vi: { telegramCreateOrLoginButton: "Tạo tài khoản hoặc đăng nhập bằng Telegram", telegramBindExistingButton: "Tôi đã có tài khoản APIMaster" },
+};
+
 const LOCALE_SET = new Set<string>(BOT_LOCALES);
 
 export function resolveBotLocale(language?: string | null): BotLocale {
@@ -353,6 +389,7 @@ function overrides(locale: BotLocale): MessageOverrides {
   return {
     ...CORE_TRANSLATIONS[locale],
     ...ACCESS_TRANSLATIONS[locale],
+    ...TELEGRAM_ACCOUNT_TRANSLATIONS[locale],
     settings: SETTINGS_TRANSLATIONS[locale],
   };
 }

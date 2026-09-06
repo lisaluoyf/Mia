@@ -97,6 +97,8 @@ describe("Telegram bot localization", () => {
       "mediaTokenRequired",
       "mediaTopUpRequired",
       "registerAndBindButton",
+      "telegramCreateOrLoginButton",
+      "telegramBindExistingButton",
       "createTokenButton",
       "topUpButton",
     ];

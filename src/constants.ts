@@ -9,4 +9,5 @@ export const TELEGRAM_MESSAGE_LIMIT = 4096;
 // Mia-originated users authenticate with Telegram first. The legacy
 // /connect/telegram route is only for an already signed-in website user who
 // wants to complete optional community verification.
-export const APIMASTER_TELEGRAM_LOGIN_URL = "https://apimaster.ai/api/auth/telegram/deep-link/start?next=%2Fmia%2F";
+export const APIMASTER_TELEGRAM_LOGIN_URL = "https://apimaster.ai/api/auth/telegram/deep-link/start?intent=login&next=%2Fmia%2F";
+export const APIMASTER_TELEGRAM_BIND_EXISTING_URL = "https://apimaster.ai/api/auth/telegram/deep-link/start?intent=bind_existing&next=%2Fmia%2F";
