@@ -4,7 +4,7 @@ import type { Logger } from "pino";
 
 import type { APIMasterClient, ImageSubmitResult, NormalizedTaskStatus } from "../clients/apimaster.js";
 import { MediaAPIError, ResolverError } from "../clients/apimaster.js";
-import { APIMASTER_CONNECT_URL } from "../constants.js";
+import { APIMASTER_TELEGRAM_LOGIN_URL } from "../constants.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { ContextStore } from "../storage/store.js";
 import type { MediaStore } from "./store.js";
@@ -507,7 +507,7 @@ function submissionAccessFailure(error: unknown, locale: string): { text: string
       text: botText(locale, "mediaBindRequired"),
       keyboard: new InlineKeyboard().url(
         botText(locale, "registerAndBindButton"),
-        APIMASTER_CONNECT_URL,
+        APIMASTER_TELEGRAM_LOGIN_URL,
       ),
     };
   }
