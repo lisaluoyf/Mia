@@ -36,6 +36,19 @@ describe("APIMaster client", () => {
     });
   });
 
+  it("preserves the selected-model-unavailable resolver error", async () => {
+    const client = createClient(vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      success: false,
+      code: "selected_model_unavailable",
+      message: "selected model is not available for this API key",
+    }, { status: 404 })));
+
+    await expect(client.resolveAPIKey(123456, "MiniMax-H3")).rejects.toMatchObject({
+      code: "selected_model_unavailable",
+      status: 404,
+    });
+  });
+
   it("confirms a Bot deep-link login through the APIMaster identity service", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       success: true,

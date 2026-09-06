@@ -68,6 +68,7 @@ const ENGLISH = {
   telegramNotBound: "Connect this Telegram account to APIMaster first, then try again.",
   accountDisabled: "This APIMaster account is currently unavailable. Check the account status first.",
   noUsableKey: "Your APIMaster account has no API Key available for {model}.",
+  selectedModelUnavailable: "The selected model is temporarily unavailable. Try again later or choose another model in Mia settings.",
   quotaUnavailable: "This request could not be completed. Check your APIMaster quota and try again.",
   mediaBindRequired: "Images and videos require an APIMaster account. Sign up or sign in, then connect this Telegram account.",
   mediaTokenRequired: "Images and videos require your own APIMaster API Token. Create a Token first.",
@@ -182,6 +183,7 @@ const CHINESE_SIMPLIFIED: MessageOverrides = {
   telegramNotBound: "请先在 APIMaster 绑定这个 Telegram 账号，然后再试。",
   accountDisabled: "这个 APIMaster 账号目前不可用，请先检查账号状态。",
   noUsableKey: "你的 APIMaster 账号目前没有可用于 {model} 的 API Key。",
+  selectedModelUnavailable: "当前选择的模型暂不可用，请稍后重试或在 Mia 设置中更换模型。",
   quotaUnavailable: "本次请求暂时无法完成，请检查 APIMaster 额度后再试。",
   mediaBindRequired: "图片和视频需要 APIMaster 账号，请先注册或登录并绑定这个 Telegram 账号。",
   mediaTokenRequired: "图片和视频需要使用你自己的 APIMaster API Token，请先创建 Token。",
@@ -258,6 +260,7 @@ const CHINESE_TRADITIONAL: MessageOverrides = {
   telegramCreateOrLoginButton: "用 Telegram 建立/登入",
   telegramBindExistingButton: "我已有 APIMaster 帳號",
   createTokenButton: "建立 API Token",
+  selectedModelUnavailable: "目前選擇的模型暫時不可用，請稍後再試或在 Mia 設定中更換模型。",
   topUpButton: "去儲值",
 };
 

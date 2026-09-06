@@ -496,4 +496,52 @@ I can:
     const sent = calls.find((call) => call.method === "sendMessage");
     expect(JSON.stringify(sent?.payload.reply_markup)).toContain("/console/tokens");
   });
+
+  it("does not tell a bound user to create another Token when only the video model is unavailable", async () => {
+    mediaStore = new MediaStore(":memory:");
+    const classify = vi.fn().mockResolvedValue({
+      intent: "video_generate", confidence: 0.99, instruction: "让海浪动起来", media_source: "none",
+      image_options: null,
+      video_options: { mode: "text_to_video", duration_seconds: 4, aspect_ratio: "16:9", resolution: "768P", image_roles: [] },
+      final_response: null, conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+      missingRequired: [],
+    });
+    const resolveAPIKey = vi.fn().mockRejectedValue(new ResolverError("selected_model_unavailable"));
+    const bot = createBot("123:test", {
+      client: { resolveAPIKey } as unknown as APIMasterClient,
+      chatCredentials: { resolve: vi.fn().mockResolvedValue({
+        apiKey: "user-key", model: "gpt-5.4", source: "user", fallbackReason: null,
+      }) },
+      logger: createLogger("silent"),
+      settings: {
+        getPreferences: vi.fn().mockReturnValue({ videoModel: "MiniMax-H3" }),
+        getSnapshot: vi.fn().mockResolvedValue({
+          apimasterUserId: 7, models: [],
+          settings: { chatModel: "gpt-5.4", visionModel: null, imageModel: "gpt-image-2", videoModel: "MiniMax-H3" },
+          unavailable: [],
+        }),
+      },
+      contexts: contextStubs(),
+      router: { model: "gpt-5.4", classify } as unknown as IntentRouter,
+      mediaStore,
+      botToken: "123:test",
+    });
+    bot.botInfo = botInfo;
+    const calls = installApi(bot);
+
+    await bot.handleUpdate({
+      update_id: 1008,
+      message: {
+        message_id: 22, date: 1_788_333_600,
+        chat: { id: 42, type: "private", first_name: "Guest" },
+        from: { id: 42, is_bot: false, first_name: "Guest", language_code: "zh-CN" },
+        text: "做一个海浪视频",
+      },
+    } as never);
+
+    const sent = calls.find((call) => call.method === "sendMessage");
+    expect(sent?.payload.text).toContain("当前选择的模型暂不可用");
+    expect(sent?.payload.text).not.toContain("创建 Token");
+    expect(sent?.payload.reply_markup).toBeUndefined();
+  });
 });

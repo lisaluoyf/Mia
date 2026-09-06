@@ -2463,6 +2463,10 @@ async function replyMediaAccessError(
     await replyTo(ctx, message, botText(locale, "mediaTokenRequired"), { reply_markup: keyboard });
     return;
   }
+  if (error instanceof ResolverError && error.code === "selected_model_unavailable") {
+    await replyTo(ctx, message, botText(locale, "selectedModelUnavailable"));
+    return;
+  }
   if (error instanceof ChatCompletionError && error.status === 402) {
     const keyboard = new InlineKeyboard().url(
       botText(locale, "topUpButton"),

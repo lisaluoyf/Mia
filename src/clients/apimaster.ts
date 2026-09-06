@@ -151,6 +151,7 @@ export type ResolverErrorCode =
   | "telegram_not_bound"
   | "user_disabled"
   | "no_usable_api_key"
+  | "selected_model_unavailable"
   | "service_unavailable";
 
 export class ResolverError extends Error {
@@ -270,7 +271,8 @@ export class APIMasterClient {
       const payload: unknown = await response.json().catch(() => undefined);
       const parsedError = errorResponseSchema.safeParse(payload);
       const code = parsedError.success ? parsedError.data.code : undefined;
-      if (code === "telegram_not_bound" || code === "user_disabled" || code === "no_usable_api_key") {
+      if (code === "telegram_not_bound" || code === "user_disabled" || code === "no_usable_api_key" ||
+          code === "selected_model_unavailable") {
         throw new ResolverError(code, response.status);
       }
       throw new ResolverError("service_unavailable", response.status);
@@ -378,7 +380,8 @@ export class APIMasterClient {
       const payload: unknown = await response.json().catch(() => undefined);
       const parsedError = errorResponseSchema.safeParse(payload);
       const code = parsedError.success ? parsedError.data.code : undefined;
-      if (code === "telegram_not_bound" || code === "user_disabled" || code === "no_usable_api_key") {
+      if (code === "telegram_not_bound" || code === "user_disabled" || code === "no_usable_api_key" ||
+          code === "selected_model_unavailable") {
         throw new ResolverError(code, response.status);
       }
       throw new ResolverError("service_unavailable", response.status);

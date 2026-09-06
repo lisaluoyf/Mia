@@ -520,6 +520,12 @@ function submissionAccessFailure(error: unknown, locale: string): { text: string
       keyboard: new InlineKeyboard().url(botText(locale, "createTokenButton"), "https://apimaster.ai/console/tokens"),
     };
   }
+  if (error instanceof ResolverError && error.code === "selected_model_unavailable") {
+    return {
+      text: botText(locale, "selectedModelUnavailable"),
+      keyboard: new InlineKeyboard(),
+    };
+  }
   return null;
 }
 

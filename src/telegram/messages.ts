@@ -16,6 +16,9 @@ export function userFacingError(
     if (error.code === "no_usable_api_key") {
       return botText(language, "noUsableKey", { model });
     }
+    if (error.code === "selected_model_unavailable") {
+      return botText(language, "selectedModelUnavailable", { model });
+    }
   }
   if (error instanceof ChatCompletionError && (error.status === 402 || error.status === 429)) {
     return botText(language, "quotaUnavailable");
