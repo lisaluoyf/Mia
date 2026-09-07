@@ -1079,6 +1079,7 @@ async function createVideoDraft(
       durationSeconds: duration,
       aspectRatio: ratio,
       resolution,
+      resolutionSource: resolution === undefined ? "channel_default" : "user",
       mode: inputs.length > 0 ? "image_to_video" : "text_to_video",
       locale,
     },
@@ -1095,9 +1096,8 @@ function hasCompleteVideoCapabilities(model: ModelOption | undefined): model is 
   const caps = model?.videoCapabilities;
   return Boolean(
     caps &&
-    caps.resolutions.length > 0 &&
-    caps.defaultResolution &&
-    caps.resolutions.some((value) => value.toLowerCase() === caps.defaultResolution.toLowerCase()) &&
+    (caps.defaultResolution === "" ||
+      caps.resolutions.some((value) => value.toLowerCase() === caps.defaultResolution.toLowerCase())) &&
     caps.aspectRatios.length > 0 &&
     caps.defaultAspectRatio &&
     caps.aspectRatios.includes(caps.defaultAspectRatio) &&
@@ -1109,10 +1109,14 @@ function hasCompleteVideoCapabilities(model: ModelOption | undefined): model is 
 export function resolveVideoResolution(
   capabilities: NonNullable<ModelOption["videoCapabilities"]>,
   requested: string | null,
-): string | null {
+): string | null | undefined {
   const requestedValue = requested?.trim();
-  const wanted = requestedValue || capabilities.defaultResolution;
-  return capabilities.resolutions.find((value) => value.toLowerCase() === wanted.toLowerCase()) ?? null;
+  // A catalog default can belong to a different channel than the eventual route.
+  if (!requestedValue) return undefined;
+  if (capabilities.resolutions.length === 0) {
+    return /^(?:\d{3,4}p|\d{1,2}k)$/i.test(requestedValue) ? requestedValue : null;
+  }
+  return capabilities.resolutions.find((value) => value.toLowerCase() === requestedValue.toLowerCase()) ?? null;
 }
 
 function onboardingDebugDetails(
@@ -2293,7 +2297,11 @@ function videoDraftText(job: MediaJob): string {
     botText(locale, "promptLabel", { value: job.instruction }),
     botText(locale, "durationLabel", { value: String(job.options.durationSeconds) }),
     botText(locale, "aspectRatioLabel", { value: String(job.options.aspectRatio) }),
-    botText(locale, "resolutionLabel", { value: String(job.options.resolution) }),
+    botText(locale, "resolutionLabel", {
+      value: job.options.resolutionSource === "channel_default"
+        ? botText(locale, "channelDefaultResolution")
+        : String(job.options.resolution),
+    }),
     botText(locale, "draftExpires"),
   ].join("\n");
 }

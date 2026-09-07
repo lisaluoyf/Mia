@@ -17,7 +17,12 @@ describe("group media context routing", () => {
     vi.unstubAllGlobals();
   });
 
-  it("binds a nearby Mia-generated Topic image when the user says to use this image", async () => {
+  it.each([
+    { requested: "768P", resolutions: ["768P"], defaultResolution: "768P" },
+    { requested: null, resolutions: ["720p"], defaultResolution: "720p" },
+    { requested: null, resolutions: [], defaultResolution: "" },
+    { requested: "512p", resolutions: [], defaultResolution: "" },
+  ])("binds a Topic image and preserves resolution intent: $requested / $defaultResolution", async ({ requested, resolutions, defaultResolution }) => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     contexts = new ContextStore(":memory:");
     mediaStore = new MediaStore(":memory:");
@@ -43,7 +48,7 @@ describe("group media context routing", () => {
       intent: "video_generate", confidence: 0.99, instruction: "龙猫收衣服后去切土豆", media_source: "context",
       media_message_ids: [10], image_options: null,
       video_options: {
-        mode: "image_to_video", duration_seconds: 6, aspect_ratio: "16:9", resolution: "768P",
+        mode: "image_to_video", duration_seconds: 6, aspect_ratio: "16:9", resolution: requested,
         image_roles: ["first_frame"],
       },
       final_response: null, conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
@@ -63,7 +68,7 @@ describe("group media context routing", () => {
             videoCapabilities: {
               modes: ["text_to_video", "image_to_video"],
               durationSeconds: { min: 4, max: 15, default: 4 },
-              resolutions: ["768P"], defaultResolution: "768P",
+              resolutions, defaultResolution,
               aspectRatios: ["1:1", "16:9", "9:16"], defaultAspectRatio: "16:9", maxReferenceImages: 10,
             },
           }],
@@ -83,9 +88,11 @@ describe("group media context routing", () => {
     };
     bot.botInfo = botInfo;
     const apiCalls: string[] = [];
+    const sentTexts: string[] = [];
     bot.api.config.use((_previous, method, payload) => {
       const safePayload = payload as unknown as Record<string, unknown>;
       apiCalls.push(method);
+      if (method === "sendMessage" && typeof safePayload.text === "string") sentTexts.push(safePayload.text);
       if (method === "sendMessage") return Promise.resolve({
         ok: true,
         result: {
@@ -115,7 +122,16 @@ describe("group media context routing", () => {
     });
     expect(apiCalls).not.toContain("getFile");
     const draft = mediaStore.getJobByIdempotencyKey("message:-1001:11");
-    expect(draft).toMatchObject({ type: "video_generate", status: "draft", threadId: 12 });
+    expect(draft).toMatchObject({
+      type: "video_generate", status: "draft", threadId: 12,
+      options: { resolutionSource: requested === null ? "channel_default" : "user" },
+    });
+    if (requested === null) {
+      expect(draft?.options).not.toHaveProperty("resolution");
+      expect(sentTexts.some((text) => text.includes("清晰度：渠道默认"))).toBe(true);
+    } else {
+      expect(draft?.options.resolution).toBe(requested);
+    }
     expect(draft && mediaStore.listJobInputs(draft.id)).toMatchObject([{ messageId: 10, fileId: "generated-file" }]);
   });
 

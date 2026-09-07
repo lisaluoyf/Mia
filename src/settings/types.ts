@@ -25,6 +25,7 @@ export interface ModelOption {
   videoCapabilities?: {
     modes: Array<"text_to_video" | "image_to_video">;
     durationSeconds: { min: number; max: number; default: number };
+    // Empty means unknown until routing, not that the model rejects all resolutions.
     resolutions: string[];
     defaultResolution: string;
     aspectRatios: string[];

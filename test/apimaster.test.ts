@@ -152,6 +152,19 @@ describe("APIMaster client", () => {
     expect(body.metadata.content.map((item) => item.role).filter(Boolean)).toEqual(["first_frame", "last_frame"]);
   });
 
+  it("omits both video resolution fields when using the channel default", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ id: "video-default", status: "queued" }));
+    await createClient(fetcher).submitVideo("key", {
+      model: "minimax-h3", prompt: "move", durationSeconds: 15, aspectRatio: "16:9",
+    });
+    const rawBody = fetcher.mock.calls[0]?.[1]?.body;
+    const body = z.object({ metadata: z.record(z.string(), z.unknown()) }).passthrough()
+      .parse(typeof rawBody === "string" ? JSON.parse(rawBody) as unknown : null);
+    expect(body).not.toHaveProperty("size");
+    expect(body.metadata).not.toHaveProperty("resolution");
+    expect(body.metadata).toMatchObject({ duration: 15, ratio: "16:9" });
+  });
+
   it("never forwards a user's key to an external media result URL", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), {
       headers: { "content-type": "image/png" },

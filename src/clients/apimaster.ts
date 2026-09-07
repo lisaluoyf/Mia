@@ -225,7 +225,7 @@ export interface VideoSubmitInput {
   prompt: string;
   durationSeconds: number;
   aspectRatio: string;
-  resolution: string;
+  resolution?: string;
   images?: readonly { dataUrl: string; role: "first_frame" | "last_frame" | "reference_image" }[];
 }
 
@@ -774,11 +774,11 @@ export class APIMasterClient {
         model: input.model,
         prompt: input.prompt,
         duration: input.durationSeconds,
-        size: input.resolution,
+        ...(input.resolution ? { size: input.resolution } : {}),
         metadata: {
           content,
           duration: input.durationSeconds,
-          resolution: input.resolution,
+          ...(input.resolution ? { resolution: input.resolution } : {}),
           ratio: input.aspectRatio,
         },
       }),

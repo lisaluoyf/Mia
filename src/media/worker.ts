@@ -140,20 +140,25 @@ export class MediaWorker {
       externalKey: `media-job:${job.id}`,
     }) ?? null;
     try {
+      if (job.type === "video_generate" &&
+          job.options.resolutionSource !== "channel_default" && job.options.resolutionSource !== "user") {
+        // Old drafts cannot distinguish a user choice from the former injected default.
+        throw new MediaAPIError("video_resolution_confirmation_required");
+      }
       apiKey = await this.options.client.resolveAPIKey(job.telegramUserId, job.model);
       const images = await downloadTelegramImages(this.options.api, this.options.botToken, inputs);
       let taskId: string;
       if (job.type === "video_generate") {
         const durationSeconds = numberOption(job.options.durationSeconds, 4);
         const aspectRatio = stringOption(job.options.aspectRatio, "16:9");
-        const resolution = stringOption(job.options.resolution, "");
-        if (!resolution) throw new Error("video_resolution_missing");
+        const resolution = job.options.resolutionSource === "user" ? stringOption(job.options.resolution, "").trim() : undefined;
+        if (resolution === "") throw new MediaAPIError("video_resolution_confirmation_required");
         taskId = await this.options.client.submitVideo(apiKey, {
           model: job.model,
           prompt: job.instruction,
           durationSeconds,
           aspectRatio,
-          resolution,
+          ...(resolution === undefined ? {} : { resolution }),
           images: images.map((image, index) => ({
             dataUrl: dataUrl(image),
             role: index === 0 ? "first_frame" : index === 1 ? "last_frame" : "reference_image",
@@ -208,9 +213,12 @@ export class MediaWorker {
       this.options.debug?.finish(debugId, { status: "failed", errorCode: errorCode(error) });
       const locale = mediaJobLocale(job.options);
       const accessFailure = submissionAccessFailure(error, locale);
+      const failureText = errorCode(error) === "video_resolution_confirmation_required"
+        ? botText(locale, "videoResolutionConfirmationRequired")
+        : botText(locale, job.type === "video_generate" ? "videoSubmissionFailed" : "submissionFailed");
       await this.notifyFailure(
         job,
-        accessFailure?.text ?? botText(locale, "submissionFailed"),
+        accessFailure?.text ?? failureText,
         accessFailure?.keyboard,
       );
     }
