@@ -24,4 +24,9 @@ describe("Mia configuration", () => {
       MIA_GUEST_CHAT_MODEL: "another-model",
     })).toThrow();
   });
+
+  it("uses a separate five-minute ceiling for interruptible Agent model work", () => {
+    expect(loadConfig({ ...requiredEnvironment, MIA_GUEST_CHAT_API_KEY: "guest-test-key" }).agentTimeoutMs).toBe(300_000);
+    expect(() => loadConfig({ ...requiredEnvironment, MIA_GUEST_CHAT_API_KEY: "guest-test-key", MIA_AGENT_TIMEOUT_MS: "600001" })).toThrow();
+  });
 });

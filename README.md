@@ -14,6 +14,7 @@ for explicitly selected Telegram test users:
 MIA_AGENT_ENABLED=true
 MIA_AGENT_ALLOWED_USERS=123456789
 MIA_AGENT_WEB_SEARCH=false
+MIA_AGENT_TIMEOUT_MS=300000
 ```
 
 Both the enable flag and allowlist are required. The selected chat model must
@@ -25,8 +26,9 @@ does not establish tool compatibility.
 - A persisted goal drives tool calls, observations, requirement checks and
   delivery. Plain progress text and queued media IDs are not completion.
 - Tools wrap conversation reading, vision, image generation/editing, stickers,
-  video and cancellation of unsubmitted media. Optional `search_web` uses the
-  existing hosted-search client and rejects answers with zero observed searches.
+  video and cancellation of unsubmitted media. Optional hosted Web Search is
+  sent directly with the Agent's Responses request, so the selected model
+  searches and continues in the same model step.
 - Incoming additions are persisted and interrupt stale model output. One active
   goal per user/chat/topic can answer incidental questions while media waits;
   it does not yet maintain multiple independently selectable concurrent goals.

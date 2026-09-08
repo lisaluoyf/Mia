@@ -26,6 +26,7 @@ const environmentSchema = z.object({
   MIA_AGENT_ENABLED: z.enum(["true", "false"]).default("false"),
   MIA_AGENT_ALLOWED_USERS: z.string().regex(/^\s*(?:\d+\s*(?:,\s*\d+\s*)*)?$/).default(""),
   MIA_AGENT_WEB_SEARCH: z.enum(["true", "false"]).default("false"),
+  MIA_AGENT_TIMEOUT_MS: z.coerce.number().int().min(30_000).max(600_000).default(300_000),
   MIA_ACTIVATION_ENABLED: z.enum(["true", "false"]).default("false"),
   MIA_ACTIVATION_INTERVAL_MS: z.coerce.number().int().min(10_000).max(3_600_000).default(60_000),
   MIA_ACTIVATION_DAILY_LIMIT: z.coerce.number().int().min(1).max(10_000).default(50),
@@ -56,6 +57,7 @@ export interface AppConfig {
   agentEnabled: boolean;
   agentAllowedUsers: number[];
   agentWebSearch: boolean;
+  agentTimeoutMs: number;
   activationEnabled: boolean;
   activationIntervalMs: number;
   activationDailyLimit: number;
@@ -95,6 +97,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     agentEnabled: parsed.MIA_AGENT_ENABLED === "true",
     agentAllowedUsers: parsed.MIA_AGENT_ALLOWED_USERS.split(",").map(value => value.trim()).filter(Boolean).map(Number),
     agentWebSearch: parsed.MIA_AGENT_WEB_SEARCH === "true",
+    agentTimeoutMs: parsed.MIA_AGENT_TIMEOUT_MS,
     activationEnabled: parsed.MIA_ACTIVATION_ENABLED === "true",
     activationIntervalMs: parsed.MIA_ACTIVATION_INTERVAL_MS,
     activationDailyLimit: parsed.MIA_ACTIVATION_DAILY_LIMIT,

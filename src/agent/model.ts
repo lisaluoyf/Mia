@@ -18,12 +18,13 @@ export async function responseStep(options: {
   input: Item[]; tools: ToolDefinition[]; signal: AbortSignal;
   timeoutMs: number; fetcher?: typeof fetch; webSearch?: boolean;
 }): Promise<ModelStep> {
+  const deadline = AbortSignal.timeout(options.timeoutMs);
   let response: Response;
   try {
     response = await (options.fetcher ?? fetch)(`${options.baseUrl}/v1/responses`, {
       method: "POST",
       headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
-      signal: AbortSignal.any([options.signal, AbortSignal.timeout(options.timeoutMs)]),
+      signal: AbortSignal.any([options.signal, deadline]),
       body: JSON.stringify({
         model: options.model, instructions: options.instructions, input: options.input,
         tools: [...options.tools, ...(options.webSearch ? [{ type: "web_search" }] : [])],
@@ -33,6 +34,7 @@ export async function responseStep(options: {
     });
   } catch {
     if (options.signal.aborted) throw options.signal.reason;
+    if (deadline.aborted) throw new AgentModelError("model_timeout", true);
     throw new AgentModelError("model_transport_error", true);
   }
   if (!response.ok) {

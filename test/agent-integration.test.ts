@@ -212,17 +212,6 @@ describe("agent capability integration", () => {
     expect(client.submitImage).not.toHaveBeenCalled();
     expect(media.getJobByIdempotencyKey("agent:cancel")?.errorCode).toBe("cancelled_before_submission");
   });
-  it("rejects text-only fake search success and retains actual search evidence", async () => {
-    const media = mediaStore();
-    const client = { resolveAPIKey: vi.fn().mockResolvedValue("own-key"), structuredResponse: vi.fn().mockResolvedValueOnce({ data: { answer: "I will check" }, webSearch: { callCount: 0, queries: [], sources: [] } }).mockResolvedValueOnce({ data: { answer: "Retrieved answer" }, webSearch: { callCount: 1, queries: ["query"], sources: [{ title: "Source", url: "https://example.invalid" }] } }) };
-    const tools = createAgentTools({ media, client: client as unknown as APIMasterClient, settings: { getPreferences: () => ({ chatModel: "selected" }) } as unknown as ModelSettingsService, api: {} as Api, botToken: "test", webSearch: true });
-    const tool = tools.find(tool => tool.definition.name === "search_web")!;
-    const operation = op("search_web"); operation.call.arguments = JSON.stringify({ query: "query" });
-    const first = await tool.execute(run(), operation, new AbortController().signal, () => true);
-    expect(first).toMatchObject({ status: "failed", error: { code: "search_not_executed" } });
-    const second = await tool.execute(run(), operation, new AbortController().signal, () => true);
-    expect(second).toMatchObject({ status: "succeeded", data: { webSearch: { callCount: 1 } } });
-  });
 });
 
 describe("durable agent ingress", () => {

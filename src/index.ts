@@ -100,7 +100,7 @@ async function main(): Promise<void> {
     store: agentStore, media: mediaStore, client, settings, credentials: chatCredentials,
     contexts, logger, botToken: config.telegramBotToken, baseUrl: config.apimasterBaseUrl,
     model: () => modelConfig.get("intent_router") ?? config.miaRouterModel,
-    timeoutMs: config.miaRouterTimeoutMs, enabled: config.agentEnabled,
+    timeoutMs: config.agentTimeoutMs, enabled: config.agentEnabled,
     allowedUsers: config.agentAllowedUsers, webSearch: config.agentWebSearch,
   });
   const router = new IntentRouter(client, {

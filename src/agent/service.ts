@@ -63,7 +63,12 @@ export class AgentService {
         const selected = this.options.settings.getPreferences(run.input.userId).chatModel ?? this.options.model();
         const credential = await this.options.credentials.resolve(run.input.userId, selected);
         const permittedTools = credential.source === "user" ? tools : tools.filter(tool => ["finish", "read_conversation"].includes(tool.name));
-        return responseStep({ baseUrl: this.options.baseUrl, apiKey: credential.apiKey, model: credential.model, instructions, input, tools: permittedTools, signal, timeoutMs: this.options.timeoutMs });
+        return responseStep({
+          baseUrl: this.options.baseUrl, apiKey: credential.apiKey, model: credential.model,
+          instructions, input, tools: permittedTools, signal, timeoutMs: this.options.timeoutMs,
+          // Hosted search runs inside this model response, not as a second model request.
+          webSearch: credential.source === "user" && this.options.webSearch,
+        });
       },
       notify: run => this.notify(run),
       deliver: (run, current) => this.deliver(run, current),

@@ -24,16 +24,18 @@ describe("native agent Responses contract", () => {
   it.each([false, true])("sends provider-compatible strict schemas with web search %s", async webSearch => {
     // Definitions must not access execution dependencies while being constructed.
     const unavailable = new Proxy({}, { get() { throw new Error("Unexpected tool execution"); } });
-    const tools = createAgentTools({ client: unavailable, settings: unavailable, media: unavailable, api: unavailable, botToken: "test", webSearch } as Parameters<typeof createAgentTools>[0]);
+    const tools = createAgentTools({ client: unavailable, settings: unavailable, media: unavailable, api: unavailable, botToken: "test" } as Parameters<typeof createAgentTools>[0]);
     const fetcher = vi.fn().mockResolvedValue(Response.json({ status: "completed", output: [{ type: "message", content: [] }] }));
-    await responseStep({ ...options, tools: [...tools.map(tool => tool.definition), finishTool], fetcher });
-    const body = JSON.parse((fetcher.mock.calls[0]![1] as RequestInit).body as string) as { tools: typeof finishTool[] };
+    await responseStep({ ...options, tools: [...tools.map(tool => tool.definition), finishTool], webSearch, fetcher });
+    const body = JSON.parse((fetcher.mock.calls[0]![1] as RequestInit).body as string) as { tools: Array<typeof finishTool | { type: "web_search" }> };
     expect(body.tools).toHaveLength(webSearch ? 9 : 8);
     for (const tool of body.tools) {
+      if (tool.type === "web_search") continue;
       expect(tool.strict).toBe(true);
       checkStrictSchema(tool.parameters);
     }
-    const finish = body.tools.find(tool => tool.name === "finish")?.parameters;
+    expect(body.tools.filter(tool => tool.type === "web_search")).toHaveLength(webSearch ? 1 : 0);
+    const finish = body.tools.find((tool): tool is typeof finishTool => tool.type === "function" && tool.name === "finish")?.parameters;
     expect(finish?.required).toEqual(expect.arrayContaining(["status", "text", "presentation", "requirements"]));
     expect(finish).toMatchObject({
       properties: { presentation: { anyOf: [MIA_RESPONSE_JSON_SCHEMA, { type: "null" }] } },
@@ -58,6 +60,13 @@ describe("native agent Responses contract", () => {
   it("distinguishes throttling from quota failures", async () => {
     const fetcher = vi.fn().mockResolvedValue(Response.json({ error: { code: "rate_limit_exceeded" } }, { status: 429 }));
     await expect(responseStep({ ...options, fetcher })).rejects.toMatchObject({ retryable: true, code: "rate_limit_exceeded" });
+  });
+  it("reports its own deadline separately from transport failures", async () => {
+    const fetcher = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      await new Promise<void>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))));
+      return Response.json({});
+    });
+    await expect(responseStep({ ...options, timeoutMs: 1, fetcher })).rejects.toMatchObject({ code: "model_timeout", retryable: true });
   });
   it("rejects duplicate call identities", async () => {
     const item = { type: "function_call", call_id: "c1", name: "lookup", arguments: "{}" };

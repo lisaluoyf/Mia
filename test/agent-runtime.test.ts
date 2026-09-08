@@ -30,6 +30,19 @@ function setup(model: (run: Run) => ModelStep | Promise<ModelStep>, tools: Agent
 afterEach(async () => { for (const runtime of runtimes.splice(0)) await runtime.stop(); for (const store of stores.splice(0)) store.close(); });
 
 describe("goal-driven agent runtime", () => {
+  it("accepts search completion only after an observed hosted web search", async () => {
+    const search = { type: "web_search_call", id: "ws_1", action: { type: "search", query: "latest news" } };
+    const finishSearch = () => call("finish", { text: "Current answer", status: "completed", requirements: [{ requirement: "Current facts", kind: "search", satisfied: true, evidence: ["native_web_search"] }] }, "finish-search");
+    const f = setup(() => ({ output: [search, finishSearch().output[0]!], calls: finishSearch().calls }));
+    f.runtime.enqueue(input); await f.runtime.drain();
+    expect(f.deliver).toHaveBeenCalledTimes(1);
+  });
+  it("does not accept a search claim without a hosted web search result", async () => {
+    const f = setup(() => call("finish", { text: "Current answer", status: "completed", requirements: [{ requirement: "Current facts", kind: "search", satisfied: true, evidence: ["native_web_search"] }] }, "finish-search"));
+    f.runtime.enqueue(input); await f.runtime.drain();
+    expect(f.deliver).not.toHaveBeenCalled();
+    expect(f.store.list()[0]?.status).toBe("blocked");
+  });
   it.each<MiaResponse | null>([
     null,
     { ...miaResponseFromText("Body"), title: { text: "Result", emoji: null } },
