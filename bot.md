@@ -15,6 +15,9 @@
 
 ### Agent Loop 第一版实现（2026-09-08，未部署）
 
+- 2026-09-08 工具 Schema 回归修复：生产 `0f930ba` 的 `finish.presentation` 由 Zod 生成了渠道不支持的 `oneOf`，导致整个 Responses 请求在工具执行前被 HTTP 400 拒绝。改为复用已有 `MIA_RESPONSE_JSON_SCHEMA` 的 `anyOf` 定义，保留本地 Zod 验证及富文本交付；不修改模型、搜索或灰度配置。新增实际出站工具 Schema 和 nullable／普通富文本／表格 finish 回归；合入已上线 `027d524` 后，本地 338/338 测试、Lint、类型检查、构建和差异检查通过。
+- 增加显式运维探针：构建后运行 `node --env-file=.env dist/agent/schema-smoke.js TELEGRAM_USER_ID MODEL`，仅对已启用 Agent 的指定用户发起一次真实 Responses 请求并验证富文本解析／渲染，不执行工具、不发送 Telegram、不重放旧任务。发布 SHA 与生产验证结果以本次部署输出及服务器 `release.json` 为准。
+
 - 2026-09-08 富文本回归修复：Agent 最终输出复用 MiaResponse，最终答复和过程提示使用 Telegram 富文本；最终答复仅在明确格式拒绝时降级 HTML／纯文本，分段交付与旧任务收据兼容。上线版本以 Git 发布记录为准。
 
 - 新增默认关闭且要求 Telegram 用户白名单的单 Agent runtime：目标、输入、工具记录、异步等待、审批和交付持久化；模型根据工具观察继续行动，最终通过要求与证据检查。

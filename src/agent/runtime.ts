@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { miaResponseSchema, miaResponsePlainText } from "../presentation/schema.js";
+import { MIA_RESPONSE_JSON_SCHEMA, miaResponseSchema, miaResponsePlainText } from "../presentation/schema.js";
 import type { Logger } from "pino";
 import { AgentModelError } from "./model.js";
 import type { AgentStore } from "./store.js";
@@ -17,10 +17,18 @@ const finishSchema = z.object({
     evidence: z.array(z.string()),
   })).min(1).max(20),
 });
+// Keep local Zod validation, but use the provider-compatible rich-text wire schema.
+const finishParameters = z.toJSONSchema(finishSchema.extend({ presentation: z.null() }));
 export const finishTool: ToolDefinition = {
   type: "function", name: "finish", strict: true,
   description: "Propose an answer and check ALL requirements of the latest user goal against evidence. Evidence IDs are operation IDs. For ordinary text answers no external evidence is necessary. Never report a promised or submitted action as completed.",
-  parameters: z.toJSONSchema(finishSchema.extend({ presentation: miaResponseSchema.nullable() })),
+  parameters: {
+    ...finishParameters,
+    properties: {
+      ...finishParameters.properties,
+      presentation: { anyOf: [MIA_RESPONSE_JSON_SCHEMA, { type: "null" }] },
+    },
+  },
 };
 export const instructions = `You are Mia, a Telegram agent. Work toward the user's actual goal, not a single reply.
 Read the latest user corrections, tool observations and outstanding work before choosing the next action.

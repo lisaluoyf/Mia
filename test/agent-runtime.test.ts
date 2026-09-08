@@ -3,6 +3,7 @@ import { AgentRuntime } from "../src/agent/runtime.js";
 import { AgentStore } from "../src/agent/store.js";
 import { AgentModelError } from "../src/agent/model.js";
 import type { AgentInput, AgentTool, ModelStep, Run, ToolResult } from "../src/agent/types.js";
+import { miaResponseFromText, miaResponsePlainText, type MiaResponse } from "../src/presentation/schema.js";
 
 const input: AgentInput = { key: "1", userId: 42, chatId: 42, threadId: null, messageId: 1, replyToMessageId: null, language: "en", text: "Help me", media: [], context: "" };
 function call(name: string, args: unknown = {}, id = "call-1"): ModelStep {
@@ -29,6 +30,18 @@ function setup(model: (run: Run) => ModelStep | Promise<ModelStep>, tools: Agent
 afterEach(async () => { for (const runtime of runtimes.splice(0)) await runtime.stop(); for (const store of stores.splice(0)) store.close(); });
 
 describe("goal-driven agent runtime", () => {
+  it.each<MiaResponse | null>([
+    null,
+    { ...miaResponseFromText("Body"), title: { text: "Result", emoji: null } },
+    { version: 1, title: null, actions: [], blocks: [{ type: "table", heading: "Comparison", emoji: null, columns: ["Item", "Status"], rows: [["Schema", "OK"]], compact: false }] },
+  ])("validates and delivers nullable rich finish output %#", async presentation => {
+    const f = setup(() => call("finish", { status: "completed", text: "Plain answer", presentation, requirements: [{ requirement: "Answer", kind: "text", satisfied: true, evidence: [] }] }));
+    f.runtime.enqueue(input); await f.runtime.drain();
+    expect(f.deliver).toHaveBeenCalledTimes(1);
+    const delivered = f.deliver.mock.calls[0]![0] as Run;
+    expect(delivered.final?.text).toBe(presentation ? miaResponsePlainText(presentation) : "Plain answer");
+    expect(delivered.final?.presentation).toEqual(presentation ?? undefined);
+  });
   it("finishes ordinary text in one model step and deduplicates input", async () => {
     const f = setup(() => finish());
     f.runtime.enqueue(input); await f.runtime.drain();

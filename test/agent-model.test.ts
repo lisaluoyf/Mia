@@ -1,8 +1,44 @@
 import { describe, expect, it, vi } from "vitest";
 import { responseStep } from "../src/agent/model.js";
+import { finishTool } from "../src/agent/runtime.js";
+import { createAgentTools } from "../src/agent/tools.js";
+import { MIA_RESPONSE_JSON_SCHEMA } from "../src/presentation/schema.js";
+
+function checkStrictSchema(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    value.forEach(checkStrictSchema);
+    return;
+  }
+  const schema = value as Record<string, unknown>;
+  expect(schema).not.toHaveProperty("oneOf");
+  if (schema.type === "object") {
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.required).toEqual(expect.arrayContaining(Object.keys(schema.properties as object)));
+  }
+  Object.values(schema).forEach(checkStrictSchema);
+}
 
 const options = { baseUrl: "https://example.invalid", apiKey: "test-key", model: "configured-model", instructions: "test", input: [], tools: [], signal: new AbortController().signal, timeoutMs: 1000 };
 describe("native agent Responses contract", () => {
+  it.each([false, true])("sends provider-compatible strict schemas with web search %s", async webSearch => {
+    // Definitions must not access execution dependencies while being constructed.
+    const unavailable = new Proxy({}, { get() { throw new Error("Unexpected tool execution"); } });
+    const tools = createAgentTools({ client: unavailable, settings: unavailable, media: unavailable, api: unavailable, botToken: "test", webSearch } as Parameters<typeof createAgentTools>[0]);
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ status: "completed", output: [{ type: "message", content: [] }] }));
+    await responseStep({ ...options, tools: [...tools.map(tool => tool.definition), finishTool], fetcher });
+    const body = JSON.parse((fetcher.mock.calls[0]![1] as RequestInit).body as string) as { tools: typeof finishTool[] };
+    expect(body.tools).toHaveLength(webSearch ? 9 : 8);
+    for (const tool of body.tools) {
+      expect(tool.strict).toBe(true);
+      checkStrictSchema(tool.parameters);
+    }
+    const finish = body.tools.find(tool => tool.name === "finish")?.parameters;
+    expect(finish?.required).toEqual(expect.arrayContaining(["status", "text", "presentation", "requirements"]));
+    expect(finish).toMatchObject({
+      properties: { presentation: { anyOf: [MIA_RESPONSE_JSON_SCHEMA, { type: "null" }] } },
+    });
+  });
   it("preserves reasoning and function items and disables parallel actions", async () => {
     const output = [{ type: "reasoning", id: "r1", encrypted_content: "opaque" }, { type: "function_call", call_id: "c1", name: "lookup", arguments: "{}" }];
     const fetcher = vi.fn().mockResolvedValue(Response.json({ status: "completed", output }));
