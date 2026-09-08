@@ -599,7 +599,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     return;
   }
   const callbackReply = pending?.missingRequired.includes("callback_reply") === true &&
-    pending.sourceMessageIds.at(-1) === message.reply_to_message?.message_id;
+    (message.chat.type === "private" || pending.sourceMessageIds.at(-1) === message.reply_to_message?.message_id);
   const savedCallbackIntent = callbackReply ? mediaIntentSchema.safeParse(pending.slots) : null;
 
   if (!automaticFollowUp && request.inputs.length > 0 && await rejectUnavailableMediaUser(ctx, message, dependencies)) {
@@ -1237,14 +1237,11 @@ async function sendIntroductionActionPrompt(
   const copy = miaIntroductionActionPrompt(locale, action);
   const actorName = [actor.first_name, actor.last_name].filter(Boolean).join(" ") || actor.username || String(actor.id);
   const promptText = sourceMessage.chat.type === "private" ? copy.text : `${actorName}: ${copy.text}`;
+  const replyMarkup = forceReplyMarkup(sourceMessage, copy.placeholder);
   const prompt = await sendRichText(ctx, sourceMessage.chat.id, promptText, {
     ...threadOptionFromCallbackMessage(sourceMessage),
     reply_parameters: { message_id: sourceMessage.message_id, allow_sending_without_reply: true },
-    reply_markup: {
-      force_reply: true,
-      selective: true,
-      input_field_placeholder: copy.placeholder,
-    },
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
   const intent = action === "image" ? "image_generate" : action === "video" ? "video_generate" : "sticker_create";
   const instruction = action === "sticker" ? "制作一张贴纸" : "";
@@ -1411,10 +1408,11 @@ async function handleImageActionCallback(ctx: Context, dependencies: BotDependen
   const promptText = botText(locale, action === "analyze" ? "analyzeImagePrompt" : action === "edit" ? "editImagePrompt" : "animateImagePrompt");
   await ctx.answerCallbackQuery();
   await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, { reply_markup: { inline_keyboard: [] } });
+  const replyMarkup = forceReplyMarkup(message);
   const prompt = await sendRichText(ctx, message.chat.id, promptText, {
     ...threadOptionFromCallbackMessage(message),
     reply_parameters: { message_id: sourceMessageId, allow_sending_without_reply: true },
-    reply_markup: { force_reply: true, selective: true },
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
   dependencies.mediaStore.savePendingIntent({
     ...pendingScope,
@@ -1681,6 +1679,7 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
     await ctx.answerCallbackQuery();
     const displayName = query.from.first_name.trim() || query.from.username || "User";
     const instruction = botText(locale, "editInstruction");
+    const replyMarkup = forceReplyMarkupForJob(job, botText(locale, "continueEditing"));
     try {
       const prompt = await ctx.api.sendMessage(job.chatId, `${displayName}: ${instruction}`, {
         ...threadOptionFromJob(job),
@@ -1691,11 +1690,7 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
           length: displayName.length,
           user: query.from,
         }],
-        reply_markup: {
-          force_reply: true,
-          selective: true,
-          input_field_placeholder: botText(locale, "continueEditing"),
-        },
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       });
       dependencies.mediaStore.savePendingIntent({
         ...scopeForJob(job),
@@ -2519,6 +2514,20 @@ function threadOptionFromJob(job: MediaJob) {
 
 function threadOptionFromCallbackMessage(message: Message) {
   return message.message_thread_id === undefined ? {} : { message_thread_id: message.message_thread_id };
+}
+
+function forceReplyMarkup(message: Message, inputFieldPlaceholder?: string) {
+  if (message.chat.type === "private") return null;
+  return {
+    force_reply: true as const,
+    selective: true,
+    ...(inputFieldPlaceholder ? { input_field_placeholder: inputFieldPlaceholder } : {}),
+  };
+}
+
+function forceReplyMarkupForJob(job: { chatId: number; telegramUserId: number }, inputFieldPlaceholder: string) {
+  if (job.chatId === job.telegramUserId) return null;
+  return { force_reply: true as const, selective: true, input_field_placeholder: inputFieldPlaceholder };
 }
 
 function replyOptions(message: Message, extra: Record<string, unknown> = {}) {

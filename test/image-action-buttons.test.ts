@@ -110,8 +110,8 @@ describe("image action buttons", () => {
     const prompt = calls.filter((call) => call.method === "sendMessage").at(-1);
     expect(prompt?.payload).toMatchObject({
       text: "回复这条消息，告诉我你想了解图片中的什么。",
-      reply_markup: { force_reply: true, selective: true },
     });
+    expect(prompt?.payload.reply_markup).toBeUndefined();
     expect(prompt?.payload).toMatchObject({
       reply_parameters: { message_id: 40, allow_sending_without_reply: true },
     });

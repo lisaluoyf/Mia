@@ -125,8 +125,11 @@ describe("sticker callbacks", () => {
   }
 
   it("continues editing a sticker and preserves sticker output mode", async () => {
-    const { bot, classify, job } = setup();
+    const { bot, calls, classify, job } = setup();
     await bot.handleUpdate(callbackUpdate(job.id, "edit", 9101) as never);
+
+    const editPrompt = calls.find((call) => call.method === "sendMessage");
+    expect(editPrompt?.payload.reply_markup).toBeUndefined();
 
     expect(store?.getPendingIntent({ telegramUserId: 42, chatId: 42, threadId: null })).toMatchObject({
       intent: "sticker_create",
@@ -142,13 +145,6 @@ describe("sticker callbacks", () => {
         chat: { id: 42, type: "private", first_name: "Liz" },
         from: { id: 42, is_bot: false, first_name: "Liz", language_code: "zh-CN" },
         text: "眼镜保留，衣服换成红色",
-        reply_to_message: {
-          message_id: 78,
-          date: 1_788_333_600,
-          chat: { id: 42, type: "private", first_name: "Liz" },
-          from: botInfo,
-          text: "Liz: 请回复生成结果，并说明你想如何修改。",
-        },
       },
     } as never);
 
