@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   const result = await responseStep({
     baseUrl: config.apimasterBaseUrl, apiKey, model, instructions,
     input: [{ role: "user", content: verifySearch
-      ? "This is an operator compatibility check, not a user task. Use hosted web search once for the current official OpenAI news page. Then call only finish: status completed, text Hosted search OK, presentation with title Check and one paragraph Hosted search OK, actions []. Include one satisfied search requirement with evidence [native_web_search]. Do not call media, inspection or other function tools."
+      ? "This is an operator compatibility check, not a user task. Use hosted web search once for the current official OpenAI news page. Then call only finish: status completed, text Hosted search OK, presentation with title Check and one paragraph Hosted search OK, actions []. Include one satisfied search requirement. Do not call media, inspection or other function tools."
       : "This is a schema compatibility check, not a user task. Call only finish, status completed, text Schema OK, presentation with title Check and one paragraph Schema OK, actions []. Include one satisfied text requirement with no evidence. Do not call search, media, inspection or other tools." }],
     tools: [...tools.map(tool => tool.definition), finishTool], webSearch: config.agentWebSearch,
     signal: new AbortController().signal, timeoutMs: config.agentTimeoutMs,
