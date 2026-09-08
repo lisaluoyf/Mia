@@ -131,7 +131,6 @@ function previewData() {
     { key: "intent_router", group: "internal", scenario: "意图识别与路由", description: "识别聊天、图片、贴纸和视频请求", capability: "chat", defaultModel: "gpt-5.4", model: "gpt-5.4", updatedAt: null },
     { key: "private_compaction", group: "internal", scenario: "私聊记忆整理", description: "整理长期记忆和私聊滚动摘要", capability: "chat", defaultModel: "gpt-5.4", model: "gpt-5.4", updatedAt: null },
     { key: "group_compaction", group: "internal", scenario: "群聊上下文整理", description: "整理群聊和 Topic 上下文", capability: "chat", defaultModel: "gpt-5.4", model: "gpt-5.4", updatedAt: null },
-    { key: "group_summary", group: "internal", scenario: "群聊总结", description: "响应用户主动发起的群聊总结", capability: "chat", defaultModel: "gpt-5.4", model: "gpt-5.4", updatedAt: null },
     { key: "guest_chat", group: "internal", scenario: "访客聊天与无 Key 回退", description: "使用 Mia 的受限访客 Token", capability: "chat", defaultModel: "gpt-5.4", model: "gpt-5.4", updatedAt: null },
   ];
   const models: DebugModelOption[] = [

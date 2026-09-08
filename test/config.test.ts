@@ -29,4 +29,13 @@ describe("Mia configuration", () => {
     expect(loadConfig({ ...requiredEnvironment, MIA_GUEST_CHAT_API_KEY: "guest-test-key" }).agentTimeoutMs).toBe(300_000);
     expect(() => loadConfig({ ...requiredEnvironment, MIA_GUEST_CHAT_API_KEY: "guest-test-key", MIA_AGENT_TIMEOUT_MS: "600001" })).toThrow();
   });
+
+  it("keeps the no-message Agent Loop monitor opt-in with a bounded cadence", () => {
+    const config = loadConfig({ ...requiredEnvironment, MIA_GUEST_CHAT_API_KEY: "guest-test-key" });
+    expect(config.agentSmokeEnabled).toBe(false);
+    expect(config.agentSmokeUserId).toBeNull();
+    expect(config.agentSmokeModel).toBe("gpt-5.6-luna");
+    expect(config.agentSmokeIntervalMs).toBe(21_600_000);
+    expect(() => loadConfig({ ...requiredEnvironment, MIA_GUEST_CHAT_API_KEY: "guest-test-key", MIA_AGENT_SMOKE_INTERVAL_MS: "299999" })).toThrow();
+  });
 });

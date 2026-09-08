@@ -3,14 +3,13 @@ export interface MiaBotCommand {
   description: string;
 }
 
-const COMMANDS = ["tr", "ntr", "image", "video", "sticker", "new", "summary"] as const;
+const COMMANDS = ["tr", "ntr", "image", "video", "sticker", "new"] as const;
 
 const ENGLISH_DESCRIPTIONS: Record<typeof COMMANDS[number], string> = {
   image: "Generate or edit an image",
   video: "Generate a video",
   sticker: "Create a Telegram sticker",
   new: "Start a new conversation",
-  summary: "Summarize the current group or Topic",
   tr: "Enter translation mode",
   ntr: "Exit translation mode",
 };
@@ -20,7 +19,6 @@ const CHINESE_DESCRIPTIONS: Record<typeof COMMANDS[number], string> = {
   video: "生成视频",
   sticker: "制作 Telegram 贴纸",
   new: "开始新对话",
-  summary: "总结当前群聊或 Topic",
   tr: "进入翻译模式",
   ntr: "退出翻译模式",
 };

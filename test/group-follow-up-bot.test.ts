@@ -300,7 +300,7 @@ describe("Mia group follow-up", () => {
       .mockResolvedValueOnce({
         should_respond: true,
         response_to_message_id: 192,
-        intent_hint: "media_or_summary",
+        intent_hint: "media",
         needs_web_search: false,
         confidence: 0.99,
         reason: "explicit_image_edit_request",

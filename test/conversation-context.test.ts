@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { buildConversationMessages, loadConversationContext } from "../src/context/conversation.js";
+import {
+  buildConversationMessages,
+  estimateStoredMessageTokens,
+  GROUP_CONTEXT_TOKEN_BUDGET,
+  loadConversationContext,
+} from "../src/context/conversation.js";
 import { ContextStore } from "../src/storage/store.js";
 
 describe("conversation context", () => {
@@ -193,7 +198,7 @@ describe("conversation context", () => {
     expect(serialized).not.toContain("PRIVATE SECRET");
   });
 
-  it("uses 20 Topic messages plus 8 speaker messages and prioritizes valid nearby media", () => {
+  it("uses 100 Topic messages plus the triggering member's recent messages and prioritizes valid nearby media", () => {
     store = new ContextStore(":memory:");
     store.upsertUser({ telegramUserId: 42, firstName: "Roma", lastName: null, username: "roma", languageCode: "zh-CN", isBot: false });
     store.upsertUser({ telegramUserId: 43, firstName: "Lee", lastName: null, username: "lee", languageCode: "zh-CN", isBot: false });
@@ -232,13 +237,83 @@ describe("conversation context", () => {
 
     const ids = context.messages.map((message) => message.messageId);
     expect(ids).toContain(2);
-    expect(ids).not.toContain(1);
-    expect(ids).not.toContain(20);
+    expect(ids).toContain(1);
+    expect(ids).toContain(20);
     expect(ids).toContain(21);
     expect(ids).toContain(40);
     expect(context.mediaInputs.map((media) => media.messageId)).toEqual([10, 2, 21]);
     const serialized = JSON.stringify(buildConversationMessages(context, [], 99));
     expect(serialized).toContain("message_id=10");
     expect(serialized).toContain("pixels=not_provided");
+  });
+
+  it("keeps the triggering member's eight latest messages even when they predate the group tail", () => {
+    store = new ContextStore(":memory:");
+    store.upsertUser({ telegramUserId: 42, firstName: "Roma", lastName: null, username: "roma", languageCode: "zh-CN", isBot: false });
+    store.upsertUser({ telegramUserId: 43, firstName: "Lee", lastName: null, username: "lee", languageCode: "zh-CN", isBot: false });
+    store.upsertUser({ telegramUserId: 99, firstName: "Mia", lastName: null, username: "mia", languageCode: null, isBot: true });
+    store.upsertChat({ chatId: -1001, type: "supergroup", title: "Builders", username: null, description: null, isForum: false });
+    for (let messageId = 1; messageId <= 150; messageId += 1) {
+      const senderUserId = messageId <= 8 || messageId === 150 ? 42 : 43;
+      store.saveMessage({
+        chatId: -1001, messageId, threadId: null, senderUserId, senderChatId: null,
+        replyToMessageId: null, contentType: "text", text: `Message ${messageId}`,
+        caption: null, entitiesJson: null, mediaFileId: null, mediaUniqueId: null,
+        sentAt: `2026-09-03T10:${String(messageId % 60).padStart(2, "0")}:00.000Z`, editedAt: null,
+      });
+    }
+
+    const context = loadConversationContext({
+      store,
+      scope: { type: "group", chatId: -1001 },
+      userId: 42,
+      currentMessageId: 150,
+      replyToMessageId: null,
+      metadata: {
+        chatType: "supergroup", chatTitle: "Builders", currentUser: "roma", language: "zh-CN",
+        currentTime: "2026-09-03T11:00:00.000Z", timezone: null, trigger: "message", currentTask: null,
+      },
+    }, 99);
+
+    const ids = context.messages.map((message) => message.messageId);
+    expect(ids).toEqual(expect.arrayContaining([2, 3, 4, 5, 6, 7, 8, 51, 150]));
+    expect(ids).not.toContain(1);
+    expect(ids).not.toContain(50);
+  });
+
+  it("keeps the current message, reply chain, and triggering member ahead of the group tail within the token budget", () => {
+    store = new ContextStore(":memory:");
+    store.upsertUser({ telegramUserId: 42, firstName: "Roma", lastName: null, username: "roma", languageCode: "zh-CN", isBot: false });
+    store.upsertUser({ telegramUserId: 43, firstName: "Lee", lastName: null, username: "lee", languageCode: "zh-CN", isBot: false });
+    store.upsertUser({ telegramUserId: 99, firstName: "Mia", lastName: null, username: "mia", languageCode: null, isBot: true });
+    store.upsertChat({ chatId: -1001, type: "supergroup", title: "Builders", username: null, description: null, isForum: false });
+    const body = "中".repeat(1_100);
+    for (let messageId = 1; messageId <= 150; messageId += 1) {
+      const senderUserId = messageId <= 8 || messageId === 150 ? 42 : 43;
+      store.saveMessage({
+        chatId: -1001, messageId, threadId: null, senderUserId, senderChatId: null,
+        replyToMessageId: messageId === 9 ? 8 : messageId === 150 ? 9 : null,
+        contentType: "text", text: `Message ${messageId} ${body}`,
+        caption: null, entitiesJson: null, mediaFileId: null, mediaUniqueId: null,
+        sentAt: `2026-09-03T10:${String(messageId % 60).padStart(2, "0")}:00.000Z`, editedAt: null,
+      });
+    }
+
+    const context = loadConversationContext({
+      store,
+      scope: { type: "group", chatId: -1001 },
+      userId: 42,
+      currentMessageId: 150,
+      replyToMessageId: 9,
+      metadata: {
+        chatType: "supergroup", chatTitle: "Builders", currentUser: "roma", language: "zh-CN",
+        currentTime: "2026-09-03T11:00:00.000Z", timezone: null, trigger: "reply", currentTask: null,
+      },
+    }, 99);
+
+    const ids = context.messages.map((message) => message.messageId);
+    expect(ids).toEqual(expect.arrayContaining([2, 3, 4, 5, 6, 7, 8, 9, 149, 150]));
+    expect(context.messages.reduce((total, message) => total + estimateStoredMessageTokens(message), 0))
+      .toBeLessThanOrEqual(GROUP_CONTEXT_TOKEN_BUDGET);
   });
 });

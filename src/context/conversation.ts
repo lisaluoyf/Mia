@@ -5,8 +5,7 @@ import type { ConversationScope, MemoryRecord, StoredMessage, UserProfile } from
 
 export const CONTEXT_TURN_BATCH_SIZE = 10;
 const MAX_CONTEXT_MESSAGES = 100;
-export const GROUP_CONTEXT_CANDIDATE_MESSAGES = 200;
-export const GROUP_CONTEXT_TAIL_MESSAGES = 20;
+export const GROUP_CONTEXT_TAIL_MESSAGES = 100;
 export const GROUP_CONTEXT_SPEAKER_MESSAGES = 8;
 export const GROUP_CONTEXT_TOKEN_BUDGET = 16_000;
 const MAX_CONTEXT_IMAGES = 10;
@@ -38,7 +37,7 @@ export interface ConversationContext {
 interface LoadContextInput {
   store: Pick<ContextStore,
     "getLatestSummary" | "listMemories" | "listMessagesAfter" | "listRecentMessages" |
-    "getMessage" | "getReplyChain" | "getUser" | "listPendingCompletedTurns">;
+    "listRecentMessagesBySender" | "getMessage" | "getReplyChain" | "getUser" | "listPendingCompletedTurns">;
   scope: ConversationScope;
   userId: number;
   currentMessageId: number;
@@ -76,9 +75,8 @@ function belongsToScope(message: StoredMessage, scope: ConversationScope): boole
 
 function takeGroupContext(
   messages: readonly StoredMessage[],
-  speakerCandidates: readonly StoredMessage[],
+  speakerMessages: readonly StoredMessage[],
   replyChain: readonly StoredMessage[],
-  userId: number,
   currentMessageId: number,
 ): StoredMessage[] {
   const ordered = [...messages].sort((left, right) => left.messageId - right.messageId);
@@ -86,22 +84,20 @@ function takeGroupContext(
   const selected = new Map<number, StoredMessage>();
   let tokenCount = 0;
 
-  const add = (message: StoredMessage, required = false): void => {
+  const add = (message: StoredMessage): void => {
     if (selected.has(message.messageId)) return;
     const tokens = estimateStoredMessageTokens(message);
-    if (!required && tokenCount + tokens > GROUP_CONTEXT_TOKEN_BUDGET) return;
+    if (tokenCount + tokens > GROUP_CONTEXT_TOKEN_BUDGET) return;
     selected.set(message.messageId, message);
     tokenCount += tokens;
   };
 
-  if (current) add(current, true);
-  for (const message of replyChain) add(message, true);
+  if (current) add(current);
+  for (const message of [...replyChain].reverse()) add(message);
 
-  const newestFirst = [...speakerCandidates].sort((left, right) => right.messageId - left.messageId);
-  [...speakerCandidates].sort((left, right) => right.messageId - left.messageId)
-    .filter((message) => message.senderUserId === userId)
-    .slice(0, GROUP_CONTEXT_SPEAKER_MESSAGES)
-    .forEach((message) => add(message));
+  const newestFirst = [...messages].sort((left, right) => right.messageId - left.messageId);
+  [...speakerMessages].sort((left, right) => right.messageId - left.messageId)
+    .slice(0, GROUP_CONTEXT_SPEAKER_MESSAGES).forEach((message) => add(message));
   newestFirst.slice(0, GROUP_CONTEXT_TAIL_MESSAGES).forEach((message) => add(message));
 
   return [...selected.values()].sort((left, right) => left.messageId - right.messageId);
@@ -138,10 +134,13 @@ export function loadConversationContext(input: LoadContextInput, botUserId: numb
         : input.store.listRecentMessages(input.scope, MAX_CONTEXT_MESSAGES);
     messages = latestSummary || pendingTurns.length > 0 ? available : takeLastTurns(available, botUserId);
   } else {
-    const recent = input.store.listRecentMessages(input.scope, GROUP_CONTEXT_CANDIDATE_MESSAGES);
-    const available = latestSummary
-      ? recent.filter((message) => message.messageId > latestSummary.throughMessageId)
-      : recent;
+    const recent = input.store.listRecentMessages(input.scope, GROUP_CONTEXT_TAIL_MESSAGES);
+    const speakerMessages = input.store.listRecentMessagesBySender(
+      input.scope,
+      input.userId,
+      GROUP_CONTEXT_SPEAKER_MESSAGES,
+    );
+    const available = [...recent];
     const current = input.store.getMessage(input.scope.chatId, input.currentMessageId);
     if (current && belongsToScope(current, input.scope) && !available.some((message) => message.messageId === current.messageId)) {
       available.push(current);
@@ -150,7 +149,7 @@ export function loadConversationContext(input: LoadContextInput, botUserId: numb
       ? []
       : input.store.getReplyChain(input.scope.chatId, input.replyToMessageId)
         .filter((message) => belongsToScope(message, input.scope));
-    messages = takeGroupContext(available, recent, replyChain, input.userId, input.currentMessageId);
+    messages = takeGroupContext(available, speakerMessages, replyChain, input.currentMessageId);
   }
   const includedIds = new Set(messages.map((message) => message.messageId));
 

@@ -221,7 +221,8 @@ describe("Telegram sticker intent", () => {
     expect(store?.getJobByIdempotencyKey("message:42:7")).toBeNull();
     expect(classify).not.toHaveBeenCalled();
     expect(resolveAPIKey).not.toHaveBeenCalled();
-    expect(calls.find((call) => call.method === "sendMessage")?.payload.text).toContain("分析这张图片");
+    expect(calls.find((call) => call.method === "sendMessage")?.payload.text)
+      .toContain("这张图想让我做什么？");
   });
 
   it("keeps sticker generation disabled in groups", async () => {

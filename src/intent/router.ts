@@ -9,7 +9,7 @@ import {
 const followUpDecisionSchema = z.object({
   should_respond: z.boolean(),
   response_to_message_id: z.number().int().positive().nullable(),
-  intent_hint: z.enum(["chat", "media_or_summary"]),
+  intent_hint: z.enum(["chat", "media"]),
   needs_web_search: z.boolean(),
   confidence: z.number().min(0).max(1),
   reason: z.string().max(500),
@@ -24,7 +24,7 @@ const FOLLOW_UP_DECISION_JSON_SCHEMA = {
   properties: {
     should_respond: { type: "boolean" },
     response_to_message_id: { type: ["integer", "null"], minimum: 1 },
-    intent_hint: { type: "string", enum: ["chat", "media_or_summary"] },
+    intent_hint: { type: "string", enum: ["chat", "media"] },
     needs_web_search: { type: "boolean" },
     confidence: { type: "number", minimum: 0, maximum: 1 },
     reason: { type: "string", maxLength: 500 },
@@ -80,7 +80,7 @@ function withLegacyReply(value: unknown): unknown {
 }
 
 export const mediaIntentSchema = z.preprocess(withLegacyReply, z.object({
-  intent: z.enum(["chat", "group_summary", "image_generate", "image_edit", "sticker_create", "vision_qa", "video_generate"]),
+  intent: z.enum(["chat", "image_generate", "image_edit", "sticker_create", "vision_qa", "video_generate"]),
   should_respond: z.boolean().optional().default(true),
   response_to_message_id: z.number().int().positive().nullable().optional().default(null),
   confidence: z.number().min(0).max(1),
@@ -148,7 +148,6 @@ export interface IntentRouterInput {
   replyToMessageId?: number | null;
   repliedMessageText?: string | null;
   activePrivateImage: boolean;
-  allowGroupSummary?: boolean;
   summary?: string | null;
   recentMessages?: readonly RouterContextMessage[];
   mediaCandidates?: readonly RouterMediaCandidate[];
@@ -178,7 +177,7 @@ const ROUTER_SCHEMA = {
     "conversation_mode", "onboarding_opportunity", "profile_updates",
   ],
   properties: {
-    intent: { type: "string", enum: ["chat", "group_summary", "image_generate", "image_edit", "sticker_create", "vision_qa", "video_generate"] },
+    intent: { type: "string", enum: ["chat", "image_generate", "image_edit", "sticker_create", "vision_qa", "video_generate"] },
     should_respond: { type: "boolean" },
     response_to_message_id: { type: ["integer", "null"], minimum: 1 },
     confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -329,7 +328,7 @@ export function validateIntentRequirements(intent: MediaIntent, input: IntentRou
   const missing: string[] = [];
   const hasImages = input.mediaCount > 0 || input.replyMediaCount > 0 || input.activePrivateImage ||
     (intent.media_message_ids?.length ?? 0) > 0;
-  if (intent.intent !== "chat" && intent.intent !== "group_summary" && intent.intent !== "sticker_create" &&
+  if (intent.intent !== "chat" && intent.intent !== "sticker_create" &&
       intent.instruction.trim() === "") {
     missing.push(intent.intent === "vision_qa" ? "question" : "instruction");
   }
@@ -390,7 +389,6 @@ export class IntentRouter {
         sent_at: candidate.sentAt,
         source: candidate.source,
       })),
-      allow_group_summary: input.allowGroupSummary === true,
       summary: input.summary ?? null,
       recent_messages: recentMessages,
       onboarding: input.onboarding ?? { active: false, missingFields: [] },
@@ -429,7 +427,6 @@ export class IntentRouter {
             source: candidate.source,
           })),
           recent_messages: recentMessages,
-          allow_group_summary: input.allowGroupSummary === true,
           onboarding: input.onboarding ?? { active: false, missingFields: [] },
         } }),
       },
@@ -514,7 +511,7 @@ export class IntentRouter {
       // Telegram typing indicators are best-effort and must not block a confirmed response.
     }
 
-    if (decision.intent_hint === "media_or_summary") {
+    if (decision.intent_hint === "media") {
       const routed = await this.classifyFull(input, apiKey, model, fullMessages, false);
       if (routed.should_respond === false) {
         const usesCjk = /[\u3400-\u9fff\uf900-\ufaff]/u.test(input.text);
@@ -655,9 +652,6 @@ export class IntentRouter {
         missingRequired: [],
         webSearch,
       } : fallback("invalid_output", false);
-    }
-    if (intent.intent === "group_summary" && input.allowGroupSummary !== true) {
-      return fallback("invalid_output", !selective);
     }
     const allowedMediaIds = new Set((input.mediaCandidates ?? []).map((candidate) => candidate.messageId));
     const selectedMediaIds = [...new Set(intent.media_message_ids ?? [])].filter((messageId) => allowedMediaIds.has(messageId));

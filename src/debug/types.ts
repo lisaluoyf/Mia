@@ -6,8 +6,7 @@ export type DebugRequestKind =
   | "image_edit"
   | "video_generate"
   | "memory_compaction"
-  | "group_compaction"
-  | "group_summary";
+  | "group_compaction";
 
 export type DebugRequestStatus = "running" | "succeeded" | "failed" | "submitted";
 

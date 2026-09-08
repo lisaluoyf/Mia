@@ -11,7 +11,6 @@ describe("Telegram slash command menu", () => {
       "video",
       "sticker",
       "new",
-      "summary",
     ]);
   });
 

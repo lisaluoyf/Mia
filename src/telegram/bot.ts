@@ -14,7 +14,6 @@ import type { ChatCredential, ChatCredentialProvider } from "../credentials/chat
 import { buildConversationMessages, loadConversationContext, type ConversationContext } from "../context/conversation.js";
 import type { ContextCompactor } from "../context/compactor.js";
 import type { GroupContextCompactor } from "../context/group-compactor.js";
-import type { GroupSummaryService } from "../context/group-summary.js";
 import { debugContextLayers } from "../debug/context.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { DebugContextLayers, DebugRequestKind } from "../debug/types.js";
@@ -61,7 +60,6 @@ import {
   translationLanguageLabel,
   type TranslationLanguage,
 } from "./translation-languages.js";
-import { groupSummaryPresentation } from "./group-summary-html.js";
 import {
   miaIntroductionActionPrompt,
   miaIntroductionPanel,
@@ -85,7 +83,7 @@ interface BotDependencies {
   settings: Pick<ModelSettingsService, "getPreferences"> & Partial<Pick<ModelSettingsService, "getDefaults" | "getSnapshot">>;
   contexts: Pick<ContextStore, "upsertUser" | "upsertChat" | "upsertMember" | "saveMessage"> &
     Partial<Pick<ContextStore,
-      "listRecentMessages" | "getLatestSummary" | "clearConversation" | "listMemories" |
+      "listRecentMessages" | "listRecentMessagesBySender" | "getLatestSummary" | "clearConversation" | "listMemories" |
       "listMessagesAfter" | "getMessage" | "getReplyChain" | "getUser" | "listPendingCompletedTurns" |
       "wakeGroupFollowUp" | "getActiveGroupFollowUp" | "claimGroupFollowUpEvaluation" |
       "markGroupFollowUpHandled" | "expireGroupFollowUp" |
@@ -94,7 +92,6 @@ interface BotDependencies {
       "getTranslationLanguagePreference" | "setTranslationLanguagePair" | "exitTranslationSession">>;
   compactor?: ContextCompactor;
   groupCompactor?: GroupContextCompactor;
-  groupSummary?: GroupSummaryService;
   router?: IntentRouter;
   mediaStore?: MediaStore;
   botToken?: string;
@@ -131,7 +128,7 @@ interface IncomingRequest extends IncomingMessage {
 }
 
 type ContextReader = Pick<ContextStore,
-  "getLatestSummary" | "listMemories" | "listMessagesAfter" | "listRecentMessages" |
+  "getLatestSummary" | "listMemories" | "listMessagesAfter" | "listRecentMessages" | "listRecentMessagesBySender" |
   "getMessage" | "getReplyChain" | "getUser" | "listPendingCompletedTurns">;
 
 type FollowUpStore = Pick<ContextStore,
@@ -439,13 +436,11 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   };
   const identity = { id: ctx.me.id, username: ctx.me.username };
   const explicit = parseExplicitCommand(request.text);
-  const explicitSummaryPhrase = isExplicitGroupSummaryPhrase(promptFromMessage(policyInput, identity));
   const namedMediaReply = message.reply_to_message !== undefined && /^(?:@?mia)(?:\s|[,，:：])/i.test(request.text.trim());
   const repliedMessageText = messageText(message.reply_to_message);
   const pending = dependencies.mediaStore.getPendingIntent?.(scopeFor(message)) ?? null;
   const suppliesPendingMedia = pending !== null && request.inputs.length > 0;
-  if (!automaticFollowUp && !shouldRespond(policyInput, identity) && !explicit && !namedMediaReply &&
-      !explicitSummaryPhrase && !suppliesPendingMedia) return;
+  if (!automaticFollowUp && !shouldRespond(policyInput, identity) && !explicit && !namedMediaReply && !suppliesPendingMedia) return;
 
   const startPayload = message.chat.type === "private" ? parseStartPayload(request.text) : null;
   if (startPayload !== null && typeof startPayload === "object" && startPayload.type === "login") {
@@ -550,12 +545,6 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     await replyTo(ctx, message, botText(locale, "contextCleared"));
     return;
   }
-  const directSummary = explicit?.command === "summary" || explicitSummaryPhrase;
-  if (directSummary && !dependencies.agent?.enabled(message.from.id)) {
-    await handleGroupSummary(ctx, message, dependencies, locale);
-    return;
-  }
-
   const replyInputs = message.reply_to_message
     ? dependencies.mediaStore.getTelegramMedia(message.chat.id, message.reply_to_message.message_id)
     : [];
@@ -587,8 +576,22 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     return;
   }
   let inputs = normalizePositions(chosenInputs);
+  // Keep the fast, deterministic image entry point for a bare upload. Agent Loop
+  // still receives a caption or a later instruction together with the same image.
+  if (!automaticFollowUp && request.inputs.length > 0 && request.text.trim() === "" && !pending) {
+    if (message.chat.type !== "private" && !dependencies.mediaStore.isGroupMediaEnabled(message.chat.id)) {
+      await replyTo(ctx, message, botText(locale, "mediaDisabled"));
+      return;
+    }
+    if (await rejectUnavailableMediaUser(ctx, message, dependencies)) return;
+    await replyTo(ctx, message, botText(locale, "imageActionQuestion"), {
+      reply_markup: imageActionKeyboard(message.from.id, message.message_id, locale),
+    });
+    request.onIntervention?.();
+    return;
+  }
   if (!automaticFollowUp && dependencies.agent?.enabled(message.from.id) &&
-      (!explicit || ["image", "video", "vision", "sticker", "summary"].includes(explicit.command))) {
+      (!explicit || ["image", "video", "vision", "sticker"].includes(explicit.command))) {
     dependencies.agent.enqueue({
       key: `${message.chat.id}:${message.message_id}`, userId: message.from.id,
       chatId: message.chat.id, threadId: message.message_thread_id ?? null,
@@ -603,17 +606,6 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   const savedCallbackIntent = callbackReply ? mediaIntentSchema.safeParse(pending.slots) : null;
 
   if (!automaticFollowUp && request.inputs.length > 0 && await rejectUnavailableMediaUser(ctx, message, dependencies)) {
-    return;
-  }
-
-  if (request.inputs.length > 0 && request.text.trim() === "" && !pending) {
-    if (message.chat.type !== "private" && !dependencies.mediaStore.isGroupMediaEnabled(message.chat.id)) {
-      await replyTo(ctx, message, botText(locale, "mediaDisabled"));
-      return;
-    }
-    await replyTo(ctx, message, botText(locale, "imageActionQuestion"), {
-      reply_markup: imageActionKeyboard(message.from.id, message.message_id, locale),
-    });
     return;
   }
 
@@ -657,7 +649,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       return;
     }
     const scope = conversationScope(message);
-    const recent = dependencies.contexts.listRecentMessages?.(scope, 20) ?? [];
+    const recent = dependencies.contexts.listRecentMessages?.(scope, 100) ?? [];
     const summary = dependencies.contexts.getLatestSummary?.(scope)?.content ?? null;
     onboardingEligibility = message.chat.type === "private" && dependencies.onboarding
       ? dependencies.onboarding.eligibility(message.chat.id, message.from.id)
@@ -743,7 +735,6 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         replyToMessageId: message.reply_to_message?.message_id ?? null,
         repliedMessageText,
         activePrivateImage: active !== null,
-        allowGroupSummary: message.chat.type !== "private",
         summary,
         recentMessages: requestContext ? routerContextMessages(requestContext.context, ctx.me.id) : recent.map((item) => ({
           role: item.senderUserId === ctx.me.id ? "assistant" as const : "user" as const,
@@ -837,12 +828,6 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   }
   const responseSender = message.from;
   if (!responseSender) return;
-
-  if (routed.intent === "group_summary") {
-    await handleGroupSummary(ctx, message, dependencies, locale);
-    request.onIntervention?.();
-    return;
-  }
 
   if (routed.intent === "sticker_create" && message.chat.type !== "private") {
     await replyTo(ctx, message, botText(locale, "stickerPrivateOnly"));
@@ -1199,6 +1184,7 @@ function imageActionKeyboard(userId: number, messageId: number, locale: BotLocal
   return new InlineKeyboard()
     .text(botText(locale, "analyzeImageButton"), `${prefix}:analyze`)
     .text(botText(locale, "editImageButton"), `${prefix}:edit`).row()
+    .text(botText(locale, "stickerImageButton"), `${prefix}:sticker`)
     .text(botText(locale, "animateImageButton"), `${prefix}:video`);
 }
 
@@ -1384,7 +1370,7 @@ async function handleImageActionCallback(ctx: Context, dependencies: BotDependen
   const query = ctx.callbackQuery;
   const message = query?.message;
   if (!query?.data || !query.from || !message || !dependencies.mediaStore) return false;
-  const match = /^image_action:(\d+):(\d+):(analyze|edit|video)$/.exec(query.data);
+  const match = /^image_action:(\d+):(\d+):(analyze|edit|sticker|video)$/.exec(query.data);
   if (!match) return false;
   const ownerId = Number(match[1]);
   const sourceMessageId = Number(match[2]);
@@ -1404,8 +1390,8 @@ async function handleImageActionCallback(ctx: Context, dependencies: BotDependen
     await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
     return true;
   }
-  const intent = action === "analyze" ? "vision_qa" : action === "edit" ? "image_edit" : "video_generate";
-  const promptText = botText(locale, action === "analyze" ? "analyzeImagePrompt" : action === "edit" ? "editImagePrompt" : "animateImagePrompt");
+  const intent = action === "analyze" ? "vision_qa" : action === "edit" ? "image_edit" : action === "sticker" ? "sticker_create" : "video_generate";
+  const promptText = botText(locale, action === "analyze" ? "analyzeImagePrompt" : action === "edit" ? "editImagePrompt" : action === "sticker" ? "stickerImagePrompt" : "animateImagePrompt");
   await ctx.answerCallbackQuery();
   await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, { reply_markup: { inline_keyboard: [] } });
   const replyMarkup = forceReplyMarkup(message);
@@ -1423,7 +1409,7 @@ async function handleImageActionCallback(ctx: Context, dependencies: BotDependen
       instruction: "",
       media_source: "reply",
       media_message_ids: [sourceMessageId],
-      image_options: action === "edit" ? { aspect_ratio: null } : null,
+      image_options: action === "edit" || action === "sticker" ? { aspect_ratio: null } : null,
       video_options: action === "video" ? {
         mode: "image_to_video", duration_seconds: null, aspect_ratio: null, resolution: null, image_roles: ["first_frame"],
       } : null,
@@ -1904,6 +1890,7 @@ function hasContextReader(contexts: BotDependencies["contexts"]): contexts is Bo
     typeof contexts.listMemories === "function" &&
     typeof contexts.listMessagesAfter === "function" &&
     typeof contexts.listRecentMessages === "function" &&
+    typeof contexts.listRecentMessagesBySender === "function" &&
     typeof contexts.getMessage === "function" &&
     typeof contexts.getReplyChain === "function" &&
     typeof contexts.getUser === "function" &&
@@ -2023,66 +2010,6 @@ function recordSuccessfulGroupTrigger(message: Message, dependencies: BotDepende
   dependencies.groupCompactor.recordSuccessfulGroupTrigger(scope, message.from.id);
 }
 
-async function handleGroupSummary(
-  ctx: Context,
-  message: Message,
-  dependencies: BotDependencies,
-  locale: BotLocale,
-): Promise<void> {
-  if (!message.from) return;
-  if (message.chat.type === "private") {
-    await replyTo(ctx, message, botText(locale, "groupSummaryGroupOnly"));
-    return;
-  }
-  const scope = conversationScope(message);
-  if (scope.type === "private") return;
-  if (!dependencies.groupSummary) {
-    await replyTo(ctx, message, botText(locale, "serviceUnavailable"));
-    return;
-  }
-  await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
-  let prepared;
-  try {
-    prepared = await dependencies.groupSummary.summarize({
-      scope,
-      requesterUserId: message.from.id,
-      currentMessageId: message.message_id,
-      locale,
-    });
-  } catch (error) {
-    dependencies.logger.warn({ err: error, scope }, "Mia group summary failed");
-    await replyTo(ctx, message, userFacingError(error, dependencies.groupSummary.model, locale));
-    return;
-  }
-  if (!prepared) {
-    await replyTo(ctx, message, botText(locale, "groupSummaryEmpty"));
-    return;
-  }
-  let lastMessageId: number | null = null;
-  const summaryMessageIds: number[] = [];
-  let allPersisted = true;
-  const deliveries: TelegramPresentationDelivery[] = [];
-  try {
-    for (const chunk of renderTelegramRich(groupSummaryPresentation(prepared.content, locale))) {
-      const delivery = await sendTelegramPresentationChunk(ctx, message, chunk);
-      deliveries.push(delivery);
-      for (const sent of delivery.messages) {
-        allPersisted = persistMessage(sent, dependencies) && allPersisted;
-        lastMessageId = sent.message_id;
-        summaryMessageIds.push(sent.message_id);
-      }
-    }
-  } catch (error) {
-    dependencies.groupSummary.failDelivery(prepared);
-    throw error;
-  }
-  if (!allPersisted || lastMessageId === null) {
-    dependencies.groupSummary.failDelivery(prepared);
-    return;
-  }
-  dependencies.groupSummary.complete(prepared, lastMessageId, summaryMessageIds, presentationDebug(deliveries));
-}
-
 interface TelegramPresentationDelivery {
   messages: StorableMessage[];
   mode: "rich_message" | "html" | "plain_text" | "mixed";
@@ -2199,7 +2126,7 @@ function directIntent(intent: PendingMediaIntent, instruction: string, mediaSour
 }
 
 function parseExplicitCommand(text: string): { command: string; instruction: string } | null {
-  const match = /^\/(image|vision|video|sticker|summary|new|forget|media_on|media_off|tr|ntr)(?:@\w+)?(?:\s+([\s\S]*))?$/i.exec(text.trim());
+  const match = /^\/(image|vision|video|sticker|new|forget|media_on|media_off|tr|ntr)(?:@\w+)?(?:\s+([\s\S]*))?$/i.exec(text.trim());
   return match ? { command: match[1]?.toLowerCase() ?? "", instruction: match[2]?.trim() ?? "" } : null;
 }
 
@@ -2382,13 +2309,6 @@ async function handleTelegramDeepLinkLogin(
   await replyPlainTo(ctx, message, botText(locale, "telegramLoginConfirmed"), {
     reply_markup: new InlineKeyboard().url(botText(locale, "telegramLoginButton"), confirmation.loginUrl),
   });
-}
-
-export function isExplicitGroupSummaryPhrase(text: string): boolean {
-  const normalized = text.normalize("NFKC").trim();
-  const chinese = /^(?:请|帮我|麻烦)?(?:总结|概括|回顾)(?:一下|下)?(?:刚才|刚刚|最近|上面|前面|这段|本群|群里|这个群|当前(?:话题|topic))?(?:的)?(?:聊天记录|聊天|讨论|对话|内容)?[吧。！？!?.]*$/i;
-  const english = /^(?:please\s+)?(?:summarize|recap)(?:\s+(?:the|this|our))?\s+(?:chat|conversation|discussion|messages?|thread)(?:\s+(?:so far|above|just now|recently))?[.!?]*$/i;
-  return chinese.test(normalized) || english.test(normalized);
 }
 
 function isMediaIntent(intent: RoutedIntent["intent"]): intent is PendingMediaIntent {
@@ -2676,16 +2596,7 @@ export function createBot(token: string, dependencies: BotDependencies): Bot {
       return;
     }
 
-    const policyInput = {
-      chatType: message.chat.type,
-      text: incoming.text,
-      entities: "entities" in message ? message.entities :
-        "caption_entities" in message ? message.caption_entities : undefined,
-      repliedToUserId: message.reply_to_message?.from?.id,
-    };
-    const identity = { id: ctx.me.id, username: ctx.me.username };
     const immediate = parseExplicitCommand(incoming.text) !== null ||
-      isExplicitGroupSummaryPhrase(promptFromMessage(policyInput, identity)) ||
       message.reply_to_message !== undefined && /^(?:@?mia)(?:\s|[,，:：])/i.test(incoming.text.trim()) ||
       Boolean(dependencies.mediaStore?.getPendingIntent?.(scopeFor(message)) && incoming.inputs.length > 0);
     if (immediate) {

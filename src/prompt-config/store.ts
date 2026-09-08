@@ -40,6 +40,9 @@ export class PromptConfigStore {
         prompt_text TEXT NOT NULL
       );
     `);
+    this.database.prepare(
+      "DELETE FROM prompt_configs WHERE prompt_id IN ('mia.group-summary', 'mia.group-summary-input')",
+    ).run();
     const insert = this.database.prepare(
       "INSERT OR IGNORE INTO prompt_configs (prompt_id, prompt_text) VALUES (?, ?)",
     );

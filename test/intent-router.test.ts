@@ -212,19 +212,17 @@ describe("Mia intent router", () => {
     expect(JSON.stringify(structuredResponse.mock.calls[0]?.[2])).toContain("missingFields");
   });
 
-  it("returns group_summary only when the server marks the request as a group scope", async () => {
+  it("treats a group recap request as ordinary chat", async () => {
     const structuredResponse = vi.fn().mockResolvedValue(response({
-      intent: "group_summary", confidence: 0.99, instruction: "", media_source: "none",
-      image_options: null, video_options: null, final_response: null,
+      intent: "chat", confidence: 0.99, instruction: "", media_source: "none",
+      image_options: null, video_options: null, final_response: "刚才主要在聊周末活动。",
       conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
     }));
     const router = new IntentRouter({ structuredResponse }, { model: "gpt-5.4", timeoutMs: 1000 });
 
-    await expect(router.classify({ ...base, text: "梳理一下大家刚才聊的重点", allowGroupSummary: true }, "key"))
-      .resolves.toMatchObject({ intent: "group_summary", missingRequired: [] });
-    await expect(router.classify({ ...base, text: "梳理一下", allowGroupSummary: false }, "key"))
-      .resolves.toMatchObject({ intent: "chat", fallbackReason: "invalid_output" });
-    expect(JSON.stringify(structuredResponse.mock.calls[0]?.[2])).toContain("allow_group_summary");
+    await expect(router.classify({ ...base, text: "总结一下刚才群里聊了什么" }, "key"))
+      .resolves.toMatchObject({ intent: "chat", missingRequired: [] });
+    expect(JSON.stringify(structuredResponse.mock.calls[0]?.[2])).not.toContain("group_summary");
   });
 
   it("keeps only server-approved contextual media message IDs", async () => {
@@ -362,7 +360,7 @@ describe("Mia intent router", () => {
       .mockResolvedValueOnce({
         should_respond: true,
         response_to_message_id: 192,
-        intent_hint: "media_or_summary",
+        intent_hint: "media",
         needs_web_search: false,
         confidence: 0.99,
         reason: "explicit_image_edit_request",
@@ -431,7 +429,7 @@ describe("Mia intent router", () => {
       .mockResolvedValueOnce({
         should_respond: true,
         response_to_message_id: 193,
-        intent_hint: "media_or_summary",
+        intent_hint: "media",
         needs_web_search: false,
         confidence: 0.99,
         reason: "explicit_image_edit_correction",
@@ -596,7 +594,7 @@ describe("Mia intent router", () => {
     };
     const structuredResponse = vi.fn()
       .mockResolvedValueOnce(response({
-        should_respond: true, response_to_message_id: 22, intent_hint: "media_or_summary",
+        should_respond: true, response_to_message_id: 22, intent_hint: "media",
         needs_web_search: false, confidence: 0.99, reason: "明确请求 Mia 继续媒体任务",
       }))
       .mockResolvedValueOnce(response({

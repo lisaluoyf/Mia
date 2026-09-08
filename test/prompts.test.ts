@@ -19,6 +19,7 @@ describe("prompt localization", () => {
 
     expect(promptText("mia.system", "en")).toContain("You are Mia");
     expect(promptText("mia.system", "en")).not.toContain("产品身份与能力边界");
+    expect(promptText("mia.system", "zh-CN")).toContain("不强行套会议纪要栏目");
     expect(promptText("mia.system", "ru")).toContain("Ты Mia");
     expect(promptText("mia.system", "fr")).toContain("You are Mia");
   });
@@ -64,13 +65,10 @@ describe("prompt localization", () => {
   it("cleans Russian prompt translations without Chinese residue", () => {
     const contextPrompt = promptText("mia.context-compaction", "ru");
     const groupContextInput = promptText("mia.group-context-compaction-input", "ru");
-    const groupSummaryInput = promptText("mia.group-summary-input", "ru");
 
     expect(contextPrompt).not.toContain("整理");
     expect(contextPrompt).toContain("скользящего резюме");
     expect(groupContextInput).not.toContain("watermark summary");
     expect(groupContextInput).toContain("после границы текущей сводки");
-    expect(groupSummaryInput).not.toContain("locale вывода");
-    expect(groupSummaryInput).toContain("Запрошенный язык вывода");
   });
 });

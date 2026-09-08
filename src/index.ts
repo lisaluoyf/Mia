@@ -9,7 +9,6 @@ import { SettingsStore } from "./settings/store.js";
 import { ContextStore } from "./storage/store.js";
 import { ContextCompactor } from "./context/compactor.js";
 import { GroupContextCompactor } from "./context/group-compactor.js";
-import { GroupSummaryService } from "./context/group-summary.js";
 import { createBot } from "./telegram/bot.js";
 import { botCommands } from "./telegram/commands.js";
 import { IntentRouter } from "./intent/router.js";
@@ -25,6 +24,7 @@ import { ChatCredentialResolver } from "./credentials/chat.js";
 import { ModelConfigStore } from "./model-config/store.js";
 import { AgentStore } from "./agent/store.js";
 import { AgentService } from "./agent/service.js";
+import { AgentLoopMonitor } from "./agent/loop-monitor.js";
 import { ActivationStore } from "./activation/store.js";
 import { ActivationService } from "./activation/service.js";
 
@@ -45,7 +45,6 @@ async function main(): Promise<void> {
     intent_router: config.miaRouterModel,
     private_compaction: config.miaContextModel,
     group_compaction: config.miaContextModel,
-    group_summary: config.miaContextModel,
     guest_chat: config.miaGuestChatModel,
   });
   const debug = new DebugRecorder(debugStore);
@@ -84,14 +83,6 @@ async function main(): Promise<void> {
     model: () => modelConfig.get("group_compaction") ?? config.miaContextModel,
     debug,
   });
-  const groupSummary = new GroupSummaryService({
-    client,
-    credentials: chatCredentials,
-    store: contexts,
-    logger,
-    model: () => modelConfig.get("group_summary") ?? config.miaContextModel,
-    debug,
-  });
   const onboarding = new OnboardingService(contexts);
   const mediaStore = new MediaStore(resolve(config.databasePath));
   const settings = new ModelSettingsService(client, store, () => modelConfig.userDefaults());
@@ -116,7 +107,6 @@ async function main(): Promise<void> {
     contexts,
     compactor,
     groupCompactor,
-    groupSummary,
     router,
     mediaStore,
     botToken: config.telegramBotToken,
@@ -147,6 +137,17 @@ async function main(): Promise<void> {
     intervalMs: config.activationIntervalMs,
     previewTelegramUserIds: config.activationPreviewTelegramUserIds,
   });
+  const agentLoopMonitor = new AgentLoopMonitor({
+    enabled: config.agentSmokeEnabled,
+    userId: config.agentSmokeUserId ?? config.agentAllowedUsers[0] ?? null,
+    model: config.agentSmokeModel,
+    intervalMs: config.agentSmokeIntervalMs,
+    failureThreshold: config.agentSmokeFailureThreshold,
+    timeoutMs: config.agentTimeoutMs,
+    baseUrl: config.apimasterBaseUrl,
+    client,
+    logger,
+  });
   botDependencies.activation = activation;
   try {
     await bot.api.setMyCommands(botCommands("en"));
@@ -174,6 +175,7 @@ async function main(): Promise<void> {
     void activation.sendPreviews().catch((error: unknown) => logger.warn({ err: error }, "Mia activation previews could not be sent"));
   }
   activation.start();
+  agentLoopMonitor.start();
   const server = createServer({
     logger,
     serviceKey: config.miaInternalServiceKey,
@@ -199,6 +201,7 @@ async function main(): Promise<void> {
     await server.close();
     worker.stop();
     activation.stop();
+    agentLoopMonitor.stop();
     await agent.stop();
     await worker.drain();
     agentStore.close();

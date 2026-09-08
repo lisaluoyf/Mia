@@ -36,6 +36,7 @@ export class ModelConfigStore {
         updated_at TEXT
       );
     `);
+    this.database.prepare("DELETE FROM mia_model_config WHERE config_key = 'group_summary'").run();
   }
 
   private seed(initial: Partial<ModelConfigValues>): void {

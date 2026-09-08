@@ -421,6 +421,8 @@ export class ContextStore {
         ON mia_messages(chat_id, thread_id, message_id DESC);
       CREATE INDEX IF NOT EXISTS idx_mia_messages_sender
         ON mia_messages(sender_user_id, sent_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mia_messages_scope_sender
+        ON mia_messages(chat_id, thread_id, sender_user_id, message_id DESC);
 
       CREATE TABLE IF NOT EXISTS mia_summaries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -912,6 +914,23 @@ export class ContextStore {
         LIMIT ?
       ) ORDER BY message_id ASC
     `).all(chatId, threadId, limit) as MessageRow[];
+    return rows.map(messageFromRow);
+  }
+
+  listRecentMessagesBySender(scope: ConversationScope, telegramUserId: number, limit = 50): StoredMessage[] {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+      throw new RangeError("limit must be between 1 and 500");
+    }
+    requireSafeInteger(telegramUserId, "telegramUserId");
+    const { chatId, threadId } = conversationCoordinates(scope);
+    const rows = this.database.prepare(`
+      SELECT * FROM (
+        SELECT * FROM mia_messages
+        WHERE chat_id = ? AND thread_id = ? AND sender_user_id = ? AND content_type <> 'translation'
+        ORDER BY message_id DESC
+        LIMIT ?
+      ) ORDER BY message_id ASC
+    `).all(chatId, threadId, telegramUserId, limit) as MessageRow[];
     return rows.map(messageFromRow);
   }
 

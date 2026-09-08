@@ -5,6 +5,7 @@ import type { IntentRouter } from "../src/intent/router.js";
 import { createLogger } from "../src/logger.js";
 import { MediaStore } from "../src/media/store.js";
 import { createBot } from "../src/telegram/bot.js";
+import type { AgentService } from "../src/agent/service.js";
 
 const botInfo = {
   id: 100, is_bot: true, first_name: "Mia", username: "MiaAssistantBot",
@@ -66,13 +67,16 @@ describe("image action buttons", () => {
     } as never);
 
     const question = calls.find((call) => call.method === "sendMessage");
-    expect(question?.payload.text).toBe("你想让我分析这张图片，还是修改它？");
+    expect(question?.payload.text).toBe("这张图想让我做什么？我可以帮你看图、修改图片、做成贴纸或视频。");
     expect(question?.payload.reply_markup).toEqual({ inline_keyboard: [
       [
         { text: "看懂这张图", callback_data: "image_action:42:40:analyze" },
         { text: "修改图片", callback_data: "image_action:42:40:edit" },
       ],
-      [{ text: "做成视频", callback_data: "image_action:42:40:video" }],
+      [
+        { text: "做成贴纸", callback_data: "image_action:42:40:sticker" },
+        { text: "做成视频", callback_data: "image_action:42:40:video" },
+      ],
     ] });
     expect(classify).not.toHaveBeenCalled();
 
@@ -83,7 +87,7 @@ describe("image action buttons", () => {
         message: {
           message_id: 701, date: 1_788_333_601,
           chat: { id: 42, type: "private", first_name: "Liz" }, from: botInfo,
-          text: "你想让我分析这张图片，还是修改它？",
+          text: "这张图想让我做什么？我可以帮你看图、修改图片、做成贴纸或视频。",
         },
         chat_instance: "instance", data: "image_action:42:40:analyze",
       },
@@ -96,7 +100,7 @@ describe("image action buttons", () => {
     const callbackMessage = {
       message_id: 701, date: 1_788_333_601,
       chat: { id: 42, type: "private", first_name: "Liz" }, from: botInfo,
-      text: "你想让我分析这张图片，还是修改它？",
+      text: "这张图想让我做什么？我可以帮你看图、修改图片、做成贴纸或视频。",
     };
     await bot.handleUpdate({
       update_id: 3,
@@ -129,5 +133,59 @@ describe("image action buttons", () => {
       },
     } as never);
     expect(calls.slice(beforeDuplicate).map((call) => call.method)).toEqual(["answerCallbackQuery"]);
+  });
+
+  it("keeps the image action menu ahead of Agent Loop for a bare upload", async () => {
+    store = new MediaStore(":memory:");
+    const enqueue = vi.fn();
+    const bot = createBot("123:test", {
+      agent: { enabled: () => true, ownsUpdate: () => true, enqueue } as unknown as AgentService,
+      client: {} as APIMasterClient,
+      logger: createLogger("silent"),
+      settings: { getPreferences: vi.fn(), getSnapshot: vi.fn().mockResolvedValue({}) },
+      contexts: contextStubs(),
+      router: { model: "gpt-5.4", classify: vi.fn() } as unknown as IntentRouter,
+      mediaStore: store,
+      botToken: "123:test",
+    });
+    bot.botInfo = botInfo;
+    const calls: Array<{ method: string; payload: Record<string, unknown> }> = [];
+    bot.api.config.use((_previous, method, payload) => {
+      calls.push({ method, payload });
+      if (method === "sendMessage") {
+        return Promise.resolve({ ok: true, result: {
+          message_id: 701, date: 1_788_333_601,
+          chat: { id: 42, type: "private", first_name: "Liz" }, from: botInfo,
+          text: "menu",
+        } } as never);
+      }
+      return Promise.resolve({ ok: true, result: true } as never);
+    });
+
+    await bot.handleUpdate({
+      update_id: 11,
+      message: {
+        message_id: 41, date: 1_788_333_600,
+        chat: { id: 42, type: "private", first_name: "Liz" },
+        from: { id: 42, is_bot: false, first_name: "Liz", language_code: "zh-CN" },
+        photo: [{ file_id: "photo", file_unique_id: "unique", width: 100, height: 100 }],
+      },
+    } as never);
+
+    expect(enqueue).not.toHaveBeenCalled();
+    const menu = calls.find((call) => call.method === "sendMessage")?.payload;
+    expect(menu).toMatchObject({
+      text: "这张图想让我做什么？我可以帮你看图、修改图片、做成贴纸或视频。",
+    });
+    expect(menu?.reply_markup).toEqual({ inline_keyboard: [
+      [
+        { text: "看懂这张图", callback_data: "image_action:42:41:analyze" },
+        { text: "修改图片", callback_data: "image_action:42:41:edit" },
+      ],
+      [
+        { text: "做成贴纸", callback_data: "image_action:42:41:sticker" },
+        { text: "做成视频", callback_data: "image_action:42:41:video" },
+      ],
+    ] });
   });
 });

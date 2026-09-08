@@ -54,8 +54,13 @@ does not establish tool compatibility.
 The system prompt and tool contract live in `src/agent/`; logs record run IDs,
 revisions, steps and tool outcomes without credentials or private reasoning.
 Tests use mocked providers/Telegram and real temporary SQLite/media storage;
-production channel compatibility and paid end-to-end generation are not verified
-by those tests. No production deployment is implied.
+production channel compatibility is verified by the no-message Agent Loop smoke
+probe. Run `pnpm test:agent-loop` for the deterministic internal scenario matrix.
+`node --env-file=.env dist/agent/loop-smoke.js` runs the two real Responses
+checks (text and hosted search) through the runtime and rich renderer; it never
+sends Telegram messages or executes media tools. Enable the six-hour in-process
+monitor with `MIA_AGENT_SMOKE_ENABLED=true`; it logs only after the configured
+consecutive-failure threshold. Paid end-to-end generation remains simulated.
 
 Agent answers now reuse the existing structured Mia response schema and Telegram
 rich renderer. Definite formatting rejections fall back to HTML, then plain text;

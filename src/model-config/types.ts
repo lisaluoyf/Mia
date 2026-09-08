@@ -10,7 +10,6 @@ export type ModelConfigKey =
   | "intent_router"
   | "private_compaction"
   | "group_compaction"
-  | "group_summary"
   | "guest_chat";
 
 export interface ModelConfigDefinition {
@@ -83,14 +82,6 @@ export const MODEL_CONFIG_DEFINITIONS: readonly ModelConfigDefinition[] = [
     group: "internal",
     scenario: "群聊上下文整理",
     description: "整理群聊或 Topic 滚动摘要与公共记忆的内部模型",
-    defaultModel: "gpt-5.4",
-    capability: "chat",
-  },
-  {
-    key: "group_summary",
-    group: "internal",
-    scenario: "群聊总结",
-    description: "用户主动要求总结群聊或 Topic 时使用的内部模型",
     defaultModel: "gpt-5.4",
     capability: "chat",
   },

@@ -8,6 +8,7 @@ import type { MediaStore } from "../media/store.js";
 import type { MediaJob } from "../media/types.js";
 import type { ContextStore } from "../storage/store.js";
 import type { ConversationScope } from "../storage/types.js";
+import { loadConversationContext } from "../context/conversation.js";
 import { isStickerSetNameOccupied, stickerSetName } from "../stickers/service.js";
 import type { AgentStore } from "./store.js";
 import { AgentRuntime, instructions } from "./runtime.js";
@@ -17,6 +18,7 @@ import { sendAgentChunk, formatRejected } from "./presentation.js";
 import { miaResponseFromText } from "../presentation/schema.js";
 import { renderTelegramRich } from "../presentation/telegram-rich.js";
 import { scopeKey, type AgentInput, type Run } from "./types.js";
+import { promptText } from "../prompts.js";
 
 interface ServiceOptions {
   store: AgentStore; media: MediaStore; client: APIMasterClient; settings: ModelSettingsService;
@@ -65,7 +67,8 @@ export class AgentService {
         const permittedTools = credential.source === "user" ? tools : tools.filter(tool => ["finish", "read_conversation"].includes(tool.name));
         return responseStep({
           baseUrl: this.options.baseUrl, apiKey: credential.apiKey, model: credential.model,
-          instructions, input, tools: permittedTools, signal, timeoutMs: this.options.timeoutMs,
+          instructions: `${promptText("mia.system", run.input.language)}\n\n${instructions}`,
+          input, tools: permittedTools, signal, timeoutMs: this.options.timeoutMs,
           // Hosted search runs inside this model response, not as a second model request.
           webSearch: credential.source === "user" && this.options.webSearch,
         });
@@ -107,11 +110,42 @@ export class AgentService {
   enqueue(input: Omit<AgentInput, "context">): void {
     if (!this.runtime) throw new Error("Agent runtime is not attached");
     const scope: ConversationScope = input.chatId === input.userId ? { type: "private", chatId: input.chatId } : input.threadId === null ? { type: "group", chatId: input.chatId } : { type: "topic", chatId: input.chatId, threadId: input.threadId };
-    const recent = this.options.contexts.listRecentMessages(scope, 30);
-    const summary = this.options.contexts.getLatestSummary(scope)?.content;
-    const memories = this.options.contexts.listMemories(scope.type === "private" ? { type: "user", userId: input.userId } : scope, 30);
-    const context = JSON.stringify({ summary, memories, messages: recent.map(message => ({ sender: message.senderUserId, text: message.text ?? message.caption, id: message.messageId })) });
-    this.runtime.enqueue({ ...input, context });
+    const context = loadConversationContext({
+      store: this.options.contexts,
+      scope,
+      userId: input.userId,
+      currentMessageId: input.messageId,
+      replyToMessageId: input.replyToMessageId,
+      metadata: {
+        chatType: scope.type === "private" ? "private" : "group",
+        chatTitle: null,
+        currentUser: String(input.userId),
+        language: input.language,
+        currentTime: new Date().toISOString(),
+        timezone: null,
+        trigger: input.replyToMessageId === null ? "message" : "reply",
+        currentTask: null,
+      },
+    }, this.botId);
+    this.runtime.enqueue({
+      ...input,
+      context: JSON.stringify({
+        summary: context.summary,
+        memories: context.memories.map(memory => ({
+          scope: memory.scope.type,
+          category: memory.category,
+          content: memory.content,
+          sourceMessageId: memory.sourceMessageId,
+        })),
+        messages: context.messages.map(message => ({
+          sender: message.senderUserId,
+          text: message.text ?? message.caption,
+          id: message.messageId,
+          replyToMessageId: message.replyToMessageId,
+          sentAt: message.sentAt,
+        })),
+      }),
+    });
   }
   cancel(input: Pick<AgentInput, "userId" | "chatId" | "threadId">): void { this.runtime?.cancelScope(scopeKey(input)); }
   approve(id: string, revision: number, userId: number, chatId: number, threadId: number | null): boolean {

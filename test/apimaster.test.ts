@@ -361,7 +361,7 @@ describe("APIMaster client", () => {
       properties: {
         should_respond: { type: "boolean" },
         response_to_message_id: { type: ["integer", "null"] },
-        intent_hint: { type: "string", enum: ["chat", "media_or_summary"] },
+        intent_hint: { type: "string", enum: ["chat", "media"] },
         needs_web_search: { type: "boolean" },
         confidence: { type: "number" },
         reason: { type: "string" },

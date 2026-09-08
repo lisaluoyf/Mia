@@ -146,7 +146,7 @@ export function createAgentTools(options: {
   tools.push({
     definition: { type: "function", name: "read_conversation", description: "Read the bounded, authorized conversation context for this chat/topic, for example before summarizing it.", strict: true, parameters: { type: "object", properties: {}, additionalProperties: false, required: [] } },
     paid: false,
-    execute(run) { return Promise.resolve({ status: "succeeded", data: { context: run.input.context.slice(0, 24_000) } }); },
+    execute(run) { return Promise.resolve({ status: "succeeded", data: { context: run.input.context } }); },
   });
   tools.push({
     definition: { type: "function", name: "cancel_operation", description: "Cancel a pending media operation before submission when user corrections supersede it. Already-submitted operations cannot be cancelled by this tool. Never interpret cancellation as a refund.", strict: true, parameters: { type: "object", properties: { operation_id: { type: "string" } }, required: ["operation_id"], additionalProperties: false } },

@@ -1,6 +1,5 @@
 export type RoutedIntent =
   | "chat"
-  | "group_summary"
   | "image_generate"
   | "image_edit"
   | "sticker_create"
