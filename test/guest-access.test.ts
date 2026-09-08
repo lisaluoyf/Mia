@@ -188,6 +188,10 @@ describe("Mia guest access", () => {
           { text: "✨ 制作贴纸", url: "https://t.me/MiaAssistantBot?start=sticker" },
           { text: "⚙️ 模型设置", url: "https://t.me/MiaAssistantBot?start=settings" },
         ],
+        [
+          { text: "💬 聊天", callback_data: "intro_action:chat" },
+          { text: "🔍 搜索", callback_data: "intro_action:search" },
+        ],
       ],
     });
   });
@@ -236,6 +240,10 @@ I can:
         [
           { text: "✨ Make sticker", callback_data: "intro_action:sticker" },
           { text: "⚙️ Model settings", web_app: { url: "https://apimaster.ai/mia/" } },
+        ],
+        [
+          { text: "💬 Chat", callback_data: "intro_action:chat" },
+          { text: "🔍 Search", callback_data: "intro_action:search" },
         ],
       ],
     });

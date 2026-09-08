@@ -3,6 +3,7 @@ import type { Message, User } from "grammy/types";
 import type { Logger } from "pino";
 
 import type { APIMasterClient } from "../clients/apimaster.js";
+import type { ActivationService } from "../activation/service.js";
 import { ChatCompletionError, ResolverError } from "../clients/apimaster.js";
 import {
   APIMASTER_TELEGRAM_BIND_EXISTING_URL,
@@ -102,6 +103,7 @@ interface BotDependencies {
   onboarding?: OnboardingService;
   followUpCredential?: Pick<ChatCredential, "apiKey" | "model">;
   miniAppUrl?: string | null;
+  activation?: ActivationService;
 }
 
 const TRANSLATION_RESULT_SCHEMA = {
@@ -396,6 +398,36 @@ function selectedModelForError(dependencies: BotDependencies, telegramUserId: nu
 async function handleIncoming(request: IncomingRequest, dependencies: BotDependencies): Promise<void> {
   let { ctx, message } = request;
   if (!message.from || !ctx.me || !dependencies.mediaStore) return;
+  if (message.chat.type === "private" && dependencies.activation) {
+    const text = request.text.trim();
+    if (!/^\/start(?:\s|$)/u.test(text)) {
+      if (/^(?:停止|不要提醒|不再提醒|stop|unsubscribe)$/iu.test(text)) {
+        dependencies.activation.dismiss(message.from.id, true);
+        await ctx.reply(resolveBotLocale(message.from.language_code) === "zh-CN" ? "已关闭 Mia 的主动提醒。" : "Mia reminders are turned off.");
+        return;
+      }
+      if (dependencies.activation.consumeWeatherIntent(message.from.id, message.chat.id)) {
+        dependencies.activation.markInteraction(message.from.id);
+        try {
+          const weather = await dependencies.activation.requestWeather(message.from.id, message.chat.id, text);
+          const locale = resolveBotLocale(message.from.language_code);
+          if (!weather) {
+            await ctx.reply(locale === "zh-CN" ? "没有找到这个城市。请再发一次城市名，例如“上海”或“Paris, France”。" : "I couldn't find that city. Try again, for example Shanghai or Paris, France.");
+          } else if ("choices" in weather) {
+            await ctx.reply(locale === "zh-CN" ? `这个城市可能有多个地点，请加上国家或地区：${weather.choices.join("；")}` : `There are several matches. Please add a country or region: ${weather.choices.join("; ")}`);
+          } else {
+            const reply = await dependencies.activation.weatherTextForRequest(message.from.id, message.from.language_code);
+            if (reply) await ctx.reply(reply, { reply_markup: dependencies.activation.weatherSubscriptionKeyboard(message.from.language_code) });
+          }
+        } catch (error) {
+          dependencies.logger.warn({ err: error, telegramUserId: message.from.id }, "Mia weather request failed");
+          await ctx.reply(resolveBotLocale(message.from.language_code) === "zh-CN" ? "这次天气查询失败了，请稍后再试。" : "The weather lookup failed this time. Please try again shortly.");
+        }
+        return;
+      }
+      dependencies.activation.markInteraction(message.from.id);
+    }
+  }
   const automaticFollowUp = request.triggerMode === "active_follow_up";
   let locale = resolveBotLocale(message.from.language_code);
   const entities = "entities" in message ? message.entities : "caption_entities" in message ? message.caption_entities : undefined;
@@ -1253,17 +1285,102 @@ async function handleIntroductionCallback(ctx: Context, dependencies: BotDepende
   const query = ctx.callbackQuery;
   if (!query?.data) return false;
   const message = query.message;
-  const match = /^intro_action:(image|video|sticker)$/.exec(query.data);
+  const match = /^intro_action:(image|video|sticker|chat|search)$/.exec(query.data);
   if (!match) return false;
-  const action = match[1] as MiaIntroductionAction;
+  const action = match[1]!;
   const locale = resolveBotLocale(query.from.language_code);
-  if (!message || !dependencies.mediaStore || action === "sticker" && message.chat.type !== "private") {
+  if (message?.chat.type === "private" && message.chat.id === query.from.id) {
+    dependencies.activation?.markInteraction(query.from.id);
+  }
+  if (action === "chat" || action === "search") {
+    await ctx.answerCallbackQuery();
+    if (message) {
+      await replyPlainTo(ctx, message, action === "chat"
+        ? (locale === "zh-CN" ? "想聊什么？直接告诉我。" : "What would you like to talk about?")
+        : (locale === "zh-CN" ? "想搜索什么？直接发给我，例如“今天北京天气”或“OpenAI 最新新闻”。" : "What would you like to search for? Send me a question, for example, today's weather in Beijing or the latest OpenAI news."));
+    }
+    return true;
+  }
+  const mediaAction = action as MiaIntroductionAction;
+  if (!message || !dependencies.mediaStore || mediaAction === "sticker" && message.chat.type !== "private") {
     await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
     return true;
   }
   await ctx.answerCallbackQuery();
-  await sendIntroductionActionPrompt(ctx, message, query.from, action, dependencies);
+  await sendIntroductionActionPrompt(ctx, message, query.from, mediaAction, dependencies);
   return true;
+}
+
+async function handleActivationCallback(ctx: Context, dependencies: BotDependencies): Promise<boolean> {
+  const query = ctx.callbackQuery;
+  const message = query?.message;
+  if (!query?.data || !query.from || !message || !dependencies.activation || !query.data.startsWith("activation:")) return false;
+  if (message.chat.type !== "private" || message.chat.id !== query.from.id) {
+    await ctx.answerCallbackQuery({ text: botText(resolveBotLocale(query.from.language_code), "actionUnavailable"), show_alert: true });
+    return true;
+  }
+  const locale = resolveBotLocale(query.from.language_code);
+  const send = (text: string, replyMarkup?: InlineKeyboard) => ctx.api.sendMessage(message.chat.id, text, {
+    reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+  });
+  switch (query.data) {
+    case "activation:ask":
+      dependencies.activation.markInteraction(query.from.id);
+      await ctx.answerCallbackQuery();
+      await send(locale === "zh-CN" ? "想聊什么？直接告诉我。" : "What would you like to talk about?");
+      return true;
+    case "activation:search":
+      dependencies.activation.markInteraction(query.from.id);
+      await ctx.answerCallbackQuery();
+      await send(locale === "zh-CN" ? "想搜索什么？直接发给我，例如“今天北京天气”或“OpenAI 最新新闻”。" : "What would you like to search for? Send me a question, for example, today's weather in Beijing or the latest OpenAI news.");
+      return true;
+    case "activation:companion":
+      dependencies.activation.markInteraction(query.from.id);
+      await ctx.answerCallbackQuery();
+      await send(locale === "zh-CN" ? "我在。今天想从哪儿聊起？" : "I'm here. What would you like to start with?");
+      return true;
+    case "activation:weather":
+      dependencies.activation.markInteraction(query.from.id);
+      dependencies.activation.beginWeatherIntent(query.from.id, message.chat.id);
+      await ctx.answerCallbackQuery();
+      await send(locale === "zh-CN" ? "发一个城市名就行，例如“上海”或“Paris, France”。" : "Send a city name, for example Shanghai or Paris, France.");
+      return true;
+    case "activation:stop":
+      dependencies.activation.dismiss(query.from.id, true);
+      await ctx.answerCallbackQuery({ text: locale === "zh-CN" ? "已关闭提醒" : "Reminders turned off" });
+      await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, { reply_markup: { inline_keyboard: [] } });
+      return true;
+    case "activation:dismiss":
+      dependencies.activation.dismiss(query.from.id, false);
+      await ctx.answerCallbackQuery({ text: locale === "zh-CN" ? "好的，暂时不打扰。" : "Okay, not now." });
+      await ctx.api.editMessageReplyMarkup(message.chat.id, message.message_id, { reply_markup: { inline_keyboard: [] } });
+      return true;
+    case "activation:weather:subscribe:8":
+    case "activation:weather:subscribe:9": {
+      const hour = query.data.endsWith(":8") ? 8 : 9;
+      const subscription = dependencies.activation.subscribeWeather(query.from.id, hour);
+      await ctx.answerCallbackQuery({ text: subscription ? (locale === "zh-CN" ? "天气订阅已开启" : "Weather subscription enabled") : (locale === "zh-CN" ? "请先查询一个城市的天气。" : "Check a city's weather first."), show_alert: !subscription });
+      if (subscription) await send(locale === "zh-CN" ? `已订阅 ${subscription.location.name} 每天早上 ${hour}:00 的天气。` : `You'll receive ${subscription.location.name}'s weather every day at ${hour}:00.`);
+      return true;
+    }
+    case "activation:weather:tomorrow": {
+      const text = await dependencies.activation.weatherTextForRequest(query.from.id, query.from.language_code, true);
+      await ctx.answerCallbackQuery();
+      if (text) await send(text);
+      return true;
+    }
+    case "activation:weather:pause":
+      dependencies.activation.pauseWeather(query.from.id, false);
+      await ctx.answerCallbackQuery({ text: locale === "zh-CN" ? "天气已暂停" : "Weather paused" });
+      return true;
+    case "activation:weather:cancel":
+      dependencies.activation.pauseWeather(query.from.id, true);
+      await ctx.answerCallbackQuery({ text: locale === "zh-CN" ? "天气订阅已取消" : "Weather subscription cancelled" });
+      return true;
+    default:
+      return false;
+  }
 }
 
 async function handleImageActionCallback(ctx: Context, dependencies: BotDependencies): Promise<boolean> {
@@ -1463,6 +1580,7 @@ async function handleTranslationCallback(ctx: Context, dependencies: BotDependen
 async function handleCallback(ctx: Context, dependencies: BotDependencies): Promise<void> {
   const query = ctx.callbackQuery;
   if (!query || !query.data || !query.from) return;
+  if (await handleActivationCallback(ctx, dependencies)) return;
   if (query.data.startsWith("onboard:")) {
     await handleOnboardingCallback(ctx, dependencies);
     return;
@@ -1470,9 +1588,21 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
   if (await handleTranslationCallback(ctx, dependencies)) return;
   if (await handleIntroductionCallback(ctx, dependencies)) return;
   if (await handleImageActionCallback(ctx, dependencies)) return;
-  if (!dependencies.mediaStore) return;
+  const unavailable = async () => {
+    await ctx.answerCallbackQuery({
+      text: botText(resolveBotLocale(query.from.language_code), "actionUnavailable"),
+      show_alert: true,
+    });
+  };
+  if (!dependencies.mediaStore) {
+    await unavailable();
+    return;
+  }
   const match = /^media:(\d+):(generate|cancel|dur_up|dur_down|ratio|download|again|edit)$/.exec(query.data);
-  if (!match) return;
+  if (!match) {
+    await unavailable();
+    return;
+  }
   const jobId = Number(match[1]);
   const action = match[2];
   const job = dependencies.mediaStore.getJob(jobId);

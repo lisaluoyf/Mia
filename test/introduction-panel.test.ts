@@ -16,6 +16,10 @@ describe("Mia introduction panel", () => {
         { text: "✨ 制作贴纸", callback_data: "intro_action:sticker" },
         { text: "⚙️ 模型设置", web_app: { url: "https://apimaster.ai/mia/" } },
       ],
+      [
+        { text: "💬 聊天", callback_data: "intro_action:chat" },
+        { text: "🔍 搜索", callback_data: "intro_action:search" },
+      ],
     ]);
   });
 
@@ -31,6 +35,10 @@ describe("Mia introduction panel", () => {
       [
         { text: "✨ 制作贴纸", url: "https://t.me/MiaAssistantBot?start=sticker" },
         { text: "⚙️ 模型设置", url: "https://t.me/MiaAssistantBot?start=settings" },
+      ],
+      [
+        { text: "💬 聊天", callback_data: "intro_action:chat" },
+        { text: "🔍 搜索", callback_data: "intro_action:search" },
       ],
     ]);
   });

@@ -137,6 +137,16 @@ const debugIdentitiesResponseSchema = z.object({
   }),
 });
 
+const activationEligibilityResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({
+    eligible: z.array(z.object({
+      telegram_user_id: z.string().regex(/^\d+$/),
+      bound_at: z.number().int().nonnegative(),
+    })),
+  }),
+});
+
 const telegramDeepLinkLoginResponseSchema = z.object({
   success: z.literal(true),
   data: z.object({ login_url: z.string().url() }),
@@ -145,6 +155,11 @@ const telegramDeepLinkLoginResponseSchema = z.object({
 export interface ModelCatalog {
   apimasterUserId: number;
   models: ModelOption[];
+}
+
+export interface ActivationEligibility {
+  telegramUserId: number;
+  boundAt: Date;
 }
 
 export type ResolverErrorCode =
@@ -356,6 +371,35 @@ export class APIMasterClient {
     const parsed = debugIdentitiesResponseSchema.safeParse(payload);
     if (!parsed.success) throw new ResolverError("service_unavailable", response.status);
     return parsed.data.data.identities.map((identity) => Number(identity.telegram_user_id));
+  }
+
+  async resolveActivationEligibility(telegramUserIds: readonly number[]): Promise<ActivationEligibility[]> {
+    if (telegramUserIds.length === 0) return [];
+    let response: Response;
+    try {
+      response = await this.fetcher(
+        `${this.options.internalBaseUrl}/api/user/internal/mia-activation-eligibility`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-mia-internal-key": this.options.serviceKey,
+          },
+          body: JSON.stringify({ telegram_user_ids: telegramUserIds.map(String) }),
+          signal: AbortSignal.timeout(this.options.timeoutMs),
+        },
+      );
+    } catch {
+      throw new ResolverError("service_unavailable");
+    }
+    if (!response.ok) throw new ResolverError("service_unavailable", response.status);
+    const payload: unknown = await response.json().catch(() => undefined);
+    const parsed = activationEligibilityResponseSchema.safeParse(payload);
+    if (!parsed.success) throw new ResolverError("service_unavailable", response.status);
+    return parsed.data.data.eligible.map((item) => ({
+      telegramUserId: Number(item.telegram_user_id),
+      boundAt: new Date(item.bound_at * 1_000),
+    }));
   }
 
   async listModels(telegramUserId: number): Promise<ModelCatalog> {

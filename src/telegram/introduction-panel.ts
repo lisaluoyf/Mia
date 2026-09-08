@@ -9,6 +9,8 @@ interface IntroductionPanelCopy {
   video: string;
   sticker: string;
   settings: string;
+  chat: string;
+  search: string;
   settingsPrompt: string;
   openSettings: string;
   prompts: Record<MiaIntroductionAction, { text: string; placeholder: string }>;
@@ -19,6 +21,8 @@ const ENGLISH: IntroductionPanelCopy = {
   video: "🎬 Generate video",
   sticker: "✨ Make sticker",
   settings: "⚙️ Model settings",
+  chat: "💬 Chat",
+  search: "🔍 Search",
   settingsPrompt: "Open Mia settings to choose your chat, image, vision, and video models.",
   openSettings: "Open settings",
   prompts: {
@@ -35,6 +39,8 @@ const COPY: Partial<Record<BotLocale, IntroductionPanelCopy>> = {
     video: "🎬 生成视频",
     sticker: "✨ 制作贴纸",
     settings: "⚙️ 模型设置",
+    chat: "💬 聊天",
+    search: "🔍 搜索",
     settingsPrompt: "打开 Mia 设置，选择聊天、图片、视觉和视频模型。",
     openSettings: "打开设置",
     prompts: {
@@ -48,6 +54,8 @@ const COPY: Partial<Record<BotLocale, IntroductionPanelCopy>> = {
     video: "🎬 生成影片",
     sticker: "✨ 製作貼圖",
     settings: "⚙️ 模型設定",
+    chat: "💬 聊天",
+    search: "🔍 搜尋",
     settingsPrompt: "開啟 Mia 設定，選擇聊天、圖片、視覺和影片模型。",
     openSettings: "開啟設定",
     prompts: {
@@ -80,7 +88,9 @@ export function miaIntroductionPanel(
   else keyboard.url(copy.sticker, botDeepLink(username, "sticker"));
   if (options.privateChat) keyboard.webApp(copy.settings, options.miniAppUrl);
   else keyboard.url(copy.settings, botDeepLink(username, "settings"));
-  return keyboard;
+  return keyboard.row()
+    .text(copy.chat, "intro_action:chat")
+    .text(copy.search, "intro_action:search");
 }
 
 export function miaIntroductionActionPrompt(

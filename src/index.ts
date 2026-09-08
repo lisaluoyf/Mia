@@ -25,6 +25,8 @@ import { ChatCredentialResolver } from "./credentials/chat.js";
 import { ModelConfigStore } from "./model-config/store.js";
 import { AgentStore } from "./agent/store.js";
 import { AgentService } from "./agent/service.js";
+import { ActivationStore } from "./activation/store.js";
+import { ActivationService } from "./activation/service.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -61,6 +63,7 @@ async function main(): Promise<void> {
   debugRefreshTimer.unref();
   const store = new SettingsStore(resolve(config.databasePath), () => modelConfig.userDefaults());
   const contexts = new ContextStore(resolve(config.databasePath));
+  const activationStore = new ActivationStore(resolve(config.databasePath));
   const chatCredentials = new ChatCredentialResolver(client, {
     apiKey: config.miaGuestChatApiKey,
     model: () => modelConfig.get("guest_chat") ?? config.miaGuestChatModel,
@@ -104,7 +107,7 @@ async function main(): Promise<void> {
     model: () => modelConfig.get("intent_router") ?? config.miaRouterModel,
     timeoutMs: config.miaRouterTimeoutMs,
   });
-  const bot = createBot(config.telegramBotToken, {
+  const botDependencies: Parameters<typeof createBot>[1] = {
     agent,
     client,
     chatCredentials,
@@ -127,10 +130,24 @@ async function main(): Promise<void> {
       },
     },
     miniAppUrl: config.publicBaseUrl ? `${config.publicBaseUrl}/mia/` : null,
-  });
+  };
+  const bot = createBot(config.telegramBotToken, botDependencies);
   await bot.init();
   agent.attach(bot.api, bot.botInfo.id, bot.botInfo.username);
   agent.start(update => bot.handleUpdate(update));
+  const activation = new ActivationService({
+    store: activationStore,
+    client,
+    api: bot.api,
+    logger,
+    enabled: config.activationEnabled,
+    botUsername: bot.botInfo.username,
+    miniAppUrl: config.publicBaseUrl ? `${config.publicBaseUrl}/mia/` : "https://apimaster.ai/mia/",
+    dailyLimit: config.activationDailyLimit,
+    intervalMs: config.activationIntervalMs,
+    previewTelegramUserIds: config.activationPreviewTelegramUserIds,
+  });
+  botDependencies.activation = activation;
   try {
     await bot.api.setMyCommands(botCommands("en"));
     await bot.api.setMyCommands(botCommands("zh"), { language_code: "zh" });
@@ -153,6 +170,10 @@ async function main(): Promise<void> {
     debug,
   });
   worker.start();
+  if (config.activationPreviewTelegramUserIds.length > 0) {
+    void activation.sendPreviews().catch((error: unknown) => logger.warn({ err: error }, "Mia activation previews could not be sent"));
+  }
+  activation.start();
   const server = createServer({
     logger,
     serviceKey: config.miaInternalServiceKey,
@@ -177,12 +198,14 @@ async function main(): Promise<void> {
     logger.info({ signal }, "Stopping Mia");
     await server.close();
     worker.stop();
+    activation.stop();
     await agent.stop();
     await worker.drain();
     agentStore.close();
     clearInterval(debugRefreshTimer);
     store.close();
     contexts.close();
+    activationStore.close();
     mediaStore.close();
     debugStore.close();
     configurePromptReader(null);
