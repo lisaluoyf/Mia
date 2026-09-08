@@ -34,11 +34,13 @@ interface WorkerOptions {
   botUserId?: number;
   contexts?: Pick<ContextStore, "upsertUser" | "saveMessage">;
   debug?: DebugRecorder;
+  canSubmitAgentJob?: (job: MediaJob) => boolean;
 }
 
 export class MediaWorker {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  private idleWaiters: Array<() => void> = [];
   private readonly retries = new Map<number, { attempts: number; nextAt: number }>();
 
   constructor(private readonly options: WorkerOptions) {}
@@ -53,6 +55,11 @@ export class MediaWorker {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  drain(): Promise<void> {
+    if (!this.running) return Promise.resolve();
+    return new Promise(resolve => { this.idleWaiters.push(resolve); });
   }
 
   async tick(): Promise<void> {
@@ -86,6 +93,7 @@ export class MediaWorker {
       }
     } finally {
       this.running = false;
+      for (const resolve of this.idleWaiters.splice(0)) resolve();
     }
   }
 
@@ -139,6 +147,7 @@ export class MediaWorker {
       details: { mediaJobId: job.id, phase: "submission" },
       externalKey: `media-job:${job.id}`,
     }) ?? null;
+    let submissionAttempted = false;
     try {
       if (job.type === "video_generate" &&
           job.options.resolutionSource !== "channel_default" && job.options.resolutionSource !== "user") {
@@ -147,12 +156,21 @@ export class MediaWorker {
       }
       apiKey = await this.options.client.resolveAPIKey(job.telegramUserId, job.model);
       const images = await downloadTelegramImages(this.options.api, this.options.botToken, inputs);
+      if (job.options.agentRunId && typeof job.options.agentSourceJobId === "number") {
+        const source = this.options.store.getJob(job.options.agentSourceJobId);
+        if (!source || source.telegramUserId !== job.telegramUserId || source.chatId !== job.chatId || source.threadId !== job.threadId || source.status !== "succeeded") throw new MediaAPIError("source_image_unavailable");
+        const local = this.options.store.readLocalResult(source.id, source.resultMimeType);
+        if (!local || !local.mimeType.startsWith("image/")) throw new MediaAPIError("source_image_unavailable");
+        images.push(local);
+      }
+      if (job.options.agentRunId && this.options.canSubmitAgentJob && !this.options.canSubmitAgentJob(job)) throw new MediaAPIError("cancelled_before_submission");
       let taskId: string;
       if (job.type === "video_generate") {
         const durationSeconds = numberOption(job.options.durationSeconds, 4);
         const aspectRatio = stringOption(job.options.aspectRatio, "16:9");
         const resolution = job.options.resolutionSource === "user" ? stringOption(job.options.resolution, "").trim() : undefined;
         if (resolution === "") throw new MediaAPIError("video_resolution_confirmation_required");
+        submissionAttempted = true;
         taskId = await this.options.client.submitVideo(apiKey, {
           model: job.model,
           prompt: job.instruction,
@@ -177,9 +195,14 @@ export class MediaWorker {
           images,
         );
         let submission: ImageSubmitResult;
+        submissionAttempted = true;
         try {
           submission = await submitImage();
         } catch (error) {
+          if (job.options.agentRunId) {
+            if (shouldRetryImageSubmission(error)) throw new MediaAPIError("submission_outcome_unknown");
+            throw error;
+          }
           if (!shouldRetryImageSubmission(error)) throw error;
           this.options.logger.warn(
             { jobId: job.id, telegramUserId: job.telegramUserId, model: job.model, errorCode: errorCode(error) },
@@ -209,11 +232,12 @@ export class MediaWorker {
         await this.updateStatus(job, botText(mediaJobLocale(job.options), "submitted"));
       }
     } catch (error) {
-      this.options.store.transitionJob(job.id, ["submitting"], "failed", { errorCode: errorCode(error) });
-      this.options.debug?.finish(debugId, { status: "failed", errorCode: errorCode(error) });
+      const failure = job.options.agentRunId && submissionAttempted && shouldRetryImageSubmission(error) ? new MediaAPIError("submission_outcome_unknown") : error;
+      this.options.store.transitionJob(job.id, ["submitting"], "failed", { errorCode: errorCode(failure) });
+      this.options.debug?.finish(debugId, { status: "failed", errorCode: errorCode(failure) });
       const locale = mediaJobLocale(job.options);
-      const accessFailure = submissionAccessFailure(error, locale);
-      const failureText = errorCode(error) === "video_resolution_confirmation_required"
+      const accessFailure = submissionAccessFailure(failure, locale);
+      const failureText = errorCode(failure) === "video_resolution_confirmation_required"
         ? botText(locale, "videoResolutionConfirmationRequired")
         : botText(locale, job.type === "video_generate" ? "videoSubmissionFailed" : "submissionFailed");
       await this.notifyFailure(
@@ -287,7 +311,7 @@ export class MediaWorker {
       try {
         media = await this.options.client.getContent(apiKey, state.resultUrl, this.options.resultMaxBytes);
       } catch (error) {
-        if (job.type === "video_generate" && errorCode(error) === "content_too_large" && this.options.publicBaseUrl) {
+        if (!job.options.agentRunId && job.type === "video_generate" && errorCode(error) === "content_too_large" && this.options.publicBaseUrl) {
           const token = this.options.store.createAccessToken("download", job.id);
           await sendTelegramRichText(this.options.api, job.chatId, botText(locale, "videoReadyLink", {
             url: `${this.options.publicBaseUrl}/mia/media/download/${token.token}`,
@@ -304,6 +328,16 @@ export class MediaWorker {
       }
     } else {
       throw new Error("missing_media_result");
+    }
+    if (job.options.agentRunId) {
+      if (stringOption(job.options.outputMode, "") === "telegram_sticker") {
+        media = { bytes: await prepareTelegramSticker(media.bytes), mimeType: "image/webp", filename: "sticker.webp" };
+      }
+      this.options.store.saveLocalResult(job.id, media.bytes);
+      this.options.store.transitionJob(job.id, [job.status], "succeeded", {
+        progress: 100, resultUrl: state.resultUrl, resultMimeType: media.mimeType,
+      });
+      return;
     }
     if (stringOption(job.options.outputMode, "") === "telegram_sticker") {
       const sticker = await prepareTelegramSticker(media.bytes);
@@ -482,6 +516,7 @@ export class MediaWorker {
   }
 
   private async notifyFailure(job: MediaJob, text: string, keyboard?: InlineKeyboard): Promise<void> {
+    if (job.options.agentRunId) return;
     if (hasEphemeralStatus(job) && job.statusMessageId) {
       const edited = await this.options.api.editMessageText(job.chatId, job.statusMessageId, text, {
         reply_markup: keyboard ?? { inline_keyboard: [] },
@@ -540,9 +575,9 @@ function submissionAccessFailure(error: unknown, locale: string): { text: string
 function shouldRetryImageSubmission(error: unknown): boolean {
   if (!(error instanceof MediaAPIError)) return true;
   if (error.code === "service_unavailable" || error.code === "invalid_submit_response") return true;
-  return error.code === "upstream_error" &&
-    (error.status === undefined || error.status === 408 || error.status === 409 || error.status === 425 ||
-      error.status === 429 || error.status >= 500);
+  return (error.code === "upstream_error" && error.status === undefined) ||
+    error.status === 408 || error.status === 409 || error.status === 425 || error.status === 429 ||
+    (error.status !== undefined && error.status >= 500);
 }
 
 function hasEphemeralStatus(job: MediaJob): boolean {

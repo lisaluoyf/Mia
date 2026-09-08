@@ -731,6 +731,13 @@ export class MediaStore {
     return row ? mediaJobFromRow(row) : null;
   }
 
+  recordAgentDelivery(jobId: number, messageId: number, fileId: string | null, uniqueId: string | null): void {
+    const job = this.getJob(jobId);
+    if (!job?.options.agentRunId || job.status !== "succeeded") throw new Error("Agent artifact is not ready");
+    this.database.prepare(`UPDATE mia_media_jobs SET status_message_id=?, result_telegram_file_id=?, result_telegram_unique_id=? WHERE id=? AND status='succeeded'`)
+      .run(messageId, fileId, uniqueId, jobId);
+  }
+
   getJobByIdempotencyKey(idempotencyKey: string): MediaJob | null {
     requireNonEmpty(idempotencyKey, "idempotencyKey");
     const row = this.database.prepare(

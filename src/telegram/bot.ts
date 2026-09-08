@@ -68,6 +68,7 @@ import {
   type MiaIntroductionAction,
 } from "./introduction-panel.js";
 import { userFacingError } from "./messages.js";
+import type { AgentService } from "../agent/service.js";
 import { promptFromMessage, shouldRespond } from "./policy.js";
 import { sendTelegramRichText } from "./send-rich-text.js";
 
@@ -76,6 +77,7 @@ type StorableMessage = Message.TextMessage | Message.PhotoMessage | Message.Docu
   Message.StickerMessage | Message.RichMessageMessage;
 
 interface BotDependencies {
+  agent?: AgentService;
   client: APIMasterClient;
   chatCredentials?: ChatCredentialProvider;
   logger: Logger;
@@ -509,6 +511,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       }
     }
     dependencies.mediaStore.clearPendingIntent(scopeFor(message));
+    dependencies.agent?.cancel({ userId: message.from.id, chatId: message.chat.id, threadId: message.message_thread_id ?? null });
     if (message.chat.type === "private") translations?.exitTranslationSession(message.from.id, message.chat.id);
     if (message.chat.type === "private") dependencies.mediaStore.clearActivePrivateImage(message.from.id, message.chat.id);
     dependencies.contexts.clearConversation?.(conversationScope(message));
@@ -516,7 +519,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     return;
   }
   const directSummary = explicit?.command === "summary" || explicitSummaryPhrase;
-  if (directSummary) {
+  if (directSummary && !dependencies.agent?.enabled(message.from.id)) {
     await handleGroupSummary(ctx, message, dependencies, locale);
     return;
   }
@@ -552,6 +555,17 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     return;
   }
   let inputs = normalizePositions(chosenInputs);
+  if (!automaticFollowUp && dependencies.agent?.enabled(message.from.id) &&
+      (!explicit || ["image", "video", "vision", "sticker", "summary"].includes(explicit.command))) {
+    dependencies.agent.enqueue({
+      key: `${message.chat.id}:${message.message_id}`, userId: message.from.id,
+      chatId: message.chat.id, threadId: message.message_thread_id ?? null,
+      messageId: message.message_id, replyToMessageId: message.reply_to_message?.message_id ?? null,
+      language: message.from.language_code ?? "en", text: promptFromMessage(policyInput, identity), media: inputs,
+    });
+    request.onIntervention?.();
+    return;
+  }
   const callbackReply = pending?.missingRequired.includes("callback_reply") === true &&
     pending.sourceMessageIds.at(-1) === message.reply_to_message?.message_id;
   const savedCallbackIntent = callbackReply ? mediaIntentSchema.safeParse(pending.slots) : null;
@@ -2603,7 +2617,7 @@ export function createBot(token: string, dependencies: BotDependencies): Bot {
     const message = ctx.message;
     if (!("text" in message) && !("photo" in message) && !("document" in message) &&
         !("sticker" in message) && !("rich_message" in message)) return;
-    if (dependencies.mediaStore && !dependencies.mediaStore.claimTelegramUpdate(ctx.update.update_id)) return;
+    if (!dependencies.agent?.ownsUpdate(ctx.update) && dependencies.mediaStore && !dependencies.mediaStore.claimTelegramUpdate(ctx.update.update_id)) return;
     const repliedMessage = message.reply_to_message;
     if (repliedMessage && isStorableMessage(repliedMessage)) {
       persistMessage(repliedMessage, dependencies);
@@ -2611,7 +2625,7 @@ export function createBot(token: string, dependencies: BotDependencies): Bot {
     persistMessage(message as StorableMessage, dependencies);
     if ("sticker" in message || "document" in message && !message.document.mime_type?.startsWith("image/")) return;
     const media = mediaFromMessage(message);
-    if (media?.mediaGroupId) {
+    if (media?.mediaGroupId && !dependencies.agent?.ownsUpdate(ctx.update)) {
       const key = `${message.chat.id}:${media.mediaGroupId}`;
       const existing = albums.get(key);
       if (existing) {
@@ -2637,10 +2651,23 @@ export function createBot(token: string, dependencies: BotDependencies): Bot {
     persistMessage(message as StorableMessage, dependencies);
   });
   bot.on("callback_query:data", (ctx) => {
+    if (ctx.callbackQuery.data.startsWith("agent:") && dependencies.agent) {
+      const [, id, revision, action] = ctx.callbackQuery.data.split(":");
+      const message = ctx.callbackQuery.message;
+      if (!id || !message) return ctx.answerCallbackQuery({ text: "Task unavailable" });
+      const threadId = "message_thread_id" in message ? message.message_thread_id ?? null : null;
+      const accepted = action === "approve"
+        ? dependencies.agent.approve(id, Number(revision), ctx.from.id, message.chat.id, threadId)
+        : action === "cancel" && dependencies.agent.cancelRun(id, ctx.from.id, message.chat.id, threadId, `callback:${ctx.update.update_id}`);
+      return ctx.answerCallbackQuery({ text: accepted ? "OK" : "Task changed or confirmation expired" });
+    }
     if (dependencies.mediaStore && !dependencies.mediaStore.claimTelegramUpdate(ctx.update.update_id)) return;
     return handleCallback(ctx, dependencies);
   });
-  bot.catch(({ ctx, error }) => dependencies.logger.error({ err: error, updateId: ctx.update.update_id }, "Unhandled Telegram update error"));
+  bot.catch(({ ctx, error }) => {
+    dependencies.logger.error({ err: error, updateId: ctx.update.update_id }, "Unhandled Telegram update error");
+    if (dependencies.agent?.ownsUpdate(ctx.update)) throw error;
+  });
   return bot;
 }
 

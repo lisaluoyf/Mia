@@ -880,7 +880,11 @@ export class APIMasterClient {
       throw new MediaAPIError("service_unavailable");
     }
     if (!response.ok) {
-      throw new MediaAPIError(response.status === 402 ? "insufficient_quota" : "upstream_error", response.status);
+      const payload: unknown = await response.json().catch(() => null);
+      const parsed = z.object({ code: z.string().optional(), error: z.object({ code: z.string().nullable().optional(), type: z.string().optional() }).optional() }).safeParse(payload);
+      const providerCode = parsed.success ? parsed.data.error?.code ?? parsed.data.code ?? parsed.data.error?.type : undefined;
+      const safeCode = providerCode && /^[a-zA-Z0-9_.-]{1,100}$/.test(providerCode) ? providerCode : null;
+      throw new MediaAPIError(safeCode ?? (response.status === 402 ? "insufficient_quota" : "upstream_error"), response.status);
     }
     return response;
   }

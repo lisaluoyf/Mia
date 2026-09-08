@@ -27,6 +27,7 @@ interface ServerOptions {
   logger: Logger;
   serviceKey: string;
   handleUpdate: (update: Update) => Promise<void>;
+  enqueueUpdate?: (update: Update) => boolean;
   miniApp?: {
     botToken: string;
     maxAuthAgeSeconds: number;
@@ -50,7 +51,7 @@ function authenticated(provided: string | string[] | undefined, expected: string
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
-export function createServer({ logger, serviceKey, handleUpdate, miniApp, mediaDownload, debug }: ServerOptions) {
+export function createServer({ logger, serviceKey, handleUpdate, enqueueUpdate, miniApp, mediaDownload, debug }: ServerOptions) {
   const app = Fastify({ loggerInstance: logger, bodyLimit: 1024 * 1024, trustProxy: true });
 
   app.addHook("onRequest", (request, reply, done) => {
@@ -168,6 +169,7 @@ export function createServer({ logger, serviceKey, handleUpdate, miniApp, mediaD
       return reply.code(400).send({ accepted: false });
     }
     const update = parsed.data as Update;
+    if (enqueueUpdate?.(update)) return reply.code(202).send({ accepted: true });
     setImmediate(() => {
       void handleUpdate(update).catch((error: unknown) => {
         logger.error({ err: error, updateId: update.update_id }, "Telegram update processing failed");

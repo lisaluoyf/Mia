@@ -23,6 +23,8 @@ import { DebugStore } from "./debug/store.js";
 import { OnboardingService } from "./onboarding/service.js";
 import { ChatCredentialResolver } from "./credentials/chat.js";
 import { ModelConfigStore } from "./model-config/store.js";
+import { AgentStore } from "./agent/store.js";
+import { AgentService } from "./agent/service.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -90,11 +92,20 @@ async function main(): Promise<void> {
   const onboarding = new OnboardingService(contexts);
   const mediaStore = new MediaStore(resolve(config.databasePath));
   const settings = new ModelSettingsService(client, store, () => modelConfig.userDefaults());
+  const agentStore = new AgentStore(resolve(config.databasePath));
+  const agent = new AgentService({
+    store: agentStore, media: mediaStore, client, settings, credentials: chatCredentials,
+    contexts, logger, botToken: config.telegramBotToken, baseUrl: config.apimasterBaseUrl,
+    model: () => modelConfig.get("intent_router") ?? config.miaRouterModel,
+    timeoutMs: config.miaRouterTimeoutMs, enabled: config.agentEnabled,
+    allowedUsers: config.agentAllowedUsers, webSearch: config.agentWebSearch,
+  });
   const router = new IntentRouter(client, {
     model: () => modelConfig.get("intent_router") ?? config.miaRouterModel,
     timeoutMs: config.miaRouterTimeoutMs,
   });
   const bot = createBot(config.telegramBotToken, {
+    agent,
     client,
     chatCredentials,
     logger,
@@ -118,6 +129,8 @@ async function main(): Promise<void> {
     miniAppUrl: config.publicBaseUrl ? `${config.publicBaseUrl}/mia/` : null,
   });
   await bot.init();
+  agent.attach(bot.api, bot.botInfo.id, bot.botInfo.username);
+  agent.start(update => bot.handleUpdate(update));
   try {
     await bot.api.setMyCommands(botCommands("en"));
     await bot.api.setMyCommands(botCommands("zh"), { language_code: "zh" });
@@ -125,6 +138,7 @@ async function main(): Promise<void> {
     logger.warn({ err: error }, "Mia Telegram commands could not be configured");
   }
   const worker = new MediaWorker({
+    canSubmitAgentJob: job => agent.canSubmit(job),
     client,
     store: mediaStore,
     api: bot.api,
@@ -143,6 +157,7 @@ async function main(): Promise<void> {
     logger,
     serviceKey: config.miaInternalServiceKey,
     handleUpdate: (update) => bot.handleUpdate(update),
+    enqueueUpdate: update => agent.enqueueUpdate(update),
     miniApp: {
       botToken: config.telegramBotToken,
       maxAuthAgeSeconds: config.miniAppAuthMaxAgeSeconds,
@@ -162,6 +177,9 @@ async function main(): Promise<void> {
     logger.info({ signal }, "Stopping Mia");
     await server.close();
     worker.stop();
+    await agent.stop();
+    await worker.drain();
+    agentStore.close();
     clearInterval(debugRefreshTimer);
     store.close();
     contexts.close();
