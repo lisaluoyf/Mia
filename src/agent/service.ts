@@ -17,7 +17,7 @@ import { createAgentTools } from "./tools.js";
 import { sendAgentChunk, formatRejected } from "./presentation.js";
 import { miaResponseFromText } from "../presentation/schema.js";
 import { renderTelegramRich } from "../presentation/telegram-rich.js";
-import { scopeKey, type AgentInput, type Run } from "./types.js";
+import { scopeKey, type AgentInput, type Operation, type Run } from "./types.js";
 import { promptText } from "../prompts.js";
 
 interface ServiceOptions {
@@ -220,9 +220,20 @@ export class AgentService {
       throw new AgentModelError(rejected ? "telegram_delivery_rejected" : error instanceof AgentModelError ? error.code : "delivery_outcome_unknown", false);
     }
   }
+  private hasDetailedDeliveryRequest(run: Run): boolean {
+    return /(?:\b(?:compare|comparison|summari[sz]e|summary|plan|steps?|list|table|explain|detail)\b|对比|比较|总结|汇总|方案|步骤|列表|表格|详细说明|展开)/i.test(run.input.text);
+  }
+  private mediaCaption(run: Run, operation: Operation): string {
+    const zh = run.input.language.startsWith("zh");
+    if (operation.call.name === "generate_video") return zh ? "视频已生成。" : "Video generated.";
+    if (operation.call.name === "create_sticker") return zh ? "贴纸已创建。" : "Sticker created.";
+    if (operation.call.name === "edit_image") return zh ? "图片已编辑完成。" : "Image edited.";
+    return zh ? "图片已生成。" : "Image generated.";
+  }
   private async deliver(run: Run, current: () => boolean): Promise<void> {
     const api = this.api;
     if (!api || !run.final) return;
+    const completedArtifacts = run.operations.filter((operation) => operation.result?.artifact);
     for (const op of run.operations) {
       if (!current()) return;
       const artifact = op.result?.artifact;
@@ -244,8 +255,8 @@ export class AgentService {
           if (!sticker) throw new Error("empty_sticker_set");
           if (!current()) throw new AgentModelError("delivery_superseded", false);
           sent = await api.sendSticker(run.input.chatId, sticker.file_id, { ...this.replyOptions(run), reply_markup: new InlineKeyboard().url("Sticker pack", `https://t.me/addstickers/${name}`) });
-        } else if (artifact.kind === "video") sent = await api.sendVideo(run.input.chatId, file, this.replyOptions(run));
-        else sent = await api.sendDocument(run.input.chatId, file, this.replyOptions(run));
+        } else if (artifact.kind === "video") sent = await api.sendVideo(run.input.chatId, file, { ...this.replyOptions(run), caption: this.mediaCaption(run, op) });
+        else sent = await api.sendDocument(run.input.chatId, file, { ...this.replyOptions(run), caption: this.mediaCaption(run, op) });
         const mediaFile = "document" in sent ? sent.document : "video" in sent ? sent.video : "sticker" in sent ? sent.sticker : null;
         this.options.media.recordAgentDelivery(job.id, sent.message_id, mediaFile?.file_id ?? null, mediaFile?.file_unique_id ?? null);
         if (artifact.kind === "image" && mediaFile && job.options.outputMode !== "telegram_sticker") {
@@ -261,7 +272,15 @@ export class AgentService {
     const oldDelivery = this.options.store.delivery(answerKey);
     if (oldDelivery?.status === "delivered") return;
     if (oldDelivery && oldDelivery.status !== "failed") throw new AgentModelError("delivery_outcome_unknown", false);
-    const chunks = renderTelegramRich(run.final.presentation ?? miaResponseFromText(run.final.text));
+    // Media is the result. Do not follow it with a model-authored recap or table.
+    if (run.final.status === "completed" && completedArtifacts.length > 0) {
+      this.options.store.setDelivery(answerKey, "delivered");
+      return;
+    }
+    const presentation = this.hasDetailedDeliveryRequest(run) && run.final.presentation
+      ? run.final.presentation
+      : miaResponseFromText(run.final.text);
+    const chunks = renderTelegramRich(presentation);
     for (const [index, chunk] of chunks.entries()) {
       if (!current()) return;
       const chunkKey = `${answerKey}:chunk:${index}`;

@@ -30,7 +30,9 @@ describe("image action buttons", () => {
   it("offers localized actions and only lets the image owner create one pending action", async () => {
     store = new MediaStore(":memory:");
     const classify = vi.fn();
+    const enqueue = vi.fn();
     const bot = createBot("123:test", {
+      agent: { enabled: vi.fn().mockReturnValue(true), ownsUpdate: vi.fn().mockReturnValue(true), enqueue } as never,
       client: {} as APIMasterClient,
       logger: createLogger("silent"),
       settings: { getPreferences: vi.fn(), getSnapshot: vi.fn().mockResolvedValue({}) },
@@ -79,6 +81,7 @@ describe("image action buttons", () => {
       ],
     ] });
     expect(classify).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
 
     await bot.handleUpdate({
       update_id: 2,
@@ -187,5 +190,30 @@ describe("image action buttons", () => {
         { text: "做成视频", callback_data: "image_action:42:41:video" },
       ],
     ] });
+  });
+
+  it("maps the sticker action to a pending sticker intent", async () => {
+    store = new MediaStore(":memory:");
+    const bot = createBot("123:test", {
+      client: {} as APIMasterClient,
+      logger: createLogger("silent"),
+      settings: { getPreferences: vi.fn(), getSnapshot: vi.fn().mockResolvedValue({}) },
+      contexts: contextStubs(),
+      router: { model: "gpt-5.4", classify: vi.fn() } as unknown as IntentRouter,
+      mediaStore: store,
+      botToken: "123:test",
+    });
+    bot.botInfo = botInfo;
+    const calls: Array<{ method: string; payload: Record<string, unknown> }> = [];
+    bot.api.config.use((_previous, method, payload) => {
+      const safe = payload as unknown as Record<string, unknown>;
+      calls.push({ method, payload: safe });
+      if (method === "sendMessage") return Promise.resolve({ ok: true, result: { message_id: 701, date: 1_788_333_601, chat: { id: 42, type: "private" }, from: botInfo, text: typeof safe.text === "string" ? safe.text : "" } } as never);
+      return Promise.resolve({ ok: true, result: true } as never);
+    });
+    await bot.handleUpdate({ update_id: 1, message: { message_id: 40, date: 1_788_333_600, chat: { id: 42, type: "private" }, from: { id: 42, is_bot: false, first_name: "Liz", language_code: "zh-CN" }, photo: [{ file_id: "photo", file_unique_id: "unique", width: 100, height: 100 }] } } as never);
+    await bot.handleUpdate({ update_id: 2, callback_query: { id: "sticker", from: { id: 42, is_bot: false, first_name: "Liz", language_code: "zh-CN" }, message: { message_id: 701, date: 1_788_333_601, chat: { id: 42, type: "private" }, from: botInfo, text: "这张图想让我做什么？" }, chat_instance: "instance", data: "image_action:42:40:sticker" } } as never);
+    expect(calls.find(call => call.method === "sendMessage" && call.payload.text === "回复这条消息，告诉我想把这张图做成什么样的贴纸。" )).toBeTruthy();
+    expect(store.getPendingIntent({ telegramUserId: 42, chatId: 42, threadId: null })).toMatchObject({ intent: "sticker_create" });
   });
 });
