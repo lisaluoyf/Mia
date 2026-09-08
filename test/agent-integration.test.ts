@@ -16,6 +16,7 @@ import type { ModelSettingsService, SettingsSnapshot } from "../src/settings/ser
 import { createLogger } from "../src/logger.js";
 import { createServer } from "../src/server.js";
 import { createBot } from "../src/telegram/bot.js";
+import { miaResponseFromText } from "../src/presentation/schema.js";
 
 const directories: string[] = [];
 const stores: Array<{ close(): void }> = [];
@@ -46,7 +47,7 @@ function deliveryFixture() {
   task.status = "queued";
   task.final = { text: "Completed answer", status: "completed", revision: 1 };
   store.save(task);
-  const api = { sendMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, text: "Completed answer" }), sendDocument: vi.fn().mockResolvedValue({ message_id: 101, document: { file_id: "result-file", file_unique_id: "result-unique" } }) };
+  const api = { sendRichMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, rich_message: { blocks: [] } }), sendMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, text: "Completed answer" }), sendDocument: vi.fn().mockResolvedValue({ message_id: 101, document: { file_id: "result-file", file_unique_id: "result-unique" } }) };
   const media = mediaStore();
   const options = { store, media, enabled: false, allowedUsers: [], logger: createLogger("silent"), contexts: { upsertUser: vi.fn(), saveMessage: vi.fn() }, client: {}, settings: {}, credentials: {}, botToken: "test", baseUrl: "https://example.invalid", model: () => "configured", timeoutMs: 1000, webSearch: false } as unknown as ConstructorParameters<typeof AgentService>[0];
   const service = new AgentService(options);
@@ -55,6 +56,40 @@ function deliveryFixture() {
 }
 
 describe("agent delivery recovery", () => {
+  it("renders structured headings and falls back to HTML after definite rich rejection", async () => {
+    const f = deliveryFixture();
+    f.task.final!.presentation = { ...miaResponseFromText("Body <content>"), title: { text: "Result", emoji: null } };
+    f.store.save(f.task);
+    f.api.sendRichMessage.mockRejectedValueOnce(new GrammyError("unsupported", { ok: false, error_code: 400, description: "Unsupported rich message" }, "sendRichMessage", {}));
+    await f.service.drain();
+    const payload = f.api.sendRichMessage.mock.calls[0]?.[1] as { blocks: unknown[] };
+    expect(payload.blocks).toContainEqual({ type: "heading", size: 2, text: "Result" });
+    expect(f.api.sendMessage).toHaveBeenCalledWith(42, expect.stringContaining("<b>Result</b>"), expect.objectContaining({ parse_mode: "HTML" }));
+    expect(f.store.get(f.task.id)?.status).toBe("completed");
+    f.task.status = "queued"; f.store.save(f.task);
+    await f.service.drain();
+    expect(f.api.sendMessage).toHaveBeenCalledTimes(1);
+    await f.service.stop();
+  });
+  it("falls back to plain text only after both rich and HTML are rejected", async () => {
+    const f = deliveryFixture();
+    const rejection = new GrammyError("unsupported", { ok: false, error_code: 400, description: "Unsupported formatting" }, "sendMessage", {});
+    f.api.sendRichMessage.mockRejectedValueOnce(rejection);
+    f.api.sendMessage.mockRejectedValueOnce(rejection);
+    await f.service.drain();
+    expect(f.api.sendMessage).toHaveBeenCalledTimes(2);
+    expect(f.api.sendMessage.mock.calls[1]?.[2]).not.toHaveProperty("parse_mode");
+    expect(f.store.get(f.task.id)?.status).toBe("completed");
+    await f.service.stop();
+  });
+  it("does not resend a previously delivered pre-rich answer", async () => {
+    const f = deliveryFixture();
+    f.store.setDelivery(`${f.task.id}:answer:1:0:1`, "delivered", 123);
+    await f.service.drain();
+    expect(f.api.sendRichMessage).not.toHaveBeenCalled();
+    expect(f.api.sendMessage).not.toHaveBeenCalled();
+    await f.service.stop();
+  });
   it("does not resend an answer after a checkpoint restart", async () => {
     const f = deliveryFixture();
     await f.service.drain();
@@ -62,25 +97,26 @@ describe("agent delivery recovery", () => {
     f.task.status = "queued";
     f.store.save(f.task);
     await f.service.drain();
-    expect(f.api.sendMessage).toHaveBeenCalledTimes(1);
+    expect(f.api.sendRichMessage).toHaveBeenCalledTimes(1);
     await f.service.stop();
   });
   it("preserves indeterminate Telegram sends without blindly retrying", async () => {
     const f = deliveryFixture();
-    f.api.sendMessage.mockRejectedValue(new Error("connection closed"));
+    f.api.sendRichMessage.mockRejectedValue(new Error("connection closed"));
     await f.service.drain();
-    expect(f.store.delivery(`${f.task.id}:answer:1:0:1`)?.status).toBe("outcome_unknown");
+    expect(f.store.delivery(`${f.task.id}:answer:1:0:1:chunk:0:rich`)?.status).toBe("outcome_unknown");
     expect(f.store.get(f.task.id)?.status).toBe("blocked");
-    const count = f.api.sendMessage.mock.calls.length;
+    const count = f.api.sendRichMessage.mock.calls.length;
     await f.service.drain();
-    expect(f.api.sendMessage).toHaveBeenCalledTimes(count);
+    expect(f.api.sendRichMessage).toHaveBeenCalledTimes(count);
+    expect(f.api.sendMessage).not.toHaveBeenCalled();
     await f.service.stop();
   });
   it("can retry a definite Telegram rejection without regenerating an artifact", async () => {
     const f = deliveryFixture();
-    f.api.sendMessage.mockRejectedValueOnce(new GrammyError("send failed", { ok: false, error_code: 429, description: "Too Many Requests", parameters: { retry_after: 1 } }, "sendMessage", {}));
+    f.api.sendRichMessage.mockRejectedValueOnce(new GrammyError("send failed", { ok: false, error_code: 429, description: "Too Many Requests", parameters: { retry_after: 1 } }, "sendRichMessage", {}));
     await f.service.drain();
-    expect(f.store.delivery(`${f.task.id}:answer:1:0:1`)?.status).toBe("failed");
+    expect(f.store.delivery(`${f.task.id}:answer:1:0:1:chunk:0:rich`)?.status).toBe("failed");
     f.task.status = "queued";
     f.store.save(f.task);
     await f.service.drain();
@@ -98,8 +134,8 @@ describe("agent delivery recovery", () => {
     f.task.final = { text: "Now the media task is finished", status: "completed", revision: 1 };
     f.store.save(f.task);
     await f.service.drain();
-    expect(f.api.sendMessage).toHaveBeenCalledTimes(2);
-    expect(f.api.sendMessage).toHaveBeenLastCalledWith(42, "Now the media task is finished", expect.anything());
+    expect(f.api.sendRichMessage).toHaveBeenCalledTimes(2);
+    expect(f.api.sendRichMessage).toHaveBeenLastCalledWith(42, { blocks: [{ type: "paragraph", text: "Now the media task is finished" }] }, expect.anything());
     await f.service.stop();
   });
 });

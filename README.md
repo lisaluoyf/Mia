@@ -55,6 +55,12 @@ Tests use mocked providers/Telegram and real temporary SQLite/media storage;
 production channel compatibility and paid end-to-end generation are not verified
 by those tests. No production deployment is implied.
 
+Agent answers now reuse the existing structured Mia response schema and Telegram
+rich renderer. Definite formatting rejections fall back to HTML, then plain text;
+transport failures remain indeterminate and do not trigger duplicate fallback
+sends. Each chunk and fallback attempt has a durable delivery identity. Old
+plain-text checkpoints and their delivered receipts remain compatible.
+
 Roll back new enrollment by clearing the allowlist or disabling the flag; the
 runtime remains loaded to reconcile existing tasks, and existing approval/cancel
 buttons still work. New ordinary messages from disabled users follow the legacy

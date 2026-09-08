@@ -13,6 +13,9 @@ import type { AgentStore } from "./store.js";
 import { AgentRuntime, instructions } from "./runtime.js";
 import { AgentModelError, responseStep } from "./model.js";
 import { createAgentTools } from "./tools.js";
+import { sendAgentChunk, formatRejected } from "./presentation.js";
+import { miaResponseFromText } from "../presentation/schema.js";
+import { renderTelegramRich } from "../presentation/telegram-rich.js";
 import { scopeKey, type AgentInput, type Run } from "./types.js";
 
 interface ServiceOptions {
@@ -131,7 +134,13 @@ export class AgentService {
     if (existing?.status === "delivered") return existing.message_id;
     if (run.noticeMessageId) {
       try {
-        await this.api.editMessageText(run.input.chatId, run.noticeMessageId, run.notice, { reply_markup: this.keyboard(run) });
+        const chunk = renderTelegramRich(miaResponseFromText(run.notice))[0]!;
+        try {
+          await this.api.editMessageText(run.input.chatId, run.noticeMessageId, chunk.richMessage, { reply_markup: this.keyboard(run) });
+        } catch (error) {
+          if (!formatRejected(error)) throw error;
+          await this.api.editMessageText(run.input.chatId, run.noticeMessageId, run.notice, { reply_markup: this.keyboard(run) });
+        }
       } catch (error) {
         if (!(error instanceof Error && error.message.includes("message is not modified"))) return run.noticeMessageId;
       }
@@ -141,7 +150,14 @@ export class AgentService {
     if (existing) return null;
     this.options.store.setDelivery(key, "sending");
     try {
-      const sent = await this.api.sendMessage(run.input.chatId, run.notice, { ...this.replyOptions(run), reply_markup: this.keyboard(run) });
+      let sent: Message;
+      const options = { ...this.replyOptions(run), reply_markup: this.keyboard(run) };
+      try {
+        sent = await this.api.sendRichMessage(run.input.chatId, renderTelegramRich(miaResponseFromText(run.notice))[0]!.richMessage, options);
+      } catch (error) {
+        if (!formatRejected(error)) throw error;
+        sent = await this.api.sendMessage(run.input.chatId, run.notice, options);
+      }
       this.options.store.setDelivery(key, "delivered", sent.message_id);
       return sent.message_id;
     } catch {
@@ -152,6 +168,7 @@ export class AgentService {
   private async sendOnce(key: string, send: () => Promise<Message>): Promise<void> {
     const existing = this.options.store.delivery(key);
     if (existing?.status === "delivered") return;
+    if (existing?.status === "format_rejected") throw new GrammyError("Persisted format rejection", { ok: false, error_code: 400, description: "Unsupported presentation format" }, "sendMessage", {});
     if (existing && existing.status !== "failed") throw new AgentModelError("delivery_outcome_unknown", false);
     this.options.store.setDelivery(key, "sending");
     try {
@@ -159,7 +176,8 @@ export class AgentService {
       this.options.store.setDelivery(key, "delivered", sent.message_id);
     } catch (error) {
       const rejected = error instanceof GrammyError && error.error_code >= 400 && error.error_code < 500;
-      this.options.store.setDelivery(key, rejected || error instanceof AgentModelError ? "failed" : "outcome_unknown");
+      this.options.store.setDelivery(key, formatRejected(error) ? "format_rejected" : rejected || error instanceof AgentModelError ? "failed" : "outcome_unknown");
+      if (formatRejected(error)) throw error;
       throw new AgentModelError(rejected ? "telegram_delivery_rejected" : error instanceof AgentModelError ? error.code : "delivery_outcome_unknown", false);
     }
   }
@@ -200,11 +218,24 @@ export class AgentService {
       });
     }
     if (!current()) return;
-    await this.sendOnce(`${run.id}:answer:${run.final.revision}:${run.operations.length}:${run.steps}`, async () => {
-      const sent = await api.sendMessage(run.input.chatId, run.final!.text, this.replyOptions(run));
+    const answerKey = `${run.id}:answer:${run.final.revision}:${run.operations.length}:${run.steps}`;
+    const oldDelivery = this.options.store.delivery(answerKey);
+    if (oldDelivery?.status === "delivered") return;
+    if (oldDelivery && oldDelivery.status !== "failed") throw new AgentModelError("delivery_outcome_unknown", false);
+    const chunks = renderTelegramRich(run.final.presentation ?? miaResponseFromText(run.final.text));
+    for (const [index, chunk] of chunks.entries()) {
+      if (!current()) return;
+      const chunkKey = `${answerKey}:chunk:${index}`;
+      if (this.options.store.delivery(chunkKey)?.status === "delivered") continue;
+      await sendAgentChunk(api, run.input.chatId, chunk, this.replyOptions(run), (suffix, send) => this.sendOnce(`${chunkKey}:${suffix}`, async () => {
+      const sent = await send();
       this.options.contexts.upsertUser({ telegramUserId: this.botId, firstName: "Mia", lastName: null, username: this.botUsername, languageCode: null, isBot: true });
-      this.options.contexts.saveMessage({ chatId: run.input.chatId, messageId: sent.message_id, threadId: run.input.threadId, senderUserId: this.botId, senderChatId: null, replyToMessageId: run.input.messageId, contentType: "text", text: run.final!.text, caption: null, entitiesJson: null, mediaFileId: null, mediaUniqueId: null, sentAt: new Date(sent.date * 1000).toISOString(), editedAt: null });
+      this.options.contexts.saveMessage({ chatId: run.input.chatId, messageId: sent.message_id, threadId: run.input.threadId, senderUserId: this.botId, senderChatId: null, replyToMessageId: run.input.messageId, contentType: "rich_message" in sent ? "rich_message" : "text", text: chunk.plainText, caption: null, entitiesJson: null, mediaFileId: null, mediaUniqueId: null, sentAt: new Date(sent.date * 1000).toISOString(), editedAt: null });
       return sent;
-    });
+      }), current);
+      if (!current()) return;
+      this.options.store.setDelivery(chunkKey, "delivered");
+    }
+    this.options.store.setDelivery(answerKey, "delivered");
   }
 }
