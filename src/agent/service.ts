@@ -386,9 +386,17 @@ export class AgentService {
     this.clearDraft(run);
     if (run.final.executionBlock) {
       const feedback = mediaExecutionFeedback(run.final.executionBlock, run.input.language);
-      await this.sendOnce(`${run.id}:media-block:${run.final.revision}:${run.final.executionBlock}`, () =>
-        api.sendMessage(run.input.chatId, feedback.text, { ...this.replyOptions(run), reply_markup: feedback.keyboard }),
-      );
+      const message = renderTelegramRich(miaResponseFromText(feedback.text))[0]!;
+      await this.sendOnce(`${run.id}:media-block:${run.final.revision}:${run.final.executionBlock}`, async () => {
+        const options = { ...this.replyOptions(run), reply_markup: feedback.keyboard };
+        try {
+          // A native Rich Message completes and clears the active Rich Draft.
+          return await api.sendRichMessage(run.input.chatId, message.richMessage, options);
+        } catch (error) {
+          if (!formatRejected(error)) throw error;
+          return api.sendMessage(run.input.chatId, feedback.text, options);
+        }
+      });
       this.finishDebug(run, "failed", { phase: "media_execution_blocked", reason: run.final.executionBlock });
       return;
     }

@@ -218,6 +218,20 @@ describe("agent delivery recovery", () => {
     expect(f.store.get(f.task.id)?.noticeMessageId).toBeNull();
     await f.service.stop();
   });
+  it("completes a Rich thinking draft when media execution is blocked", async () => {
+    const f = deliveryFixture();
+    const progress = (f.service as unknown as { progress: (run: Run, phase: "started" | "receiving", current: () => boolean) => Promise<void> }).progress;
+    await progress.call(f.service, f.task, "started", () => true);
+    f.task.final = { text: "insufficient_quota", status: "blocked", revision: 1, executionBlock: "insufficient_quota" };
+    f.store.save(f.task);
+
+    await f.service.drain();
+
+    expect(f.api.raw.sendRichMessageDraft).toHaveBeenCalledOnce();
+    expect(f.api.sendRichMessage).toHaveBeenCalledOnce();
+    expect(f.api.sendMessage).not.toHaveBeenCalled();
+    await f.service.stop();
+  });
   it("records the Agent Loop input, plain final text, and rendered delivery", async () => {
     const f = deliveryFixture();
     f.task.final!.text = "Body";
