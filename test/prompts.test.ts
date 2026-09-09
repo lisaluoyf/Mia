@@ -77,8 +77,10 @@ describe("prompt localization", () => {
     const followUp = promptText("mia.follow-up-chat", "en");
 
     expect(router).toContain("内容本身决定需要多少层次和结构");
+    expect(router).not.toContain("reply 是 MiaResponse v1 结构化展示数据");
     expect(router).not.toContain("paragraph、code、quote 和 details");
     expect(followUp).toContain("let the content itself determine how much hierarchy and structure it needs");
+    expect(followUp).not.toContain("Return MiaResponse v1 structured presentation data");
     expect(followUp).not.toContain("Tables must have 2-8 columns");
   });
 });

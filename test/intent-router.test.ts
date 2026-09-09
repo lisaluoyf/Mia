@@ -649,7 +649,7 @@ describe("Mia intent router", () => {
     expect(basePrompt?.text).toContain("默认使用用户在当前 Telegram 会话中的系统语言回答");
     expect(basePrompt?.text).toContain("默认不超过 200 字或 3 个要点");
     expect(routerPrompt).toMatchObject({
-      version: 17,
+      version: 18,
       kind: "composed",
       includes: ["mia.system"],
     });
@@ -664,7 +664,7 @@ describe("Mia intent router", () => {
     expect(participationPrompt?.text).toContain("不要从图片、视频、文件的存在或其文字描述推断");
     expect(participationPrompt?.text).not.toContain("简单附和或感谢、表情式回复");
     expect(followUpPrompt).toMatchObject({
-      version: 11,
+      version: 12,
       kind: "composed",
       includes: ["mia.system"],
     });
