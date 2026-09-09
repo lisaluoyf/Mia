@@ -306,6 +306,22 @@ describe("agent delivery recovery", () => {
 });
 
 describe("agent capability integration", () => {
+  it("does not treat the media request itself as a superseding input", () => {
+    const store = new AgentStore(":memory:"); stores.push(store);
+    const task = run();
+    const operation = op("edit_image");
+    task.operations = [operation];
+    task.status = "waiting_tool";
+    store.save(task);
+    store.enqueue(task.input);
+    const service = new AgentService({ store } as unknown as ConstructorParameters<typeof AgentService>[0]);
+    const job = { telegramUserId: 42, chatId: 42, threadId: null, requestMessageId: task.input.messageId, options: { agentRunId: task.id, agentOperationId: operation.id } } as MediaJob;
+
+    expect(service.canSubmit(job)).toBe(true);
+
+    store.enqueue({ ...task.input, key: "input-2", messageId: task.input.messageId + 1, text: "Use a different edit" });
+    expect(service.canSubmit(job)).toBe(false);
+  });
   it("creates a video draft before approval and only queues it after confirmation", async () => {
     const f = toolsFixture();
     const tool = f.tools.find(tool => tool.definition.name === "generate_video")!;

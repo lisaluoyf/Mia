@@ -66,7 +66,12 @@ export class AgentService {
     const operation = run.operations.find(op => op.id === job.options.agentOperationId);
     if (!operation || operation.revision !== run.revision) return false;
     if (!operation.approved) return false;
-    return !this.options.store.inputs().some(input => scopeKey(input) === run.scope);
+    // The originating Telegram message may still be visible to the durable
+    // inbox while its Agent operation is being claimed. It is not a newer
+    // instruction and must not cancel its own media submission.
+    return !this.options.store.inputs().some(input =>
+      scopeKey(input) === run.scope && input.messageId !== job.requestMessageId,
+    );
   }
   ownsUpdate(update: Update): boolean {
     const from = update.message?.from ?? update.callback_query?.from;
