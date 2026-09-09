@@ -205,6 +205,19 @@ describe("agent delivery recovery", () => {
     expect(f.api.sendMessage).toHaveBeenCalledTimes(1);
     await f.service.stop();
   });
+  it("replaces a Rich progress message with a fresh final response", async () => {
+    const f = deliveryFixture();
+    f.task.noticeMessageId = 99;
+    f.task.notice = "Generating image";
+    f.store.save(f.task);
+
+    await f.service.drain();
+
+    expect(f.api.deleteMessage).toHaveBeenCalledWith(42, 99);
+    expect(f.api.sendRichMessage).toHaveBeenCalledWith(42, { blocks: [{ type: "paragraph", text: "Completed answer" }] }, expect.anything());
+    expect(f.store.get(f.task.id)?.noticeMessageId).toBeNull();
+    await f.service.stop();
+  });
   it("records the Agent Loop input, plain final text, and rendered delivery", async () => {
     const f = deliveryFixture();
     f.task.final!.text = "Body";

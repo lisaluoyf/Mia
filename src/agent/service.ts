@@ -272,19 +272,10 @@ export class AgentService {
     const existing = this.options.store.delivery(key);
     if (existing?.status === "delivered") return existing.message_id;
     if (run.noticeMessageId) {
-      try {
-        const chunk = renderTelegramRich(miaResponseFromText(run.notice))[0]!;
-        try {
-          await this.api.editMessageText(run.input.chatId, run.noticeMessageId, chunk.richMessage, { reply_markup: this.editReplyMarkup(run) });
-        } catch (error) {
-          if (!formatRejected(error)) throw error;
-          await this.api.editMessageText(run.input.chatId, run.noticeMessageId, run.notice, { reply_markup: this.editReplyMarkup(run) });
-        }
-      } catch (error) {
-        if (!(error instanceof Error && error.message.includes("message is not modified"))) return run.noticeMessageId;
-      }
-      this.options.store.setDelivery(key, "delivered", run.noticeMessageId);
-      return run.noticeMessageId;
+      // Rich progress messages cannot be reliably converted with editMessageText.
+      // Replace them so both progress and final responses remain visible.
+      await this.api.deleteMessage(run.input.chatId, run.noticeMessageId).catch(() => undefined);
+      run.noticeMessageId = null;
     }
     if (existing) return null;
     this.options.store.setDelivery(key, "sending");
@@ -453,32 +444,14 @@ export class AgentService {
     }
     const presentation = miaResponseFromText(run.final.text);
     const chunks = renderTelegramRich(presentation);
-    let firstUnsentChunk = 0;
-    if (run.noticeMessageId && chunks[0]) {
-      const chunkKey = `${answerKey}:chunk:0`;
-      if (this.options.store.delivery(chunkKey)?.status !== "delivered") {
-        const options = { reply_markup: this.editReplyMarkup(run) };
-        try {
-          try {
-            await api.editMessageText(run.input.chatId, run.noticeMessageId, chunks[0].richMessage, options);
-          } catch (error) {
-            if (!formatRejected(error)) throw error;
-            await api.editMessageText(run.input.chatId, run.noticeMessageId, chunks[0].plainText, options);
-          }
-        } catch (error) {
-          if (error instanceof Error && error.message.includes("message is not modified")) {
-            // The final text can equal the most recently streamed status text.
-          } else {
-            throw new AgentModelError("delivery_outcome_unknown", false);
-          }
-        }
-        this.options.store.setDelivery(chunkKey, "delivered", run.noticeMessageId);
-      }
-      firstUnsentChunk = 1;
+    if (run.noticeMessageId) {
+      // The final answer must be a fresh Telegram message. Editing a native Rich
+      // Message through editMessageText can report success without replacing it.
+      await api.deleteMessage(run.input.chatId, run.noticeMessageId).catch(() => undefined);
+      run.noticeMessageId = null;
       run.notice = null;
     }
     for (const [index, chunk] of chunks.entries()) {
-      if (index < firstUnsentChunk) continue;
       if (!current()) return;
       const chunkKey = `${answerKey}:chunk:${index}`;
       if (this.options.store.delivery(chunkKey)?.status === "delivered") continue;
