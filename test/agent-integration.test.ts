@@ -49,7 +49,7 @@ function deliveryFixture() {
   store.save(task);
   const api = { sendRichMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, rich_message: { blocks: [] } }), sendMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, text: "Completed answer" }), sendDocument: vi.fn().mockResolvedValue({ message_id: 101, document: { file_id: "result-file", file_unique_id: "result-unique" } }) };
   const media = mediaStore();
-  const options = { store, media, enabled: false, allowedUsers: [], logger: createLogger("silent"), contexts: { upsertUser: vi.fn(), saveMessage: vi.fn() }, client: {}, settings: {}, credentials: {}, botToken: "test", baseUrl: "https://example.invalid", model: () => "configured", timeoutMs: 1000, webSearch: false } as unknown as ConstructorParameters<typeof AgentService>[0];
+  const options = { store, media, enabled: false, logger: createLogger("silent"), contexts: { upsertUser: vi.fn(), saveMessage: vi.fn() }, client: {}, settings: {}, credentials: {}, botToken: "test", baseUrl: "https://example.invalid", model: () => "configured", timeoutMs: 1000, webSearch: false } as unknown as ConstructorParameters<typeof AgentService>[0];
   const service = new AgentService(options);
   service.attach(api as unknown as Api, 1000, "MiaBot");
   return { service, store, task, api, media };
@@ -280,10 +280,10 @@ describe("durable agent ingress", () => {
     expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ userId: 42, text: "Make an image and then explain it", key: "42:7" }));
     expect(classify).not.toHaveBeenCalled();
   });
-  it("keeps rollout disabled by default and requires an explicit allowlist", () => {
-    const options = { enabled: false, allowedUsers: [42] } as ConstructorParameters<typeof AgentService>[0];
+  it("keeps the global rollout switch disabled by default and enables every user when turned on", () => {
+    const options = { enabled: false } as ConstructorParameters<typeof AgentService>[0];
     expect(new AgentService(options).enabled(42)).toBe(false);
-    expect(new AgentService({ ...options, enabled: true, allowedUsers: [] }).enabled(42)).toBe(false);
     expect(new AgentService({ ...options, enabled: true }).enabled(42)).toBe(true);
+    expect(new AgentService({ ...options, enabled: true }).enabled(99)).toBe(true);
   });
 });

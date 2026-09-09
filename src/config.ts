@@ -24,7 +24,6 @@ const environmentSchema = z.object({
   MEDIA_RESULT_MAX_BYTES: z.coerce.number().int().min(1_000_000).max(2_000_000_000).default(50_000_000),
   MIA_DEBUG_ALLOWED_EMAILS: z.string().default("lisa.luoyf@gmail.com"),
   MIA_AGENT_ENABLED: z.enum(["true", "false"]).default("false"),
-  MIA_AGENT_ALLOWED_USERS: z.string().regex(/^\s*(?:\d+\s*(?:,\s*\d+\s*)*)?$/).default(""),
   MIA_AGENT_WEB_SEARCH: z.enum(["true", "false"]).default("false"),
   MIA_AGENT_TIMEOUT_MS: z.coerce.number().int().min(30_000).max(600_000).default(300_000),
   MIA_AGENT_SMOKE_ENABLED: z.enum(["true", "false"]).default("false"),
@@ -60,7 +59,6 @@ export interface AppConfig {
   mediaResultMaxBytes: number;
   debugAllowedEmails: string[];
   agentEnabled: boolean;
-  agentAllowedUsers: number[];
   agentWebSearch: boolean;
   agentTimeoutMs: number;
   agentSmokeEnabled: boolean;
@@ -105,7 +103,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     debugAllowedEmails: [...new Set(parsed.MIA_DEBUG_ALLOWED_EMAILS.split(",")
       .map((email) => email.trim().toLocaleLowerCase()).filter(Boolean))],
     agentEnabled: parsed.MIA_AGENT_ENABLED === "true",
-    agentAllowedUsers: parsed.MIA_AGENT_ALLOWED_USERS.split(",").map(value => value.trim()).filter(Boolean).map(Number),
     agentWebSearch: parsed.MIA_AGENT_WEB_SEARCH === "true",
     agentTimeoutMs: parsed.MIA_AGENT_TIMEOUT_MS,
     agentSmokeEnabled: parsed.MIA_AGENT_SMOKE_ENABLED === "true",

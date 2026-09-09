@@ -92,7 +92,7 @@ async function main(): Promise<void> {
     contexts, logger, botToken: config.telegramBotToken, baseUrl: config.apimasterBaseUrl,
     model: () => modelConfig.get("intent_router") ?? config.miaRouterModel,
     timeoutMs: config.agentTimeoutMs, enabled: config.agentEnabled,
-    allowedUsers: config.agentAllowedUsers, webSearch: config.agentWebSearch,
+    webSearch: config.agentWebSearch,
   });
   const router = new IntentRouter(client, {
     model: () => modelConfig.get("intent_router") ?? config.miaRouterModel,
@@ -139,7 +139,7 @@ async function main(): Promise<void> {
   });
   const agentLoopMonitor = new AgentLoopMonitor({
     enabled: config.agentSmokeEnabled,
-    userId: config.agentSmokeUserId ?? config.agentAllowedUsers[0] ?? null,
+    userId: config.agentSmokeUserId,
     model: config.agentSmokeModel,
     intervalMs: config.agentSmokeIntervalMs,
     failureThreshold: config.agentSmokeFailureThreshold,

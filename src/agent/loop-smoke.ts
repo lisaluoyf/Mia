@@ -103,14 +103,12 @@ export async function runAgentLoopSmoke(options: AgentLoopSmokeOptions): Promise
 async function main(): Promise<void> {
   const { loadConfig } = await import("../config.js");
   const config = loadConfig();
-  const requestedUserId = process.argv[2] ? Number(process.argv[2]) : config.agentSmokeUserId ?? config.agentAllowedUsers[0];
+  const requestedUserId = process.argv[2] ? Number(process.argv[2]) : config.agentSmokeUserId;
   const model = process.argv[3] ?? config.agentSmokeModel;
   if (!Number.isSafeInteger(requestedUserId) || !requestedUserId || !model) {
     throw new Error("Usage: node --env-file=.env dist/agent/loop-smoke.js [TELEGRAM_USER_ID] [MODEL]");
   }
-  if (!config.agentEnabled || !config.agentAllowedUsers.includes(requestedUserId)) {
-    throw new Error("Agent smoke user is not enabled in MIA_AGENT_ALLOWED_USERS");
-  }
+  if (!config.agentEnabled) throw new Error("Agent Loop is disabled");
   if (!config.agentWebSearch) throw new Error("Hosted Web Search is disabled");
   const client = new APIMasterClient({
     baseUrl: config.apimasterBaseUrl,

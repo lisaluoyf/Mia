@@ -15,7 +15,7 @@ async function main(): Promise<void> {
     throw new Error("Usage: node --env-file=.env dist/agent/schema-smoke.js TELEGRAM_USER_ID MODEL [--web-search]");
   }
   const config = loadConfig();
-  if (!config.agentEnabled || !config.agentAllowedUsers.includes(userId)) throw new Error("Agent user is not enabled");
+  if (!config.agentEnabled) throw new Error("Agent Loop is disabled");
   const client = new APIMasterClient({
     baseUrl: config.apimasterBaseUrl, internalBaseUrl: config.apimasterInternalBaseUrl,
     identityBaseUrl: config.apimasterIdentityBaseUrl, serviceKey: config.miaInternalServiceKey,

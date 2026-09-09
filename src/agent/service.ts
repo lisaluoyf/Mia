@@ -24,7 +24,7 @@ interface ServiceOptions {
   store: AgentStore; media: MediaStore; client: APIMasterClient; settings: ModelSettingsService;
   credentials: ChatCredentialProvider; contexts: ContextStore; logger: Logger;
   botToken: string; baseUrl: string; model: () => string; timeoutMs: number;
-  enabled: boolean; allowedUsers: number[]; webSearch: boolean;
+  enabled: boolean; webSearch: boolean;
 }
 export class AgentService {
   private runtime: AgentRuntime | null = null;
@@ -35,7 +35,10 @@ export class AgentService {
   private ingressWork: Promise<void> | null = null;
   private lastPrunedAt = 0;
   constructor(private readonly options: ServiceOptions) {}
-  enabled(userId: number): boolean { return this.options.enabled && this.options.allowedUsers.includes(userId); }
+  enabled(userId: number): boolean {
+    void userId;
+    return this.options.enabled;
+  }
   canSubmit(job: MediaJob): boolean {
     if (typeof job.options.agentRunId !== "string") return false;
     const run = this.options.store.get(job.options.agentRunId);

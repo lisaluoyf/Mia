@@ -5,19 +5,18 @@ API Token can use text chat through a dedicated service credential; bound users
 continue using their own APIMaster Keys and selected models. Image generation,
 editing, understanding, and video generation always require the user's own Key.
 
-## Agent Runtime (Opt-In)
+## Agent Runtime
 
-The new single-agent runtime is implemented but disabled by default. Enable only
-for explicitly selected Telegram test users:
+The single-agent runtime is available to every Telegram user when the global
+switch is enabled:
 
 ```dotenv
 MIA_AGENT_ENABLED=true
-MIA_AGENT_ALLOWED_USERS=123456789
 MIA_AGENT_WEB_SEARCH=false
 MIA_AGENT_TIMEOUT_MS=300000
 ```
 
-Both the enable flag and allowlist are required. The selected chat model must
+The selected chat model must
 support native Responses function calls and stateless continuation. No model
 defaults are changed and no automatic Chat Completions fallback is used by the
 new runtime. Test the actual APIMaster route before enabling it; HTTP 200 alone
@@ -68,9 +67,9 @@ transport failures remain indeterminate and do not trigger duplicate fallback
 sends. Each chunk and fallback attempt has a durable delivery identity. Old
 plain-text checkpoints and their delivered receipts remain compatible.
 
-Roll back new enrollment by clearing the allowlist or disabling the flag; the
-runtime remains loaded to reconcile existing tasks, and existing approval/cancel
-buttons still work. New ordinary messages from disabled users follow the legacy
+Roll back Agent Loop access by disabling the flag; the runtime remains loaded to
+reconcile existing tasks, and existing approval/cancel buttons still work. New
+ordinary messages from disabled users follow the legacy
 path, so drain active tasks before removing their enrollment. Do not downgrade
 the binary while agent jobs remain active: older workers do not understand the
 agent-owned delivery boundary.
