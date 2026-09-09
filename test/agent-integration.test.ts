@@ -310,17 +310,34 @@ describe("agent capability integration", () => {
     const store = new AgentStore(":memory:"); stores.push(store);
     const task = run();
     const operation = op("edit_image");
+    operation.approved = false;
+    operation.state = "waiting";
     task.operations = [operation];
     task.status = "waiting_tool";
     store.save(task);
     store.enqueue(task.input);
     const service = new AgentService({ store } as unknown as ConstructorParameters<typeof AgentService>[0]);
-    const job = { telegramUserId: 42, chatId: 42, threadId: null, requestMessageId: task.input.messageId, options: { agentRunId: task.id, agentOperationId: operation.id } } as MediaJob;
+    const job = { telegramUserId: 42, chatId: 42, threadId: null, requestMessageId: task.input.messageId, type: "image_edit", options: { agentRunId: task.id, agentOperationId: operation.id } } as MediaJob;
 
     expect(service.canSubmit(job)).toBe(true);
 
     store.enqueue({ ...task.input, key: "input-2", messageId: task.input.messageId + 1, text: "Use a different edit" });
     expect(service.canSubmit(job)).toBe(false);
+  });
+  it("requires confirmation only for an Agent video submission", () => {
+    const store = new AgentStore(":memory:"); stores.push(store);
+    const task = run();
+    const operation = { ...op(), state: "waiting", approved: false } as Operation;
+    task.operations = [operation];
+    task.status = "waiting_tool";
+    store.save(task);
+    const service = new AgentService({ store } as unknown as ConstructorParameters<typeof AgentService>[0]);
+    const job = { telegramUserId: 42, chatId: 42, threadId: null, requestMessageId: task.input.messageId, type: "video_generate", options: { agentRunId: task.id, agentOperationId: operation.id } } as MediaJob;
+
+    expect(service.canSubmit(job)).toBe(false);
+    operation.approved = true;
+    store.save(task);
+    expect(service.canSubmit(job)).toBe(true);
   });
   it("creates a video draft before approval and only queues it after confirmation", async () => {
     const f = toolsFixture();

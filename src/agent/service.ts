@@ -66,7 +66,9 @@ export class AgentService {
     if (!run || run.status === "cancelled") return false;
     const operation = run.operations.find(op => op.id === job.options.agentOperationId);
     if (!operation || operation.revision !== run.revision) return false;
-    if (!operation.approved) return false;
+    // Images can be submitted as the first paid operation without an explicit
+    // confirmation. Video drafts are the only media path that must be approved.
+    if (job.type === "video_generate" && !operation.approved) return false;
     // The originating Telegram message may still be visible to the durable
     // inbox while its Agent operation is being claimed. It is not a newer
     // instruction and must not cancel its own media submission.
