@@ -60,6 +60,48 @@ function deliveryFixture() {
 }
 
 describe("agent delivery recovery", () => {
+  it("renders the legacy video draft card for an Agent approval", async () => {
+    const f = deliveryFixture();
+    const draft = f.media.createDraft({
+      telegramUserId: 42, chatId: 42, threadId: null, type: "video_generate", idempotencyKey: "agent:run-1:0",
+      requestMessageId: 7, model: "video", instruction: "A warm kitchen scene",
+      options: { agentRunId: f.task.id, agentOperationId: "run-1:0", agentRevision: 1, locale: "en", mode: "text_to_video", durationSeconds: 6, aspectRatio: "16:9", resolutionSource: "channel_default" },
+    });
+    f.task.status = "waiting_approval";
+    f.task.final = null;
+    f.task.notice = "Confirm before submitting";
+    f.task.noticeVersion = 1;
+    f.task.operations = [{ ...op(), state: "approval", approved: false, draftJobId: draft.id }];
+    f.store.save(f.task);
+
+    await f.service.drain();
+
+    expect(f.api.sendMessage).toHaveBeenCalledOnce();
+    const sent = f.api.sendMessage.mock.calls[0] as unknown as [number, string, { reply_markup: { inline_keyboard: Array<Array<{ callback_data?: string }>> } }];
+    expect(sent[1]).toContain("Video draft (not charged)");
+    expect(sent[2].reply_markup.inline_keyboard.flat().some(button => button.callback_data === `media:${draft.id}:generate`)).toBe(true);
+    expect(f.media.getJob(draft.id)?.statusMessageId).toBe(100);
+    await f.service.stop();
+  });
+  it("approves only the draft bound to the current Agent revision", async () => {
+    const f = deliveryFixture();
+    const draft = f.media.createDraft({
+      telegramUserId: 42, chatId: 42, threadId: null, type: "video_generate", idempotencyKey: "agent:run-1:0",
+      requestMessageId: 7, model: "video", instruction: "A warm kitchen scene",
+      options: { agentRunId: f.task.id, agentOperationId: "run-1:0", agentRevision: 1, locale: "en", mode: "text_to_video", durationSeconds: 6, aspectRatio: "16:9", resolutionSource: "channel_default" },
+    });
+    f.task.status = "waiting_approval";
+    f.task.final = null;
+    f.task.operations = [{ ...op(), state: "approval", approved: false, draftJobId: draft.id }];
+    f.store.save(f.task);
+
+    expect(f.service.approveVideoDraft(draft, 99)).toBe("changed");
+    expect(f.media.getJob(draft.id)?.status).toBe("draft");
+    expect(f.service.approveVideoDraft(draft, 42)).toBe("approved");
+    expect(f.media.getJob(draft.id)?.status).toBe("queued");
+    expect(f.store.get(f.task.id)).toMatchObject({ status: "queued", operations: [{ approved: true, state: "prepared" }] });
+    await f.service.stop();
+  });
   it("keeps hosted search and media tools available when guest chat plans a task", async () => {
     const store = new AgentStore(":memory:"); stores.push(store);
     const media = mediaStore();
@@ -264,6 +306,21 @@ describe("agent delivery recovery", () => {
 });
 
 describe("agent capability integration", () => {
+  it("creates a video draft before approval and only queues it after confirmation", async () => {
+    const f = toolsFixture();
+    const tool = f.tools.find(tool => tool.definition.name === "generate_video")!;
+    const operation = op();
+    await tool.prepare!(run(), operation);
+    const draftId = await tool.createApprovalDraft!(run(), operation);
+    operation.draftJobId = draftId;
+    const draft = f.media.getJob(draftId)!;
+    expect(draft).toMatchObject({ status: "draft", type: "video_generate", options: {
+      agentRunId: "run-1", agentOperationId: "run-1:0", agentRevision: 1,
+      durationSeconds: 6, aspectRatio: "16:9", resolutionSource: "channel_default",
+    } });
+    expect(f.media.claimDraft(draftId)).toMatchObject({ outcome: "claimed", job: { status: "queued" } });
+    expect(await tool.execute(run(), operation, new AbortController().signal, () => true)).toMatchObject({ status: "pending", jobId: draftId });
+  });
   it("preserves channel-default video resolution and stable operation identity", async () => {
     const f = toolsFixture();
     const tool = f.tools.find(tool => tool.definition.name === "generate_video")!;

@@ -22,6 +22,7 @@ import { miaResponseFromText } from "../presentation/schema.js";
 import { renderTelegramRich } from "../presentation/telegram-rich.js";
 import { scopeKey, type AgentInput, type Operation, type Run } from "./types.js";
 import { promptReference, promptText } from "../prompts.js";
+import { draftKeyboard, videoDraftText } from "../telegram/video-draft.js";
 
 interface ServiceOptions {
   store: AgentStore; media: MediaStore; client: APIMasterClient; settings: ModelSettingsService;
@@ -64,6 +65,7 @@ export class AgentService {
     if (!run || run.status === "cancelled") return false;
     const operation = run.operations.find(op => op.id === job.options.agentOperationId);
     if (!operation || operation.revision !== run.revision) return false;
+    if (!operation.approved) return false;
     return !this.options.store.inputs().some(input => scopeKey(input) === run.scope);
   }
   ownsUpdate(update: Update): boolean {
@@ -183,6 +185,33 @@ export class AgentService {
   approve(id: string, revision: number, userId: number, chatId: number, threadId: number | null): boolean {
     return this.runtime?.approve(id, revision, userId, chatId, threadId) ?? false;
   }
+  approveVideoDraft(job: MediaJob, userId: number): "approved" | "changed" | "limit_reached" {
+    const runId = typeof job.options.agentRunId === "string" ? job.options.agentRunId : null;
+    const operationId = typeof job.options.agentOperationId === "string" ? job.options.agentOperationId : null;
+    const revision = typeof job.options.agentRevision === "number" ? job.options.agentRevision : null;
+    if (!runId || !operationId || revision === null || job.telegramUserId !== userId || job.status !== "draft") return "changed";
+    const run = this.options.store.get(runId);
+    const operation = run?.operations.find(op => op.id === operationId);
+    if (!run || run.revision !== revision || run.status !== "waiting_approval" || operation?.state !== "approval" || operation.draftJobId !== job.id) return "changed";
+
+    let result: "changed" | "limit_reached" | "approved" = "changed";
+    const approved = this.runtime?.approve(run.id, revision, userId, job.chatId, job.threadId, () => {
+      const claimed = this.options.media.claimDraft(job.id);
+      if (claimed.outcome === "limit_reached") {
+        result = "limit_reached";
+        return false;
+      }
+      if (claimed.outcome !== "claimed") return false;
+      result = "approved";
+      return true;
+    }) ?? false;
+    return approved ? "approved" : result;
+  }
+  cancelVideoDraft(job: MediaJob, userId: number, key: string): boolean {
+    const runId = typeof job.options.agentRunId === "string" ? job.options.agentRunId : null;
+    if (!runId || job.telegramUserId !== userId) return false;
+    return this.cancelRun(runId, userId, job.chatId, job.threadId, key);
+  }
   private keyboard(run: Run): InlineKeyboard | null {
     if (run.status !== "waiting_approval") return null;
     const keyboard = new InlineKeyboard();
@@ -211,6 +240,26 @@ export class AgentService {
   private async notify(run: Run): Promise<number | null> {
     if (!this.api || !run.notice) return null;
     this.clearDraft(run);
+    const draftOperation = run.status === "waiting_approval"
+      ? run.operations.find(op => op.state === "approval" && op.call.name === "generate_video" && op.draftJobId)
+      : null;
+    const draft = draftOperation?.draftJobId ? this.options.media.getJob(draftOperation.draftJobId) : null;
+    if (draft && draft.status === "draft" && draft.options.agentRevision === run.revision) {
+      try {
+        if (run.noticeMessageId) {
+          await this.api.editMessageText(run.input.chatId, run.noticeMessageId, videoDraftText(draft), { reply_markup: draftKeyboard(draft) });
+          this.options.media.updateDraft(draft.id, draft.options, run.noticeMessageId);
+          return run.noticeMessageId;
+        }
+        const sent = await this.api.sendMessage(run.input.chatId, videoDraftText(draft), {
+          ...this.replyOptions(run), reply_markup: draftKeyboard(draft),
+        });
+        this.options.media.updateDraft(draft.id, draft.options, sent.message_id);
+        return sent.message_id;
+      } catch {
+        return null;
+      }
+    }
     const key = `${run.id}:notice:${run.noticeVersion}`;
     const existing = this.options.store.delivery(key);
     if (existing?.status === "delivered") return existing.message_id;

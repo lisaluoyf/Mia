@@ -77,11 +77,14 @@ export class AgentRuntime {
       this.enqueue({ ...run.input, key: `cancel:${randomUUID()}`, text: "/cancel", media: [] });
     }
   }
-  approve(id: string, revision: number, userId: number, chatId: number, threadId: number | null): boolean {
+  approve(id: string, revision: number, userId: number, chatId: number, threadId: number | null, beforeApprove?: () => boolean): boolean {
     const run = this.options.store.get(id);
     if (!run || run.input.userId !== userId || run.input.chatId !== chatId || run.input.threadId !== threadId || run.revision !== revision || run.status !== "waiting_approval") return false;
     const op = run.operations.find(op => op.state === "approval");
     if (!op || op.expiresAt < Date.now()) return false;
+    // Claim a paid draft only after this run/revision is known to be valid, but
+    // before the operation becomes executable by the scheduler or media worker.
+    if (beforeApprove && !beforeApprove()) return false;
     op.approved = true;
     op.state = "prepared";
     run.status = "queued";
