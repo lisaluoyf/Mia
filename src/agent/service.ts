@@ -3,6 +3,7 @@ import type { Message, Update } from "grammy/types";
 import type { Logger } from "pino";
 import type { APIMasterClient } from "../clients/apimaster.js";
 import type { ChatCredentialProvider } from "../credentials/chat.js";
+import { withGuestTextRequestFallback } from "../credentials/chat.js";
 import type { ModelSettingsService } from "../settings/service.js";
 import type { MediaStore } from "../media/store.js";
 import type { MediaJob } from "../media/types.js";
@@ -72,16 +73,15 @@ export class AgentService {
         const selected = this.options.settings.getPreferences(run.input.userId).chatModel ?? this.options.model();
         const credential = await this.options.credentials.resolve(run.input.userId, selected);
         this.startDebug(run, credential.model);
-        const permittedTools = credential.source === "user" ? tools : tools.filter(tool => ["finish", "read_conversation"].includes(tool.name));
+        const request = (current: typeof credential) => responseStep({
+          baseUrl: this.options.baseUrl, apiKey: current.apiKey, model: current.model,
+          instructions: `${promptText("mia.system", run.input.language)}\n\n${instructions}`,
+          input, tools: current.source === "user" ? tools : tools.filter(tool => ["finish", "read_conversation"].includes(tool.name)), signal, timeoutMs: this.options.timeoutMs,
+          webSearch: current.source === "user" && this.options.webSearch,
+          onProgress: phase => this.progress(run, phase, () => !signal.aborted && this.options.store.get(run.id)?.revision === run.revision),
+        });
         try {
-          return await responseStep({
-            baseUrl: this.options.baseUrl, apiKey: credential.apiKey, model: credential.model,
-            instructions: `${promptText("mia.system", run.input.language)}\n\n${instructions}`,
-            input, tools: permittedTools, signal, timeoutMs: this.options.timeoutMs,
-            // Hosted search runs inside this model response, not as a second model request.
-            webSearch: credential.source === "user" && this.options.webSearch,
-            onProgress: phase => this.progress(run, phase, () => !signal.aborted && this.options.store.get(run.id)?.revision === run.revision),
-          });
+          return (await withGuestTextRequestFallback(this.options.credentials, credential, request)).value;
         } catch (error) {
           this.finishDebug(run, "failed", { phase: "model_request" }, error instanceof AgentModelError ? error.code : "model_request_failed");
           throw error;

@@ -10,6 +10,7 @@ const callSchema = z.object({ type: z.literal("function_call"), call_id: z.strin
 export class AgentModelError extends Error {
   constructor(public readonly code: string, public readonly retryable: boolean, public readonly status?: number) {
     super(code);
+    this.name = "AgentModelError";
   }
 }
 

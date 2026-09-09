@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ResolverError } from "../src/clients/apimaster.js";
-import { ChatCredentialResolver } from "../src/credentials/chat.js";
+import { ChatCompletionError, ResolverError } from "../src/clients/apimaster.js";
+import { AgentModelError } from "../src/agent/model.js";
+import { ChatCredentialResolver, withGuestTextRequestFallback } from "../src/credentials/chat.js";
 
 describe("guest text-chat credentials", () => {
   it("keeps a bound user's selected model and own Key", async () => {
@@ -79,4 +80,41 @@ describe("guest text-chat credentials", () => {
       await expect(resolver.resolve(42, "gpt-5.4")).rejects.toMatchObject({ code });
     },
   );
+
+  it("retries a user text request once with the guest Token after a billing failure", () => {
+    const resolver = new ChatCredentialResolver({ resolveAPIKey: vi.fn() }, { apiKey: "guest-test-key", model: "gpt-5.4" });
+    const user = { apiKey: "user-test-key", model: "grok-4.5", source: "user" as const, fallbackReason: null };
+    expect(resolver.fallbackForTextRequest(user, new ChatCompletionError(403, "insufficient_user_quota"))).toEqual({
+      apiKey: "guest-test-key", model: "gpt-5.4", source: "guest", fallbackReason: "user_request_failed",
+    });
+  });
+
+  it("does not bypass an explicit account governance rejection", () => {
+    const resolver = new ChatCredentialResolver({ resolveAPIKey: vi.fn() }, { apiKey: "guest-test-key", model: "gpt-5.4" });
+    const user = { apiKey: "user-test-key", model: "grok-4.5", source: "user" as const, fallbackReason: null };
+    expect(resolver.fallbackForTextRequest(user, new ChatCompletionError(403, "risk_denied"))).toBeNull();
+  });
+
+  it("uses the guest Token for an Agent Loop billing failure", () => {
+    const resolver = new ChatCredentialResolver({ resolveAPIKey: vi.fn() }, { apiKey: "guest-test-key", model: "gpt-5.4" });
+    const user = { apiKey: "user-test-key", model: "grok-4.5", source: "user" as const, fallbackReason: null };
+    expect(resolver.fallbackForTextRequest(user, new AgentModelError("insufficient_user_quota", false, 403))).toMatchObject({
+      apiKey: "guest-test-key", model: "gpt-5.4", source: "guest", fallbackReason: "user_request_failed",
+    });
+  });
+
+  it("performs exactly one guest retry and forces the guest model", async () => {
+    const resolver = new ChatCredentialResolver({ resolveAPIKey: vi.fn() }, { apiKey: "guest-test-key", model: "gpt-5.4" });
+    const user = { apiKey: "user-test-key", model: "grok-4.5", source: "user" as const, fallbackReason: null };
+    const request = vi.fn()
+      .mockRejectedValueOnce(new ChatCompletionError(403, "insufficient_user_quota"))
+      .mockResolvedValueOnce("guest response");
+
+    await expect(withGuestTextRequestFallback(resolver, user, request)).resolves.toEqual({
+      value: "guest response",
+      credential: { apiKey: "guest-test-key", model: "gpt-5.4", source: "guest", fallbackReason: "user_request_failed" },
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls.map(([credential]) => credential.apiKey)).toEqual(["user-test-key", "guest-test-key"]);
+  });
 });

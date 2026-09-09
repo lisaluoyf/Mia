@@ -11,6 +11,7 @@ import {
   DEFAULT_MODELS,
 } from "../constants.js";
 import type { ChatCredential, ChatCredentialProvider } from "../credentials/chat.js";
+import { withGuestTextRequestFallback } from "../credentials/chat.js";
 import { buildConversationMessages, loadConversationContext, type ConversationContext } from "../context/conversation.js";
 import type { ContextCompactor } from "../context/compactor.js";
 import type { GroupContextCompactor } from "../context/group-compactor.js";
@@ -649,6 +650,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       return;
     }
     const scope = conversationScope(message);
+    const requestLanguage = message.from.language_code ?? null;
     const recent = dependencies.contexts.listRecentMessages?.(scope, 100) ?? [];
     const summary = dependencies.contexts.getLatestSummary?.(scope)?.content ?? null;
     onboardingEligibility = message.chat.type === "private" && dependencies.onboarding
@@ -717,9 +719,9 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         },
       }) ?? null;
       routerDebugId = debugId;
-      routed = await dependencies.router.classify({
+      const classify = (current: ChatCredential) => dependencies.router!.classify({
         text: promptFromMessage(policyInput, identity),
-        locale: message.from.language_code ?? null,
+        locale: requestLanguage,
         participationMode: automaticFollowUp ? "selective" : "required",
         followUpBatchMessageIds: request.batch?.map((item) => item.message.message_id) ?? [],
         followUpContext: request.followUpState ? {
@@ -764,7 +766,12 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
             followUpTypingSent = true;
           },
         } : {}),
-      }, routerCredential.apiKey, fallbackImages, routerCredential.model);
+      }, current.apiKey, fallbackImages, current.model);
+      const classified = inputs.length === 0 && active === null
+        ? await withGuestTextRequestFallback(dependencies.chatCredentials, routerCredential, classify)
+        : { value: await classify(routerCredential), credential: routerCredential };
+      routerCredential = classified.credential;
+      routed = classified.value;
       if (inputs.length === 0 && (routed.media_message_ids?.length ?? 0) > 0) {
         inputs = resolveSelectedMedia(message, routed.media_message_ids ?? [], mediaCandidates, dependencies.mediaStore);
       }
@@ -841,10 +848,14 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   }
 
   if (!automaticFollowUp && routerCredential?.source === "guest" && isMediaIntent(routed.intent)) {
+    const fallbackReason = routerCredential.fallbackReason === "telegram_not_bound" ||
+      routerCredential.fallbackReason === "no_usable_api_key"
+      ? routerCredential.fallbackReason
+      : "no_usable_api_key";
     await replyMediaAccessError(
       ctx,
       message,
-      new ResolverError(routerCredential.fallbackReason ?? "no_usable_api_key"),
+      new ResolverError(fallbackReason),
       locale,
     );
     request.onIntervention?.();
@@ -1822,15 +1833,14 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
   try {
     await ctx.api.sendChatAction(ctx.chat.id, "typing", ctx.message ? threadOption(ctx.message) : {});
     const selectedModel = dependencies.settings.getPreferences(ctx.from.id).chatModel ?? DEFAULT_MODELS.chat;
-    const credential = await resolveTextCredential(
+    const initialCredential = await resolveTextCredential(
       dependencies,
       ctx.from.id,
       selectedModel,
       dependencies.settings.getDefaults?.().chatModel ?? DEFAULT_MODELS.chat,
     );
-    const model = credential.model;
-    if (credential.source === "user" && !sameModelId(model, selectedModel)) {
-      await ctx.reply(botText(locale, "chatModelFallback", { selected: selectedModel, model }));
+    if (initialCredential.source === "user" && !sameModelId(initialCredential.model, selectedModel)) {
+      await ctx.reply(botText(locale, "chatModelFallback", { selected: selectedModel, model: initialCredential.model }));
     }
     if (!ctx.message) return;
     const requestContext = await buildRequestContext(
@@ -1839,7 +1849,7 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
       dependencies,
       null,
       null,
-      credential.source === "user",
+      initialCredential.source === "user",
     );
     debugId = dependencies.debug?.start({
       telegramUserId: ctx.from.id,
@@ -1847,22 +1857,27 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
       chatType: ctx.chat.type,
       messageId: ctx.message.message_id,
       kind: "chat",
-      model,
+      model: initialCredential.model,
       promptRefs: [promptReference("mia.system")],
       contextLayers: requestContext?.layers ?? null,
       requestPreview: { text: prompt },
       media: requestContext?.layers.recentMessages ?? null,
       details: {
-        credentialSource: credential.source,
-        credentialFallbackReason: credential.fallbackReason,
+        credentialSource: initialCredential.source,
+        credentialFallbackReason: initialCredential.fallbackReason,
       },
     }) ?? null;
-    const response = requestContext
-      ? await dependencies.client.chatMessages(credential.apiKey, model, [
-        { role: "system", content: promptText("mia.system", locale) },
-        ...requestContext.messages,
-      ])
-      : await dependencies.client.chat(credential.apiKey, model, prompt, locale);
+    const completed = await withGuestTextRequestFallback(
+      dependencies.chatCredentials,
+      initialCredential,
+      current => requestContext
+        ? dependencies.client.chatMessages(current.apiKey, current.model, [
+          { role: "system", content: promptText("mia.system", locale) },
+          ...requestContext.messages,
+        ])
+        : dependencies.client.chat(current.apiKey, current.model, prompt, locale),
+    );
+    const { value: response, credential } = completed;
     const delivery = await sendConversationResponse(ctx, ctx.message, response, dependencies);
     const assistantMessageId = delivery.assistantMessageId;
     dependencies.debug?.finish(debugId, {

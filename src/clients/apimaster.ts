@@ -180,7 +180,7 @@ export class ResolverError extends Error {
 }
 
 export class ChatCompletionError extends Error {
-  constructor(public readonly status?: number) {
+  constructor(public readonly status?: number, public readonly code?: string) {
     super("APIMaster chat completion failed");
     this.name = "ChatCompletionError";
   }
@@ -488,7 +488,7 @@ export class APIMasterClient {
     if (await isResponsesOnlyError(response)) {
       return this.responsesText(apiKey, model, messages);
     }
-    throw new ChatCompletionError(response.status);
+    throw await chatCompletionError(response);
   }
 
   private async postChatCompletions(
@@ -532,7 +532,7 @@ export class APIMasterClient {
     } catch {
       throw new ChatCompletionError();
     }
-    if (!response.ok) throw new ChatCompletionError(response.status);
+    if (!response.ok) throw await chatCompletionError(response);
     const payload: unknown = await response.json().catch(() => undefined);
     const parsed = responsesResponseSchema.safeParse(payload);
     if (!parsed.success) throw new ChatCompletionError(response.status);
@@ -577,7 +577,7 @@ export class APIMasterClient {
       const result = await this.structuredResponse(apiKey, model, messages, schemaName, schema, timeoutMs, { webSearch: false });
       return result.data;
     }
-    if (!response.ok) throw new ChatCompletionError(response.status);
+    if (!response.ok) throw await chatCompletionError(response);
     const payload: unknown = await response.json().catch(() => undefined);
     const parsed = structuredChatResponseSchema.safeParse(payload);
     if (!parsed.success) {
@@ -637,7 +637,7 @@ export class APIMasterClient {
     } catch {
       throw new ChatCompletionError();
     }
-    if (!response.ok) throw new ChatCompletionError(response.status);
+    if (!response.ok) throw await chatCompletionError(response);
     const payload: unknown = await response.json().catch(() => undefined);
     const parsed = responsesResponseSchema.safeParse(payload);
     if (!parsed.success) throw new ChatCompletionError(response.status);
@@ -987,6 +987,18 @@ async function isResponsesOnlyError(response: Response): Promise<boolean> {
   return text.includes("protocol_not_supported")
     || (text.includes("does not support") && text.includes("chat completions"))
     || (text.includes("不支持") && text.includes("chat completions"));
+}
+
+async function chatCompletionError(response: Response): Promise<ChatCompletionError> {
+  const payload = await response.clone().json().catch(() => null) as {
+    code?: unknown;
+    error?: { code?: unknown; type?: unknown };
+  } | null;
+  const rawCode = payload?.error?.code ?? payload?.code ?? payload?.error?.type;
+  const code = typeof rawCode === "string" && /^[a-zA-Z0-9_.-]{1,100}$/.test(rawCode)
+    ? rawCode
+    : undefined;
+  return new ChatCompletionError(response.status, code);
 }
 
 function normalizeTaskStatus(status: string): NormalizedTaskStatus["status"] {
