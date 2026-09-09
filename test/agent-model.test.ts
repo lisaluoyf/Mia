@@ -43,14 +43,30 @@ describe("native agent Responses contract", () => {
   });
   it("preserves reasoning and function items and disables parallel actions", async () => {
     const output = [{ type: "reasoning", id: "r1", encrypted_content: "opaque" }, { type: "function_call", call_id: "c1", name: "lookup", arguments: "{}" }];
-    const fetcher = vi.fn().mockResolvedValue(Response.json({ status: "completed", output }));
+    const fetcher = vi.fn().mockResolvedValue(sseResponse([{ type: "response.completed", response: { status: "completed", output } }]));
     expect(await responseStep({ ...options, fetcher })).toMatchObject({ output, calls: [{ call_id: "c1", name: "lookup" }] });
     const init = fetcher.mock.calls[0]![1] as RequestInit;
     const body: unknown = JSON.parse(init.body as string);
-    expect(body).toMatchObject({ model: "configured-model", parallel_tool_calls: false, store: false, include: ["reasoning.encrypted_content"] });
+    expect(body).toMatchObject({ model: "configured-model", parallel_tool_calls: false, store: false, stream: true, include: ["reasoning.encrypted_content"] });
+  });
+  it("reports progress while consuming a completed SSE response", async () => {
+    const progress = vi.fn();
+    const output = [{ type: "function_call", call_id: "c1", name: "finish", arguments: "{}" }];
+    await responseStep({
+      ...options,
+      fetcher: vi.fn().mockResolvedValue(sseResponse([{ type: "response.completed", response: { status: "completed", output } }])),
+      onProgress: progress,
+    });
+    expect(progress).toHaveBeenNthCalledWith(1, "started");
+    expect(progress).toHaveBeenLastCalledWith("receiving");
+  });
+  it("accepts a completed JSON response when an OpenAI-compatible upstream does not stream", async () => {
+    const output = [{ type: "function_call", call_id: "c1", name: "finish", arguments: "{}" }];
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ status: "completed", output }));
+    await expect(responseStep({ ...options, fetcher })).resolves.toMatchObject({ output });
   });
   it.each(["incomplete", "failed", "cancelled", "in_progress"])("rejects %s as a completed model step", async status => {
-    const fetcher = vi.fn().mockResolvedValue(Response.json({ status, output: [{ type: "message", content: [] }] }));
+    const fetcher = vi.fn().mockResolvedValue(sseResponse([{ type: "response.completed", response: { status, output: [{ type: "message", content: [] }] } }]));
     await expect(responseStep({ ...options, fetcher })).rejects.toMatchObject({ code: "incomplete_model_output" });
   });
   it("preserves a safe provider code without leaking the error message", async () => {
@@ -70,7 +86,12 @@ describe("native agent Responses contract", () => {
   });
   it("rejects duplicate call identities", async () => {
     const item = { type: "function_call", call_id: "c1", name: "lookup", arguments: "{}" };
-    const fetcher = vi.fn().mockResolvedValue(Response.json({ status: "completed", output: [item, item] }));
+    const fetcher = vi.fn().mockResolvedValue(sseResponse([{ type: "response.completed", response: { status: "completed", output: [item, item] } }]));
     await expect(responseStep({ ...options, fetcher })).rejects.toMatchObject({ code: "duplicate_tool_call" });
   });
 });
+
+function sseResponse(events: unknown[]): Response {
+  const body = `${events.map(event => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`;
+  return new Response(body, { headers: { "content-type": "text/event-stream" } });
+}

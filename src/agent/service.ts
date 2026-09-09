@@ -80,6 +80,7 @@ export class AgentService {
             input, tools: permittedTools, signal, timeoutMs: this.options.timeoutMs,
             // Hosted search runs inside this model response, not as a second model request.
             webSearch: credential.source === "user" && this.options.webSearch,
+            onProgress: phase => this.progress(run, phase, () => !signal.aborted && this.options.store.get(run.id)?.revision === run.revision),
           });
         } catch (error) {
           this.finishDebug(run, "failed", { phase: "model_request" }, error instanceof AgentModelError ? error.code : "model_request_failed");
@@ -217,6 +218,21 @@ export class AgentService {
       return null;
     }
   }
+  private async progress(run: Run, phase: "started" | "receiving", current: () => boolean): Promise<void> {
+    if (!this.api || !current()) return;
+    const text = run.input.language.startsWith("zh")
+      ? (phase === "started" ? "正在思考..." : "正在整理回复...")
+      : (phase === "started" ? "Thinking..." : "Preparing the reply...");
+    if (run.notice === text && run.noticeMessageId) return;
+    run.notice = text;
+    run.noticeVersion++;
+    this.options.store.save(run);
+    const messageId = await this.notify(run);
+    if (messageId !== null) {
+      run.noticeMessageId = messageId;
+      this.options.store.save(run);
+    }
+  }
   private async sendOnce(key: string, send: () => Promise<Message>): Promise<void> {
     const existing = this.options.store.delivery(key);
     if (existing?.status === "delivered") return;
@@ -290,7 +306,32 @@ export class AgentService {
     }
     const presentation = run.final.presentation ?? miaResponseFromText(run.final.text);
     const chunks = renderTelegramRich(presentation);
+    let firstUnsentChunk = 0;
+    if (run.noticeMessageId && chunks[0]) {
+      const chunkKey = `${answerKey}:chunk:0`;
+      if (this.options.store.delivery(chunkKey)?.status !== "delivered") {
+        const options = { reply_markup: this.keyboard(run) };
+        try {
+          try {
+            await api.editMessageText(run.input.chatId, run.noticeMessageId, chunks[0].richMessage, options);
+          } catch (error) {
+            if (!formatRejected(error)) throw error;
+            await api.editMessageText(run.input.chatId, run.noticeMessageId, chunks[0].plainText, options);
+          }
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("message is not modified")) {
+            // The final text can equal the most recently streamed status text.
+          } else {
+            throw new AgentModelError("delivery_outcome_unknown", false);
+          }
+        }
+        this.options.store.setDelivery(chunkKey, "delivered", run.noticeMessageId);
+      }
+      firstUnsentChunk = 1;
+      run.notice = null;
+    }
     for (const [index, chunk] of chunks.entries()) {
+      if (index < firstUnsentChunk) continue;
       if (!current()) return;
       const chunkKey = `${answerKey}:chunk:${index}`;
       if (this.options.store.delivery(chunkKey)?.status === "delivered") continue;
