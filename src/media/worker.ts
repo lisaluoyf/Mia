@@ -3,16 +3,13 @@ import type { Message } from "grammy/types";
 import type { Logger } from "pino";
 
 import type { APIMasterClient, ImageSubmitResult, NormalizedTaskStatus } from "../clients/apimaster.js";
-import { MediaAPIError, ResolverError } from "../clients/apimaster.js";
-import {
-  APIMASTER_TELEGRAM_BIND_EXISTING_URL,
-  APIMASTER_TELEGRAM_LOGIN_URL,
-} from "../constants.js";
+import { MediaAPIError } from "../clients/apimaster.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { ContextStore } from "../storage/store.js";
 import type { MediaStore } from "./store.js";
 import type { MediaJob } from "./types.js";
 import { dataUrl, downloadTelegramImages } from "./intake.js";
+import { mediaExecutionBlock, mediaExecutionFeedback } from "./execution-feedback.js";
 import {
   isStickerSetNameOccupied,
   prepareTelegramSticker,
@@ -236,15 +233,16 @@ export class MediaWorker {
       this.options.store.transitionJob(job.id, ["submitting"], "failed", { errorCode: errorCode(failure) });
       this.options.debug?.finish(debugId, { status: "failed", errorCode: errorCode(failure) });
       const locale = mediaJobLocale(job.options);
-      const accessFailure = submissionAccessFailure(failure, locale);
+      const executionBlock = mediaExecutionBlock(failure);
+      const accessFailure = executionBlock ? mediaExecutionFeedback(executionBlock, locale) : null;
       const failureText = errorCode(failure) === "video_resolution_confirmation_required"
         ? botText(locale, "videoResolutionConfirmationRequired")
         : botText(locale, job.type === "video_generate" ? "videoSubmissionFailed" : "submissionFailed");
-      await this.notifyFailure(
-        job,
-        accessFailure?.text ?? failureText,
-        accessFailure?.keyboard,
-      );
+      // Agent Runtime owns structured execution feedback so a model cannot
+      // overwrite it and the user receives exactly one account/quota message.
+      if (!job.options.agentRunId || !accessFailure) {
+        await this.notifyFailure(job, accessFailure?.text ?? failureText, accessFailure?.keyboard);
+      }
     }
   }
 
@@ -539,37 +537,6 @@ export class MediaWorker {
       await this.options.api.editMessageText(job.chatId, job.statusMessageId, text).catch(() => undefined);
     }
   }
-}
-
-function submissionAccessFailure(error: unknown, locale: string): { text: string; keyboard: InlineKeyboard } | null {
-  if (error instanceof MediaAPIError && error.code === "insufficient_quota") {
-    return {
-      text: botText(locale, "mediaTopUpRequired"),
-      keyboard: new InlineKeyboard().url(botText(locale, "topUpButton"), "https://apimaster.ai/console/wallet"),
-    };
-  }
-  if (error instanceof ResolverError && error.code === "telegram_not_bound") {
-    return {
-      text: botText(locale, "mediaBindRequired"),
-      keyboard: new InlineKeyboard()
-        .url(botText(locale, "telegramCreateOrLoginButton"), APIMASTER_TELEGRAM_LOGIN_URL)
-        .row()
-        .url(botText(locale, "telegramBindExistingButton"), APIMASTER_TELEGRAM_BIND_EXISTING_URL),
-    };
-  }
-  if (error instanceof ResolverError && error.code === "no_usable_api_key") {
-    return {
-      text: botText(locale, "mediaTokenRequired"),
-      keyboard: new InlineKeyboard().url(botText(locale, "createTokenButton"), "https://apimaster.ai/console/tokens"),
-    };
-  }
-  if (error instanceof ResolverError && error.code === "selected_model_unavailable") {
-    return {
-      text: botText(locale, "selectedModelUnavailable"),
-      keyboard: new InlineKeyboard(),
-    };
-  }
-  return null;
 }
 
 function shouldRetryImageSubmission(error: unknown): boolean {

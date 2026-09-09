@@ -6,15 +6,20 @@ import type { ModelSettingsService } from "../settings/service.js";
 import type { MediaStore } from "../media/store.js";
 import type { MediaInput, MediaJob } from "../media/types.js";
 import { downloadTelegramImages } from "../media/intake.js";
+import { mediaExecutionBlock } from "../media/execution-feedback.js";
 import type { AgentTool, Operation, Run, ToolResult } from "./types.js";
 
 export function toolFailure(error: unknown): ToolResult {
   if (error instanceof z.ZodError) return { status: "failed", data: { submitted: false }, error: { code: "invalid_arguments", message: JSON.stringify(error.issues.map(issue => ({ path: issue.path, message: issue.message }))).slice(0, 4000), retryable: false } };
   const code = error instanceof MediaAPIError || error instanceof ResolverError ? error.code : "tool_execution_failed";
   const status = error instanceof MediaAPIError || error instanceof ResolverError || error instanceof ChatCompletionError ? error.status : undefined;
-  return { status: "failed", data: { submitted: false }, error: { code, message: `The operation failed (${code}${status ? `, HTTP ${status}` : ""}); no success is established. Reassess the available evidence and next action.`, retryable: false } };
+  const executionBlock = mediaExecutionBlock(error, status);
+  return { status: "failed", data: { submitted: false }, ...(executionBlock ? { executionBlock } : {}), error: { code, message: `The operation failed (${code}${status ? `, HTTP ${status}` : ""}); no success is established. Reassess the available evidence and next action.`, retryable: false } };
 }
-function failed(code: string, message: string): ToolResult { return { status: "failed", data: { submitted: false }, error: { code, message, retryable: false } }; }
+function failed(code: string, message: string): ToolResult {
+  const executionBlock = mediaExecutionBlock(code);
+  return { status: "failed", data: { submitted: false }, ...(executionBlock ? { executionBlock } : {}), error: { code, message, retryable: false } };
+}
 const mediaSchema = z.object({
   prompt: z.string().min(1).max(8000),
   aspect_ratio: z.string().nullable(),
@@ -45,7 +50,8 @@ export function createAgentTools(options: {
     }
     if (job.status === "failed" || job.status === "expired") {
       const code = job.errorCode ?? "generation_expired";
-      return { status: code === "submission_outcome_unknown" ? "unknown" : "failed", jobId: job.id, ...(code === "cancelled_before_submission" ? { data: { submitted: false } } : {}), error: { code, message: job.errorMessage ?? `Media operation ended: ${code}.`, retryable: false } };
+      const executionBlock = mediaExecutionBlock(code);
+      return { status: code === "submission_outcome_unknown" ? "unknown" : "failed", jobId: job.id, ...(code === "cancelled_before_submission" ? { data: { submitted: false } } : {}), ...(executionBlock ? { executionBlock } : {}), error: { code, message: job.errorMessage ?? `Media operation ended: ${code}.`, retryable: false } };
     }
     return { status: "pending", jobId: job.id, data: { upstreamStatus: job.status } };
   };

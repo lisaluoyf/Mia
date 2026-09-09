@@ -156,6 +156,7 @@ export class AgentRuntime {
         if (!current()) return;
         if (result && result.status !== "pending") {
           this.complete(run, op, result);
+          if (this.finishMediaBlock(run, result)) { await this.finalize(run, current); return; }
           run.status = "queued";
           run.final = null;
           run.notice = null;
@@ -241,7 +242,14 @@ export class AgentRuntime {
             run.status = "waiting_tool";
             run.notice = this.mediaProgressText(run, prepared.call.name);
             run.noticeVersion++;
-          } else this.complete(run, prepared, result);
+          } else {
+            this.complete(run, prepared, result);
+            if (this.finishMediaBlock(run, result)) {
+              this.options.store.save(run);
+              await this.finalize(run, current);
+              return;
+            }
+          }
           this.options.store.save(run);
           if (!current()) return;
           if (result.status === "pending") { await this.notice(run); return; }
@@ -335,6 +343,13 @@ export class AgentRuntime {
     run.history.push(wasWaiting
       ? { role: "developer", content: `Asynchronous tool completion (data): ${JSON.stringify(observation)}` }
       : toolOutput(op.call.call_id, observation));
+  }
+  private finishMediaBlock(run: Run, result: ToolResult): boolean {
+    if (!result.executionBlock) return false;
+    run.final = { text: result.executionBlock, status: "blocked", revision: run.revision, executionBlock: result.executionBlock };
+    run.status = "queued";
+    run.notice = null;
+    return true;
   }
   private async finalize(run: Run, current: () => boolean): Promise<void> {
     if (!run.final || !current()) return;

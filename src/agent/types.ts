@@ -1,4 +1,5 @@
 import type { MediaInput } from "../media/types.js";
+import type { MediaExecutionBlock } from "../media/execution-feedback.js";
 
 export type RunStatus = "queued" | "running" | "waiting_tool" | "waiting_input" | "waiting_approval" | "blocked" | "completed" | "cancelled";
 export type Item = Record<string, unknown>;
@@ -22,6 +23,7 @@ export interface ToolResult {
   error?: { code: string; message: string; retryable: boolean };
   jobId?: number;
   artifact?: { jobId: number; kind: "image" | "video"; revision: number };
+  executionBlock?: MediaExecutionBlock;
 }
 export interface Operation {
   id: string;
@@ -48,7 +50,7 @@ export interface Run {
   notice: string | null;
   noticeVersion: number;
   noticeMessageId: number | null;
-  final: { text: string; status: "completed" | "waiting_input" | "blocked"; revision: number } | null;
+  final: { text: string; status: "completed" | "waiting_input" | "blocked"; revision: number; executionBlock?: MediaExecutionBlock } | null;
   updatedAt: number;
 }
 export interface ToolDefinition {

@@ -68,6 +68,22 @@ describe("goal-driven agent runtime", () => {
     expect(JSON.stringify(history)).toContain("unknown_provider_error");
     expect(f.deliver).toHaveBeenCalledTimes(1);
   });
+  it("ends media access blocks without asking the model to write an account explanation", async () => {
+    const tool = {
+      ...baseTool(vi.fn().mockResolvedValue({
+        status: "failed", executionBlock: "insufficient_quota",
+        error: { code: "insufficient_quota", message: "internal", retryable: false },
+      })),
+      definition: { type: "function" as const, name: "generate_image", description: "Generate", parameters: {}, strict: true },
+      paid: true,
+    };
+    const f = setup(() => call("generate_image"), [tool]);
+    f.runtime.enqueue(input); await f.runtime.drain();
+
+    expect(f.model).toHaveBeenCalledTimes(1);
+    expect(f.deliver).toHaveBeenCalledTimes(1);
+    expect((f.deliver.mock.calls[0]![0] as Run).final).toMatchObject({ status: "blocked", executionBlock: "insufficient_quota" });
+  });
   it("does not treat progress text or missing artifact evidence as completion", async () => {
     let count = 0;
     const f = setup(() => ++count === 1 ? { output: [{ type: "message", content: [{ type: "output_text", text: "I will generate it" }] }], calls: [] } : finish([], "image"));

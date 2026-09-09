@@ -22,6 +22,7 @@ import { miaResponseFromText } from "../presentation/schema.js";
 import { renderTelegramRich } from "../presentation/telegram-rich.js";
 import { scopeKey, type AgentInput, type Operation, type Run } from "./types.js";
 import { promptReference, promptText } from "../prompts.js";
+import { mediaExecutionFeedback } from "../media/execution-feedback.js";
 import { draftKeyboard, videoDraftText } from "../telegram/video-draft.js";
 
 interface ServiceOptions {
@@ -390,6 +391,14 @@ export class AgentService {
     const api = this.api;
     if (!api || !run.final) return;
     this.clearDraft(run);
+    if (run.final.executionBlock) {
+      const feedback = mediaExecutionFeedback(run.final.executionBlock, run.input.language);
+      await this.sendOnce(`${run.id}:media-block:${run.final.revision}:${run.final.executionBlock}`, () =>
+        api.sendMessage(run.input.chatId, feedback.text, { ...this.replyOptions(run), reply_markup: feedback.keyboard }),
+      );
+      this.finishDebug(run, "failed", { phase: "media_execution_blocked", reason: run.final.executionBlock });
+      return;
+    }
     const completedArtifacts = run.operations.filter((operation) => operation.result?.artifact);
     for (const op of run.operations) {
       if (!current()) return;
