@@ -74,6 +74,15 @@ path, so drain active tasks before removing their enrollment. Do not downgrade
 the binary while agent jobs remain active: older workers do not understand the
 agent-owned delivery boundary.
 
+## Rich Responses
+
+The internal Prompt backend exposes `Mia 富展示策略` and `MiaResponse v1 JSON Schema`.
+They are read immediately by Router requests: the model returns a restricted
+`MiaResponse`, Mia validates it with the fixed server schema, then maps it to
+Telegram Rich Message blocks. Editing the backend fields changes the model
+contract without a service restart; server validation and Telegram rendering
+remain code-owned.
+
 ## Legacy Behavior
 
 - Private chats: text, images, image documents, and albums enter one intent pipeline.

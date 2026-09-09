@@ -44,6 +44,18 @@ describe("prompt localization", () => {
     expect(template).toContain("Latest 10 turns of dialogue");
   });
 
+  it("uses presentation configuration across Router locales", () => {
+    configurePromptReader({
+      get(id: string) {
+        return id === "mia.response-presentation" ? "Global presentation rule" : undefined;
+      },
+    });
+
+    expect(promptText("mia.response-presentation", "zh-CN")).toBe("Global presentation rule");
+    expect(promptText("mia.response-presentation", "en")).toBe("Global presentation rule");
+    expect(promptText("mia.response-presentation", "ru")).toBe("Global presentation rule");
+  });
+
   it("uses locale-specific empty-summary placeholders in localized templates", () => {
     expect(contextCompactionInputPrompt({ memories: [], summary: null, dialogue: "hello" }, "zh-CN"))
       .toContain("（无）");

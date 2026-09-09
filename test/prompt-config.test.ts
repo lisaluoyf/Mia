@@ -26,4 +26,13 @@ describe("Prompt configuration", () => {
     expect(() => store.save("missing", "text")).toThrow("Unknown Prompt");
     store.close();
   });
+
+  it("stores only valid JSON for the editable Mia response schema", () => {
+    const store = new PromptConfigStore(":memory:");
+    const schema = JSON.stringify({ type: "object", properties: { version: { type: "integer" } } });
+    expect(store.save("mia.response-schema", schema).text).toBe(schema);
+    expect(() => store.save("mia.response-schema", "not json")).toThrow("valid JSON");
+    expect(() => store.save("mia.response-schema", "[]")).toThrow("Schema object");
+    store.close();
+  });
 });

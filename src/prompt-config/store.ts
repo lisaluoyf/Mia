@@ -12,7 +12,7 @@ export class InvalidPromptTextError extends Error {
   }
 }
 
-function validatePromptText(value: unknown): string {
+function validatePromptText(id: string, value: unknown): string {
   if (typeof value !== "string") throw new InvalidPromptTextError("Prompt must be text");
   const text = value.trim();
   if (!text) throw new InvalidPromptTextError("Prompt cannot be empty");
@@ -22,6 +22,18 @@ function validatePromptText(value: unknown): string {
     return code === 127 || (code < 32 && code !== 9 && code !== 10 && code !== 13);
   })) {
     throw new InvalidPromptTextError("Prompt contains unsupported control characters");
+  }
+  if (id === "mia.response-schema") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new InvalidPromptTextError("Response Schema must be valid JSON");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
+        (parsed as Record<string, unknown>).type !== "object") {
+      throw new InvalidPromptTextError("Response Schema must be a JSON Schema object");
+    }
   }
   return text;
 }
@@ -68,7 +80,7 @@ export class PromptConfigStore {
   save(id: string, value: unknown): PromptDefinition {
     const prompt = PROMPT_LIBRARY.find((item) => item.id === id);
     if (!prompt) throw new InvalidPromptTextError("Unknown Prompt");
-    const text = validatePromptText(value);
+    const text = validatePromptText(id, value);
     this.database.prepare(
       "INSERT INTO prompt_configs (prompt_id, prompt_text) VALUES (?, ?) ON CONFLICT(prompt_id) DO UPDATE SET prompt_text = excluded.prompt_text",
     ).run(id, text);

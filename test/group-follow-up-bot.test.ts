@@ -5,6 +5,7 @@ import type { ChatCredentialProvider } from "../src/credentials/chat.js";
 import { IntentRouter, type RoutedIntent } from "../src/intent/router.js";
 import { createLogger } from "../src/logger.js";
 import { MediaStore } from "../src/media/store.js";
+import { miaResponseFromText } from "../src/presentation/schema.js";
 import { ContextStore } from "../src/storage/store.js";
 import { createBot } from "../src/telegram/bot.js";
 
@@ -224,7 +225,7 @@ describe("Mia group follow-up", () => {
           media_message_ids: [],
           image_options: null,
           video_options: null,
-          final_response: directReply,
+          reply: miaResponseFromText(directReply),
           conversation_mode: "task",
           onboarding_opportunity: false,
           profile_updates: null,
@@ -232,7 +233,7 @@ describe("Mia group follow-up", () => {
         webSearch: { callCount: 1, queries: ["北京明天天气"], sources: [] },
       })
       .mockResolvedValueOnce({
-        data: { final_response: followUpReply },
+        data: miaResponseFromText(followUpReply),
         webSearch: { callCount: 1, queries: ["北京后天天气"], sources: [] },
       });
     const structuredChat = vi.fn().mockResolvedValue({
@@ -279,7 +280,7 @@ describe("Mia group follow-up", () => {
           media_message_ids: [],
           image_options: null,
           video_options: null,
-          final_response: "可以，发一张参考图和修改要求。",
+          reply: miaResponseFromText("可以，发一张参考图和修改要求。"),
           conversation_mode: "task",
           onboarding_opportunity: false,
           profile_updates: null,
@@ -305,7 +306,7 @@ describe("Mia group follow-up", () => {
           media_message_ids: [191],
           image_options: { aspect_ratio: null },
           video_options: null,
-          final_response: null,
+          reply: null,
           conversation_mode: "task",
           onboarding_opportunity: false,
           profile_updates: null,

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { APIMasterClient, MediaBinary, StructuredMessage, WebSearchUsage } from "../clients/apimaster.js";
+import { MIA_RESPONSE_JSON_SCHEMA, miaResponseFromText, miaResponseSchema, type MiaResponse } from "../presentation/schema.js";
 import {
   promptText,
 } from "../prompts.js";
@@ -29,19 +30,6 @@ const FOLLOW_UP_DECISION_JSON_SCHEMA = {
     reason: { type: "string", maxLength: 500 },
   },
 } as const;
-
-const FOLLOW_UP_REPLY_JSON_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["final_response"],
-  properties: {
-    final_response: { type: "string", minLength: 1, maxLength: 20000 },
-  },
-} as const;
-
-const followUpReplySchema = z.object({
-  final_response: z.string().trim().min(1).max(20000),
-}).strict();
 
 type FollowUpDecision = z.infer<typeof followUpDecisionSchema>;
 
@@ -79,15 +67,7 @@ function obviousFollowUpDecision(input: IntentRouterInput): FollowUpDecision | n
   return null;
 }
 
-function withoutPresentation(value: unknown): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const record = value as Record<string, unknown>;
-  if (!("reply" in record)) return value;
-  const { reply: _reply, ...withoutReply } = record;
-  return withoutReply;
-}
-
-export const mediaIntentSchema = z.preprocess(withoutPresentation, z.object({
+export const mediaIntentSchema = z.object({
   intent: z.enum(["chat", "image_generate", "image_edit", "sticker_create", "vision_qa", "video_generate"]),
   should_respond: z.boolean().optional().default(true),
   response_to_message_id: z.number().int().positive().nullable().optional().default(null),
@@ -105,6 +85,7 @@ export const mediaIntentSchema = z.preprocess(withoutPresentation, z.object({
     resolution: z.string().nullable(),
     image_roles: z.array(z.enum(["first_frame", "last_frame", "reference_image"])).max(10),
   }).nullable(),
+  reply: miaResponseSchema.nullable().optional().default(null),
   final_response: z.string().max(20000).nullable().optional().default(null),
   conversation_mode: z.enum(["casual", "task"]).optional().default("task"),
   onboarding_opportunity: z.boolean().optional().default(false),
@@ -113,7 +94,7 @@ export const mediaIntentSchema = z.preprocess(withoutPresentation, z.object({
     primary_role: z.string().trim().min(1).max(500).nullable(),
     primary_goal: z.string().trim().min(1).max(1000).nullable(),
   }).strict().nullable().optional().default(null),
-}).strict());
+}).strict();
 
 export type MediaIntent = z.infer<typeof mediaIntentSchema>;
 export type IntentName = MediaIntent["intent"];
@@ -248,6 +229,29 @@ const ROUTER_SCHEMA = {
   },
 } as const;
 
+function routerSchema(): object {
+  const { final_response: _finalResponse, ...properties } = ROUTER_SCHEMA.properties;
+  return {
+    ...ROUTER_SCHEMA,
+    required: ROUTER_SCHEMA.required.map((field) => field === "final_response" ? "reply" : field),
+    properties: {
+      ...properties,
+      reply: { anyOf: [{ type: "null" }, editableMiaResponseSchema()] },
+    },
+  };
+}
+
+function editableMiaResponseSchema(): object {
+  try {
+    const value: unknown = JSON.parse(promptText("mia.response-schema"));
+    if (value && typeof value === "object" && !Array.isArray(value) &&
+        (value as Record<string, unknown>).type === "object") return value as object;
+  } catch {
+    // A persisted malformed experiment setting must not take the Router down.
+  }
+  return MIA_RESPONSE_JSON_SCHEMA;
+}
+
 function fallback(
   reason: NonNullable<RoutedIntent["fallbackReason"]>,
   shouldRespond = true,
@@ -262,6 +266,7 @@ function fallback(
     media_message_ids: [],
     image_options: null,
     video_options: null,
+    reply: null,
     final_response: null,
     conversation_mode: "task",
     onboarding_opportunity: false,
@@ -286,6 +291,7 @@ function observation(
     media_message_ids: [],
     image_options: null,
     video_options: null,
+    reply: null,
     final_response: null,
     conversation_mode: "task",
     onboarding_opportunity: false,
@@ -300,7 +306,7 @@ function followUpChatResult(input: {
   targetMessageId: number;
   confidence: number;
   instruction: string;
-  finalResponse: string;
+  reply: MiaResponse;
   webSearch?: WebSearchUsage;
   responseFallback?: boolean;
   participationSource: NonNullable<RoutedIntent["participationSource"]>;
@@ -316,7 +322,8 @@ function followUpChatResult(input: {
     media_message_ids: [],
     image_options: null,
     video_options: null,
-    final_response: input.finalResponse,
+    reply: input.reply,
+    final_response: null,
     conversation_mode: "task",
     onboarding_opportunity: false,
     profile_updates: null,
@@ -436,6 +443,7 @@ export class IntentRouter {
       },
       ...input.conversationMessages,
     ];
+    messages.splice(1, 0, { role: "system", content: promptText("mia.response-presentation", input.locale) });
 
     if (participationMode === "selective") {
       return this.classifySelective(input, apiKey, model, contextPayload, messages);
@@ -448,7 +456,7 @@ export class IntentRouter {
         model,
         messages,
         "mia_media_intent",
-        ROUTER_SCHEMA,
+        routerSchema(),
         this.options.timeoutMs,
       );
       raw = result.data;
@@ -474,7 +482,7 @@ export class IntentRouter {
       try {
         const decisionMessages: StructuredMessage[] = [
           { role: "system", content: promptText("mia.follow-up-participation", input.locale) },
-          ...fullMessages.filter((message, index) => !(index === 0 && message.role === "system")),
+          ...fullMessages.filter((message) => message.role !== "system"),
           { role: "user", content: JSON.stringify({
             follow_up_batch_message_ids: batchIds,
             follow_up_context: input.followUpContext ?? null,
@@ -523,9 +531,9 @@ export class IntentRouter {
           targetMessageId,
           confidence: decision.confidence,
           instruction: input.text,
-          finalResponse: usesCjk
+          reply: miaResponseFromText(usesCjk
             ? "我看到了你的图片处理请求，但这次没有成功解析。请稍后再发一次。"
-            : "I saw your image request, but could not parse it this time. Please try again shortly.",
+            : "I saw your image request, but could not parse it this time. Please try again shortly."),
           participationSource,
           participationReason: decision.reason,
           responseFallback: true,
@@ -536,7 +544,8 @@ export class IntentRouter {
 
     const answerMessages: StructuredMessage[] = [
       { role: "system", content: promptText("mia.follow-up-chat", input.locale) },
-      ...fullMessages.filter((message, index) => !(index === 0 && message.role === "system")),
+      { role: "system", content: promptText("mia.response-presentation", input.locale) },
+      ...fullMessages.filter((message) => message.role !== "system"),
       { role: "system", content: JSON.stringify({
         confirmed_follow_up: true,
         response_to_message_id: targetMessageId,
@@ -549,16 +558,16 @@ export class IntentRouter {
         model,
         answerMessages,
         "mia_follow_up_chat_response",
-        FOLLOW_UP_REPLY_JSON_SCHEMA,
+        editableMiaResponseSchema(),
         Math.max(this.options.timeoutMs, 45_000),
       );
-      const reply = followUpReplySchema.safeParse(result.data);
+      const reply = miaResponseSchema.safeParse(result.data);
       if (!reply.success) return fallback("invalid_output", false);
       return followUpChatResult({
         targetMessageId,
         confidence: decision.confidence,
         instruction: input.text,
-        finalResponse: reply.data.final_response,
+        reply: reply.data,
         participationSource,
         participationReason: decision.reason,
         webSearch: result.webSearch,
@@ -569,9 +578,9 @@ export class IntentRouter {
         targetMessageId,
         confidence: decision.confidence,
         instruction: input.text,
-        finalResponse: usesCjk
+        reply: miaResponseFromText(usesCjk
           ? "我看到了，这是在继续问我。不过公共模型这次响应失败了，请稍后再试一下。"
-          : "I saw that this follows up on my answer, but the public model failed to respond this time. Please try again shortly.",
+          : "I saw that this follows up on my answer, but the public model failed to respond this time. Please try again shortly."),
         participationSource,
         participationReason: decision.reason,
         responseFallback: true,
@@ -593,7 +602,7 @@ export class IntentRouter {
           model,
           messages,
           "mia_media_intent",
-          ROUTER_SCHEMA,
+          routerSchema(),
           this.options.timeoutMs,
         )
         : await this.structuredWithoutWebSearch(
@@ -601,7 +610,7 @@ export class IntentRouter {
           model,
           messages,
           "mia_media_intent",
-          ROUTER_SCHEMA,
+          routerSchema(),
           this.options.timeoutMs,
         );
       const parsed = mediaIntentSchema.safeParse(result.data);
@@ -647,7 +656,7 @@ export class IntentRouter {
       return fallback("invalid_output", !selective);
     }
     if (!intent.should_respond) {
-      const validObservation = intent.intent === "chat" && intent.final_response === null &&
+      const validObservation = intent.intent === "chat" && intent.final_response === null && intent.reply === null &&
         intent.media_source === "none" && (intent.media_message_ids?.length ?? 0) === 0 &&
         intent.image_options === null && intent.video_options === null;
       return validObservation ? {
@@ -662,7 +671,8 @@ export class IntentRouter {
     const normalizedIntent = { ...intent, media_message_ids: selectedMediaIds };
     const requiresReply = intent.intent === "chat" ||
       intent.intent === "vision_qa" && (input.mediaPixelsProvided === true || input.mediaCount > 0 || input.replyMediaCount > 0 || input.activePrivateImage);
-    if ((requiresReply && intent.final_response === null) || (!requiresReply && intent.final_response !== null)) {
+    const response = intent.reply;
+    if ((requiresReply && response === null) || (!requiresReply && response !== null)) {
       return fallback("invalid_output", !selective);
     }
     if (intent.confidence < (this.options.confidenceThreshold ?? 0.65)) {

@@ -52,6 +52,89 @@ export type MiaActionId = z.infer<typeof miaActionIdSchema>;
 export type MiaResponseBlock = z.infer<typeof miaResponseBlockSchema>;
 export type MiaResponse = z.infer<typeof miaResponseSchema>;
 
+// This is the model-facing contract. The Zod schema above remains the final
+// server-side validation boundary even when the editable copy is changed.
+export const MIA_RESPONSE_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["version", "title", "blocks", "actions"],
+  properties: {
+    version: { type: "integer", enum: [1] },
+    title: {
+      anyOf: [
+        { type: "null" },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["text", "emoji"],
+          properties: {
+            text: { type: "string", minLength: 1, maxLength: 200 },
+            emoji: { type: ["string", "null"], maxLength: 16 },
+          },
+        },
+      ],
+    },
+    blocks: {
+      type: "array",
+      minItems: 1,
+      items: {
+        anyOf: [
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["type", "heading", "emoji", "text", "items", "ordered", "language"],
+            properties: {
+              type: { type: "string", enum: ["paragraph", "list", "facts", "code", "quote", "details"] },
+              heading: { type: ["string", "null"], maxLength: 160 },
+              emoji: { type: ["string", "null"], maxLength: 16 },
+              text: { type: ["string", "null"] },
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["label", "text"],
+                  properties: {
+                    label: { type: ["string", "null"], maxLength: 120 },
+                    text: { type: "string", minLength: 1 },
+                  },
+                },
+              },
+              ordered: { type: "boolean" },
+              language: { type: ["string", "null"], maxLength: 40 },
+            },
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["type", "heading", "emoji", "columns", "rows", "compact"],
+            properties: {
+              type: { type: "string", enum: ["table"] },
+              heading: { type: ["string", "null"], maxLength: 160 },
+              emoji: { type: ["string", "null"], maxLength: 16 },
+              columns: {
+                type: "array", minItems: 2, maxItems: 8,
+                items: { type: "string", minLength: 1, maxLength: 120 },
+              },
+              rows: {
+                type: "array", minItems: 1, maxItems: 20,
+                items: {
+                  type: "array", minItems: 2, maxItems: 8,
+                  items: { type: "string", maxLength: 1000 },
+                },
+              },
+              compact: { type: "boolean" },
+            },
+          },
+        ],
+      },
+    },
+    actions: { type: "array", maxItems: 4, items: { type: "string", enum: miaActionIdSchema.options } },
+  },
+} as const;
+
+export const MIA_RESPONSE_JSON_SCHEMA_TEXT = JSON.stringify(MIA_RESPONSE_JSON_SCHEMA, null, 2);
+
 function cleanInline(value: string): string {
   return value.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/__([^_]+)__/g, "$1").trim();
 }
