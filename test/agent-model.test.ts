@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { responseStep } from "../src/agent/model.js";
 import { finishTool } from "../src/agent/runtime.js";
 import { createAgentTools } from "../src/agent/tools.js";
-import { MIA_RESPONSE_JSON_SCHEMA } from "../src/presentation/schema.js";
 
 function checkStrictSchema(value: unknown): void {
   if (!value || typeof value !== "object") return;
@@ -36,10 +35,8 @@ describe("native agent Responses contract", () => {
     }
     expect(body.tools.filter(tool => tool.type === "web_search")).toHaveLength(webSearch ? 1 : 0);
     const finish = body.tools.find((tool): tool is typeof finishTool => tool.type === "function" && tool.name === "finish")?.parameters;
-    expect(finish?.required).toEqual(expect.arrayContaining(["status", "text", "presentation", "requirements"]));
-    expect(finish).toMatchObject({
-      properties: { presentation: { anyOf: [MIA_RESPONSE_JSON_SCHEMA, { type: "null" }] } },
-    });
+    expect(finish?.required).toEqual(expect.arrayContaining(["status", "text", "requirements"]));
+    expect(finish?.properties).not.toHaveProperty("presentation");
   });
   it("preserves reasoning and function items and disables parallel actions", async () => {
     const output = [{ type: "reasoning", id: "r1", encrypted_content: "opaque" }, { type: "function_call", call_id: "c1", name: "lookup", arguments: "{}" }];

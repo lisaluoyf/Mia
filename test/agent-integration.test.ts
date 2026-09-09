@@ -18,7 +18,6 @@ import { DebugRecorder } from "../src/debug/recorder.js";
 import { DebugStore } from "../src/debug/store.js";
 import { createServer } from "../src/server.js";
 import { createBot } from "../src/telegram/bot.js";
-import { miaResponseFromText } from "../src/presentation/schema.js";
 
 const directories: string[] = [];
 const stores: Array<{ close(): void }> = [];
@@ -60,24 +59,24 @@ function deliveryFixture() {
 }
 
 describe("agent delivery recovery", () => {
-  it("renders structured headings and falls back to HTML after definite rich rejection", async () => {
+  it("renders finish text and falls back to HTML after definite rich rejection", async () => {
     const f = deliveryFixture();
-    f.task.final!.presentation = { ...miaResponseFromText("Body <content>"), title: { text: "Result", emoji: null } };
+    f.task.final!.text = "Body <content>";
     f.store.save(f.task);
     f.api.sendRichMessage.mockRejectedValueOnce(new GrammyError("unsupported", { ok: false, error_code: 400, description: "Unsupported rich message" }, "sendRichMessage", {}));
     await f.service.drain();
     const payload = f.api.sendRichMessage.mock.calls[0]?.[1] as { blocks: unknown[] };
-    expect(payload.blocks).toContainEqual({ type: "heading", size: 2, text: "Result" });
-    expect(f.api.sendMessage).toHaveBeenCalledWith(42, expect.stringContaining("<b>Result</b>"), expect.objectContaining({ parse_mode: "HTML" }));
+    expect(payload.blocks).toEqual([{ type: "paragraph", text: "Body <content>" }]);
+    expect(f.api.sendMessage).toHaveBeenCalledWith(42, expect.stringContaining("Body &lt;content&gt;"), expect.objectContaining({ parse_mode: "HTML" }));
     expect(f.store.get(f.task.id)?.status).toBe("completed");
     f.task.status = "queued"; f.store.save(f.task);
     await f.service.drain();
     expect(f.api.sendMessage).toHaveBeenCalledTimes(1);
     await f.service.stop();
   });
-  it("records the Agent Loop input, raw presentation, and rendered rich delivery", async () => {
+  it("records the Agent Loop input, plain final text, and rendered delivery", async () => {
     const f = deliveryFixture();
-    f.task.final!.presentation = { ...miaResponseFromText("Body"), title: { text: "Result", emoji: null } };
+    f.task.final!.text = "Body";
     f.store.save(f.task);
     await f.service.drain();
     const trace = f.debugStore.list(42)[0];
@@ -85,7 +84,7 @@ describe("agent delivery recovery", () => {
       kind: "agent_loop",
       status: "succeeded",
       requestPreview: { text: "Make a video" },
-      responsePreview: { presentation: { title: { text: "Result" } } },
+      responsePreview: { status: "completed", text: "Body" },
     });
     expect(trace?.details).toMatchObject({ phase: "telegram_delivered", delivery: { mode: "rich_message", chunkCount: 1 } });
     await f.service.stop();
@@ -99,7 +98,6 @@ describe("agent delivery recovery", () => {
     f.media.transitionJob(claimed.job.id, ["submitted"], "succeeded", { resultMimeType: "image/png" });
     f.media.saveLocalResult(claimed.job.id, Buffer.from("result"));
     f.task.operations = [{ ...op("edit_image"), state: "done", result: { status: "succeeded", artifact: { jobId: claimed.job.id, kind: "image", revision: 1 } } }];
-    f.task.final!.presentation = { ...miaResponseFromText("A long model recap that must not be delivered"), title: { text: "Completed", emoji: null } };
     f.store.save(f.task);
     await f.service.drain();
     expect(f.api.sendDocument).toHaveBeenCalledWith(42, expect.anything(), expect.objectContaining({ caption: "Image edited." }));

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  MIA_RESPONSE_JSON_SCHEMA,
   miaResponsePlainText,
   miaResponseSchema,
   normalizeMiaResponse,
@@ -15,13 +14,7 @@ function response(blocks: MiaResponse["blocks"]): MiaResponse {
 }
 
 describe("Mia Telegram presentation", () => {
-  it("does not expose arbitrary prose and block caps to the model", () => {
-    const modelSchema = JSON.stringify(MIA_RESPONSE_JSON_SCHEMA);
-    expect(Object.hasOwn(MIA_RESPONSE_JSON_SCHEMA.properties.blocks, "maxItems")).toBe(false);
-    expect(modelSchema).not.toContain('"maxItems":12');
-    expect(modelSchema).not.toContain('"maxLength":8000');
-    expect(modelSchema).not.toContain('"maxLength":2000');
-
+  it("accepts internal presentation without arbitrary prose and block caps", () => {
     expect(miaResponseSchema.safeParse(response(Array.from({ length: 9 }, () => ({
       type: "paragraph" as const,
       heading: null,
@@ -104,7 +97,7 @@ describe("Mia Telegram presentation", () => {
     expect(miaResponsePlainText(normalized)).toContain("状态：A < B & C > D");
   });
 
-  it("promotes a Markdown table returned inside a paragraph to a native table block", () => {
+  it("keeps Markdown tables in plain model text instead of promoting them to native tables", () => {
     const normalized = normalizeMiaResponse(response([{
       type: "paragraph", heading: null, emoji: null,
       text: "For a serious alternative:\n\n| Project | Best for | Why it can be better |\n|---|---|---|\n| [Crawlee](https://github.com/apify/crawlee) | Production crawling | Browser support |\n| Spider | High performance | Rust-based |\n\nThat is the shortlist.",
@@ -112,25 +105,9 @@ describe("Mia Telegram presentation", () => {
     }]));
 
     expect(normalized.blocks).toEqual([
-      expect.objectContaining({ type: "paragraph", text: "For a serious alternative:" }),
-      expect.objectContaining({
-        type: "table",
-        columns: ["Project", "Best for", "Why it can be better"],
-        rows: [
-          ["[Crawlee](https://github.com/apify/crawlee)", "Production crawling", "Browser support"],
-          ["Spider", "High performance", "Rust-based"],
-        ],
-      }),
-      expect.objectContaining({ type: "paragraph", text: "That is the shortlist." }),
+      expect.objectContaining({ type: "paragraph", text: expect.stringContaining("| Project | Best for | Why it can be better |") }),
     ]);
-    const table = renderTelegramRich(normalized)[0]?.richBlocks.find((block) => block.type === "table");
-    expect(table).toEqual(expect.objectContaining({ type: "table" }));
-    if (table?.type !== "table") throw new Error("Expected a native table block");
-    expect(table.cells[1]?.[0]?.text).toEqual({
-      type: "url",
-      text: "Crawlee",
-      url: "https://github.com/apify/crawlee",
-    });
+    expect(renderTelegramRich(normalized)[0]?.richBlocks.some((block) => block.type === "table")).toBe(false);
   });
 
   it("splits after HTML escaping so every Telegram chunk remains within the limit", () => {

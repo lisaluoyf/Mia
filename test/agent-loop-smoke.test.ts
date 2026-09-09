@@ -1,19 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runAgentLoopSmoke } from "../src/agent/loop-smoke.js";
 
-const presentation = (text: string) => ({
-  version: 1,
-  title: { text: "Check", emoji: null },
-  blocks: [{ type: "paragraph", heading: null, emoji: null, text, items: [], ordered: false, language: null }],
-  actions: [],
-});
-
 function finish(search: boolean) {
   return {
     type: "function_call", call_id: search ? "search-finish" : "text-finish", name: "finish",
     arguments: JSON.stringify({
       status: "completed", text: search ? "Hosted search OK" : "Text OK",
-      presentation: presentation(search ? "Hosted search OK" : "Text OK"),
       requirements: [{ requirement: search ? "Current facts" : "Text check", kind: search ? "search" : "text", satisfied: true, evidence: search ? ["turn1view5"] : [] }],
     }),
   };

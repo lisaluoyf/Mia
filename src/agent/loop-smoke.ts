@@ -1,6 +1,5 @@
 import type { Logger } from "pino";
 import { APIMasterClient } from "../clients/apimaster.js";
-import { renderTelegramRich } from "../presentation/telegram-rich.js";
 import { AgentModelError, responseStep } from "./model.js";
 import { AgentRuntime, instructions } from "./runtime.js";
 import { AgentStore } from "./store.js";
@@ -22,8 +21,8 @@ function smokeInput(userId: number, search: boolean): AgentInput {
     userId, chatId: userId, threadId: null, messageId: search ? 2 : 1, replyToMessageId: null,
     language: "en",
     text: search
-      ? "This is an internal compatibility check. Use hosted web search once for the current official OpenAI news page, then call only finish with status completed. Include one satisfied search requirement. Return a non-null presentation with title Check and one paragraph Hosted search OK. Do not call any media, inspection, or other function tools."
-      : "This is an internal compatibility check. Call only finish with status completed and one satisfied text requirement. Return a non-null presentation with title Check and one paragraph Text OK. Do not call search, media, inspection, or other function tools.",
+      ? "This is an internal compatibility check. Use hosted web search once for the current official OpenAI news page, then call only finish with status completed, text Hosted search OK, and one satisfied search requirement. Do not call any media, inspection, or other function tools."
+      : "This is an internal compatibility check. Call only finish with status completed, text Text OK, and one satisfied text requirement. Do not call search, media, inspection, or other function tools.",
     media: [], context: "",
   };
 }
@@ -62,13 +61,11 @@ async function runScenario(options: AgentLoopSmokeOptions, search: boolean): Pro
     await runtime.drain();
     const completed = delivered[0];
     if (!completed?.final || completed.status === "blocked") throw new Error("Runtime did not accept a completed finish result");
-    if (!completed.final.presentation) throw new Error("Smoke result did not include structured presentation");
-    const chunks = renderTelegramRich(completed.final.presentation);
-    if (chunks.length === 0) throw new Error("Completed rich output could not be rendered");
+    if (!completed.final.text.trim()) throw new Error("Smoke result did not include final text");
     const trace = [
       `model_steps:${modelSteps}`,
       `finish:${completed.final.status}`,
-      `rich_chunks:${chunks.length}`,
+      "plain_text_finish",
       ...(search ? [completed.history.some((item) => item.type === "web_search_call") ? "web_search_call" : "missing_web_search_call"] : []),
     ];
     if (search && !completed.history.some((item) => item.type === "web_search_call")) throw new Error("No hosted web_search_call was observed");

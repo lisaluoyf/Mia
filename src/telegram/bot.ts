@@ -852,7 +852,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   }
 
   if (routed.intent === "chat") {
-    const response = routed.reply ?? routed.final_response;
+    const response = routed.final_response;
     if (response) {
       const delivery = await sendConversationResponse(ctx, message, response, dependencies);
       const assistantMessageId = delivery.assistantMessageId;
@@ -890,7 +890,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     request.onIntervention?.();
     return;
   }
-  const visionResponse = routed.reply ?? routed.final_response;
+  const visionResponse = routed.final_response;
   if (routed.intent === "vision_qa" && visionResponse) {
     const delivery = await sendConversationResponse(ctx, message, visionResponse, dependencies);
     const assistantMessageId = delivery.assistantMessageId;
@@ -933,7 +933,6 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         media_message_ids: routed.media_message_ids ?? [],
         image_options: routed.image_options,
         video_options: routed.video_options,
-        reply: routed.reply,
         final_response: routed.final_response,
         conversation_mode: routed.conversation_mode,
         onboarding_opportunity: routed.onboarding_opportunity,
@@ -2116,7 +2115,6 @@ function directIntent(intent: PendingMediaIntent, instruction: string, mediaSour
       resolution: null,
       image_roles: [],
     } : null,
-    reply: null,
     final_response: null,
     conversation_mode: "task",
     onboarding_opportunity: false,

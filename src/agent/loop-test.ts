@@ -18,13 +18,11 @@ function toolCall(name: string, argumentsValue: unknown = {}, callId = "call-1")
   return { output: [item], calls: [item] };
 }
 
-function finishStep(options: { presentation?: boolean; search?: boolean; evidence?: string[]; status?: "completed" | "waiting_input" | "blocked" } = {}): ModelStep {
+function finishStep(options: { search?: boolean; evidence?: string[]; status?: "completed" | "waiting_input" | "blocked" } = {}): ModelStep {
   const status = options.status ?? "completed";
-  const presentation = options.presentation ? { ...miaResponseFromText("Recorded agent result"), title: { text: "Recorded result", emoji: null } } : null;
   return toolCall("finish", {
     status,
     text: "Recorded agent result",
-    presentation,
     requirements: [{
       requirement: options.search ? "Current information" : "Recorded task",
       kind: options.search ? "search" : "text",
@@ -100,13 +98,13 @@ function lookupTool(execute: AgentTool["execute"], options: Partial<AgentTool> =
 export async function runAgentLoopTest(): Promise<AgentTestReport> {
   const started = Date.now();
   const scenarios: AgentTestScenarioReport[] = [];
-  scenarios.push(await scenario("text_rich_delivery", "delivery", async () => {
-    const f = fixture(() => finishStep({ presentation: true }));
+  scenarios.push(await scenario("text_delivery", "delivery", async () => {
+    const f = fixture(() => finishStep());
     try {
       f.runtime.enqueue(input); await f.runtime.drain();
       expect(f.delivered.length === 1, "Expected exactly one final delivery");
-      expect(f.delivered[0]?.final?.presentation?.title?.text === "Recorded result", "Expected structured rich presentation");
-      return { runStatus: "completed", trace: [...f.calls, "rich_presentation_rendered"] };
+      expect(f.delivered[0]?.final?.text === "Recorded agent result", "Expected plain-text finish output");
+      return { runStatus: "completed", trace: [...f.calls, "plain_text_rendered"] };
     } finally { await close(f); }
   }));
   scenarios.push(await scenario("hosted_search_provider_source", "evidence", async () => {

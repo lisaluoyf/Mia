@@ -20,15 +20,6 @@ const botInfo = {
   has_main_web_app: false,
 };
 
-function reply(text: string) {
-  return {
-    version: 1 as const,
-    title: null,
-    blocks: [{ type: "paragraph" as const, heading: null, emoji: null, text, items: [], ordered: false, language: null }],
-    actions: [],
-  };
-}
-
 function routed(options: { respond?: boolean; target?: number | null; text?: string } = {}): RoutedIntent {
   const respond = options.respond ?? true;
   return {
@@ -41,8 +32,7 @@ function routed(options: { respond?: boolean; target?: number | null; text?: str
     media_message_ids: [],
     image_options: null,
     video_options: null,
-    reply: respond ? reply(options.text ?? "Mia reply") : null,
-    final_response: null,
+    final_response: respond ? options.text ?? "Mia reply" : null,
     conversation_mode: "task",
     onboarding_opportunity: false,
     profile_updates: null,
@@ -221,8 +211,8 @@ describe("Mia group follow-up", () => {
   });
 
   it("automatically answers 后天呢 after a weather wake-up using only the public follow-up credential", async () => {
-    const directReply = reply("北京明天有雨。");
-    const followUpReply = reply("北京后天转多云。");
+    const directReply = "北京明天有雨。";
+    const followUpReply = "北京后天转多云。";
     const structuredResponse = vi.fn().mockResolvedValueOnce({
         data: {
           intent: "chat",
@@ -234,7 +224,7 @@ describe("Mia group follow-up", () => {
           media_message_ids: [],
           image_options: null,
           video_options: null,
-          reply: directReply,
+          final_response: directReply,
           conversation_mode: "task",
           onboarding_opportunity: false,
           profile_updates: null,
@@ -242,7 +232,7 @@ describe("Mia group follow-up", () => {
         webSearch: { callCount: 1, queries: ["北京明天天气"], sources: [] },
       })
       .mockResolvedValueOnce({
-        data: followUpReply,
+        data: { final_response: followUpReply },
         webSearch: { callCount: 1, queries: ["北京后天天气"], sources: [] },
       });
     const structuredChat = vi.fn().mockResolvedValue({
@@ -289,7 +279,7 @@ describe("Mia group follow-up", () => {
           media_message_ids: [],
           image_options: null,
           video_options: null,
-          reply: reply("可以，发一张参考图和修改要求。"),
+          final_response: "可以，发一张参考图和修改要求。",
           conversation_mode: "task",
           onboarding_opportunity: false,
           profile_updates: null,
@@ -315,7 +305,7 @@ describe("Mia group follow-up", () => {
           media_message_ids: [191],
           image_options: { aspect_ratio: null },
           video_options: null,
-          reply: null,
+          final_response: null,
           conversation_mode: "task",
           onboarding_opportunity: false,
           profile_updates: null,
@@ -438,7 +428,6 @@ describe("Mia group follow-up", () => {
         media_message_ids: [],
         image_options: { aspect_ratio: null },
         video_options: null,
-        reply: null,
         final_response: null,
         conversation_mode: "task",
         onboarding_opportunity: false,

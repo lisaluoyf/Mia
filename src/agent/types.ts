@@ -1,5 +1,4 @@
 import type { MediaInput } from "../media/types.js";
-import type { MiaResponse } from "../presentation/schema.js";
 
 export type RunStatus = "queued" | "running" | "waiting_tool" | "waiting_input" | "waiting_approval" | "blocked" | "completed" | "cancelled";
 export type Item = Record<string, unknown>;
@@ -48,7 +47,7 @@ export interface Run {
   notice: string | null;
   noticeVersion: number;
   noticeMessageId: number | null;
-  final: { text: string; presentation?: MiaResponse; status: "completed" | "waiting_input" | "blocked"; revision: number } | null;
+  final: { text: string; status: "completed" | "waiting_input" | "blocked"; revision: number } | null;
   updatedAt: number;
 }
 export interface ToolDefinition {

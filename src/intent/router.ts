@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import type { APIMasterClient, MediaBinary, StructuredMessage, WebSearchUsage } from "../clients/apimaster.js";
-import { MIA_RESPONSE_JSON_SCHEMA, miaResponseFromText, miaResponseSchema } from "../presentation/schema.js";
 import {
   promptText,
 } from "../prompts.js";
@@ -30,6 +29,19 @@ const FOLLOW_UP_DECISION_JSON_SCHEMA = {
     reason: { type: "string", maxLength: 500 },
   },
 } as const;
+
+const FOLLOW_UP_REPLY_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["final_response"],
+  properties: {
+    final_response: { type: "string", minLength: 1, maxLength: 20000 },
+  },
+} as const;
+
+const followUpReplySchema = z.object({
+  final_response: z.string().trim().min(1).max(20000),
+}).strict();
 
 type FollowUpDecision = z.infer<typeof followUpDecisionSchema>;
 
@@ -67,19 +79,15 @@ function obviousFollowUpDecision(input: IntentRouterInput): FollowUpDecision | n
   return null;
 }
 
-function withLegacyReply(value: unknown): unknown {
+function withoutPresentation(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
-  if ("reply" in record || !("final_response" in record)) return value;
-  return {
-    ...record,
-    reply: typeof record.final_response === "string" && record.final_response.trim()
-      ? miaResponseFromText(record.final_response)
-      : null,
-  };
+  if (!("reply" in record)) return value;
+  const { reply: _reply, ...withoutReply } = record;
+  return withoutReply;
 }
 
-export const mediaIntentSchema = z.preprocess(withLegacyReply, z.object({
+export const mediaIntentSchema = z.preprocess(withoutPresentation, z.object({
   intent: z.enum(["chat", "image_generate", "image_edit", "sticker_create", "vision_qa", "video_generate"]),
   should_respond: z.boolean().optional().default(true),
   response_to_message_id: z.number().int().positive().nullable().optional().default(null),
@@ -97,7 +105,6 @@ export const mediaIntentSchema = z.preprocess(withLegacyReply, z.object({
     resolution: z.string().nullable(),
     image_roles: z.array(z.enum(["first_frame", "last_frame", "reference_image"])).max(10),
   }).nullable(),
-  reply: miaResponseSchema.nullable().optional().default(null),
   final_response: z.string().max(20000).nullable().optional().default(null),
   conversation_mode: z.enum(["casual", "task"]).optional().default("task"),
   onboarding_opportunity: z.boolean().optional().default(false),
@@ -173,7 +180,7 @@ const ROUTER_SCHEMA = {
   additionalProperties: false,
   required: [
     "intent", "should_respond", "response_to_message_id", "confidence", "instruction", "media_source",
-    "media_message_ids", "image_options", "video_options", "reply",
+    "media_message_ids", "image_options", "video_options", "final_response",
     "conversation_mode", "onboarding_opportunity", "profile_updates",
   ],
   properties: {
@@ -220,7 +227,7 @@ const ROUTER_SCHEMA = {
         },
       ],
     },
-    reply: { anyOf: [{ type: "null" }, MIA_RESPONSE_JSON_SCHEMA] },
+    final_response: { type: ["string", "null"], maxLength: 20000 },
     conversation_mode: { type: "string", enum: ["casual", "task"] },
     onboarding_opportunity: { type: "boolean" },
     profile_updates: {
@@ -255,7 +262,6 @@ function fallback(
     media_message_ids: [],
     image_options: null,
     video_options: null,
-    reply: null,
     final_response: null,
     conversation_mode: "task",
     onboarding_opportunity: false,
@@ -280,7 +286,6 @@ function observation(
     media_message_ids: [],
     image_options: null,
     video_options: null,
-    reply: null,
     final_response: null,
     conversation_mode: "task",
     onboarding_opportunity: false,
@@ -295,7 +300,7 @@ function followUpChatResult(input: {
   targetMessageId: number;
   confidence: number;
   instruction: string;
-  reply: z.infer<typeof miaResponseSchema>;
+  finalResponse: string;
   webSearch?: WebSearchUsage;
   responseFallback?: boolean;
   participationSource: NonNullable<RoutedIntent["participationSource"]>;
@@ -311,8 +316,7 @@ function followUpChatResult(input: {
     media_message_ids: [],
     image_options: null,
     video_options: null,
-    reply: input.reply,
-    final_response: null,
+    final_response: input.finalResponse,
     conversation_mode: "task",
     onboarding_opportunity: false,
     profile_updates: null,
@@ -519,9 +523,9 @@ export class IntentRouter {
           targetMessageId,
           confidence: decision.confidence,
           instruction: input.text,
-          reply: miaResponseFromText(usesCjk
+          finalResponse: usesCjk
             ? "我看到了你的图片处理请求，但这次没有成功解析。请稍后再发一次。"
-            : "I saw your image request, but could not parse it this time. Please try again shortly."),
+            : "I saw your image request, but could not parse it this time. Please try again shortly.",
           participationSource,
           participationReason: decision.reason,
           responseFallback: true,
@@ -545,16 +549,16 @@ export class IntentRouter {
         model,
         answerMessages,
         "mia_follow_up_chat_response",
-        MIA_RESPONSE_JSON_SCHEMA,
+        FOLLOW_UP_REPLY_JSON_SCHEMA,
         Math.max(this.options.timeoutMs, 45_000),
       );
-      const reply = miaResponseSchema.safeParse(result.data);
+      const reply = followUpReplySchema.safeParse(result.data);
       if (!reply.success) return fallback("invalid_output", false);
       return followUpChatResult({
         targetMessageId,
         confidence: decision.confidence,
         instruction: input.text,
-        reply: reply.data,
+        finalResponse: reply.data.final_response,
         participationSource,
         participationReason: decision.reason,
         webSearch: result.webSearch,
@@ -565,9 +569,9 @@ export class IntentRouter {
         targetMessageId,
         confidence: decision.confidence,
         instruction: input.text,
-        reply: miaResponseFromText(usesCjk
+        finalResponse: usesCjk
           ? "我看到了，这是在继续问我。不过公共模型这次响应失败了，请稍后再试一下。"
-          : "I saw that this follows up on my answer, but the public model failed to respond this time. Please try again shortly."),
+          : "I saw that this follows up on my answer, but the public model failed to respond this time. Please try again shortly.",
         participationSource,
         participationReason: decision.reason,
         responseFallback: true,
@@ -643,7 +647,7 @@ export class IntentRouter {
       return fallback("invalid_output", !selective);
     }
     if (!intent.should_respond) {
-      const validObservation = intent.intent === "chat" && intent.reply === null && intent.final_response === null &&
+      const validObservation = intent.intent === "chat" && intent.final_response === null &&
         intent.media_source === "none" && (intent.media_message_ids?.length ?? 0) === 0 &&
         intent.image_options === null && intent.video_options === null;
       return validObservation ? {
@@ -658,7 +662,7 @@ export class IntentRouter {
     const normalizedIntent = { ...intent, media_message_ids: selectedMediaIds };
     const requiresReply = intent.intent === "chat" ||
       intent.intent === "vision_qa" && (input.mediaPixelsProvided === true || input.mediaCount > 0 || input.replyMediaCount > 0 || input.activePrivateImage);
-    if ((requiresReply && intent.reply === null) || (!requiresReply && intent.reply !== null)) {
+    if ((requiresReply && intent.final_response === null) || (!requiresReply && intent.final_response !== null)) {
       return fallback("invalid_output", !selective);
     }
     if (intent.confidence < (this.options.confidenceThreshold ?? 0.65)) {

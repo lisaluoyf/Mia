@@ -302,21 +302,8 @@ describe("Mia intent router", () => {
   });
 
   it("answers an obvious short follow-up without spending a separate model call on participation", async () => {
-    const followUpReply = {
-      version: 1 as const,
-      title: null,
-      blocks: [{
-        type: "paragraph" as const,
-        heading: null,
-        emoji: null,
-        text: "后天北京预计多云。",
-        items: [],
-        ordered: false,
-        language: null,
-      }],
-      actions: [],
-    };
-    const structuredResponse = vi.fn().mockResolvedValue(response(followUpReply, {
+    const followUpReply = "后天北京预计多云。";
+    const structuredResponse = vi.fn().mockResolvedValue(response({ final_response: followUpReply }, {
       callCount: 1,
       queries: ["北京后天天气"],
       sources: [],
@@ -345,7 +332,7 @@ describe("Mia intent router", () => {
     expect(result).toMatchObject({
       should_respond: true,
       response_to_message_id: 172,
-      reply: followUpReply,
+      final_response: followUpReply,
       webSearch: { callCount: 1, queries: ["北京后天天气"] },
     });
     expect(structuredResponse).toHaveBeenCalledTimes(1);
@@ -375,7 +362,7 @@ describe("Mia intent router", () => {
         media_message_ids: [191],
         image_options: { aspect_ratio: null },
         video_options: null,
-        reply: null,
+        final_response: null,
         conversation_mode: "task",
         onboarding_opportunity: false,
         profile_updates: null,
@@ -472,7 +459,7 @@ describe("Mia intent router", () => {
       participationSource: "model",
       participationReason: "explicit_image_edit_correction",
     });
-    expect(result.reply?.blocks[0]?.text).toContain("图片处理请求");
+    expect(result.final_response).toContain("图片处理请求");
     expect(structuredResponse).not.toHaveBeenCalled();
     expect(structuredChat).toHaveBeenCalledTimes(2);
     expect(structuredChat.mock.calls[0]?.[3]).toBe("mia_follow_up_participation");
@@ -566,7 +553,7 @@ describe("Mia intent router", () => {
       response_to_message_id: 172,
       fallbackReason: "response_fallback",
     });
-    expect(result.reply?.blocks[0]?.text).toContain("公共模型");
+    expect(result.final_response).toContain("公共模型");
     expect(structuredResponse).toHaveBeenCalledOnce();
   });
 
@@ -586,12 +573,7 @@ describe("Mia intent router", () => {
   });
 
   it("requires selective replies to target a real message in the current batch", async () => {
-    const validReply = {
-      version: 1 as const,
-      title: null,
-      blocks: [{ type: "paragraph" as const, heading: null, emoji: null, text: "可以，我继续处理。", items: [], ordered: false, language: null }],
-      actions: [],
-    };
+    const validReply = "可以，我继续处理。";
     const structuredResponse = vi.fn()
       .mockResolvedValueOnce(response({
         should_respond: true, response_to_message_id: 22, intent_hint: "media",
@@ -600,7 +582,7 @@ describe("Mia intent router", () => {
       .mockResolvedValueOnce(response({
         intent: "chat", should_respond: true, response_to_message_id: 22,
         confidence: 0.99, instruction: "继续处理", media_source: "none", media_message_ids: [],
-        image_options: null, video_options: null, reply: validReply,
+        image_options: null, video_options: null, final_response: validReply,
         conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
       }))
       .mockResolvedValueOnce(response({

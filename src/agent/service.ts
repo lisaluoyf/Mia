@@ -304,7 +304,7 @@ export class AgentService {
       this.finishDebug(run, "succeeded", { phase: "media_delivered", completedArtifacts: completedArtifacts.map(operation => operation.id) });
       return;
     }
-    const presentation = run.final.presentation ?? miaResponseFromText(run.final.text);
+    const presentation = miaResponseFromText(run.final.text);
     const chunks = renderTelegramRich(presentation);
     let firstUnsentChunk = 0;
     if (run.noticeMessageId && chunks[0]) {
@@ -400,7 +400,7 @@ export class AgentService {
     const id = this.startDebug(run, this.options.model());
     this.options.debug?.finish(id, {
       status,
-      responsePreview: run.final ? { status: run.final.status, text: run.final.text, presentation: run.final.presentation ?? null } : null,
+      responsePreview: run.final ? { status: run.final.status, text: run.final.text } : null,
       details: { ...details, runId: run.id, revision: run.revision, operations: run.operations.map(operation => ({ id: operation.id, tool: operation.call.name, state: operation.state, result: operation.result?.status ?? null })) },
       ...(errorCode ? { errorCode } : {}),
     });

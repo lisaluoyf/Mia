@@ -3,7 +3,6 @@ import { AgentRuntime } from "../src/agent/runtime.js";
 import { AgentStore } from "../src/agent/store.js";
 import { AgentModelError } from "../src/agent/model.js";
 import type { AgentInput, AgentTool, ModelStep, Run, ToolResult } from "../src/agent/types.js";
-import { miaResponseFromText, miaResponsePlainText, type MiaResponse } from "../src/presentation/schema.js";
 
 const input: AgentInput = { key: "1", userId: 42, chatId: 42, threadId: null, messageId: 1, replyToMessageId: null, language: "en", text: "Help me", media: [], context: "" };
 function call(name: string, args: unknown = {}, id = "call-1"): ModelStep {
@@ -43,17 +42,13 @@ describe("goal-driven agent runtime", () => {
     expect(f.deliver).not.toHaveBeenCalled();
     expect(f.store.list()[0]?.status).toBe("blocked");
   });
-  it.each<MiaResponse | null>([
-    null,
-    { ...miaResponseFromText("Body"), title: { text: "Result", emoji: null } },
-    { version: 1, title: null, actions: [], blocks: [{ type: "table", heading: "Comparison", emoji: null, columns: ["Item", "Status"], rows: [["Schema", "OK"]], compact: false }] },
-  ])("validates and delivers nullable rich finish output %#", async presentation => {
-    const f = setup(() => call("finish", { status: "completed", text: "Plain answer", presentation, requirements: [{ requirement: "Answer", kind: "text", satisfied: true, evidence: [] }] }));
+  it("delivers only finish.text and ignores removed presentation fields", async () => {
+    const f = setup(() => call("finish", { status: "completed", text: "Plain answer", presentation: { type: "table" }, requirements: [{ requirement: "Answer", kind: "text", satisfied: true, evidence: [] }] }));
     f.runtime.enqueue(input); await f.runtime.drain();
     expect(f.deliver).toHaveBeenCalledTimes(1);
     const delivered = f.deliver.mock.calls[0]![0] as Run;
-    expect(delivered.final?.text).toBe(presentation ? miaResponsePlainText(presentation) : "Plain answer");
-    expect(delivered.final?.presentation).toEqual(presentation ?? undefined);
+    expect(delivered.final?.text).toBe("Plain answer");
+    expect(delivered.final).not.toHaveProperty("presentation");
   });
   it("finishes ordinary text in one model step and deduplicates input", async () => {
     const f = setup(() => finish());
