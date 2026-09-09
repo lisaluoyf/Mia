@@ -165,11 +165,15 @@ export class AgentService {
   approve(id: string, revision: number, userId: number, chatId: number, threadId: number | null): boolean {
     return this.runtime?.approve(id, revision, userId, chatId, threadId) ?? false;
   }
-  private keyboard(run: Run): InlineKeyboard {
+  private keyboard(run: Run): InlineKeyboard | null {
+    if (run.status !== "waiting_approval") return null;
     const keyboard = new InlineKeyboard();
-    if (run.status === "waiting_approval") keyboard.text(run.input.language.startsWith("zh") ? "确认执行" : "Confirm", `agent:${run.id}:${run.revision}:approve`).row();
-    if (run.status !== "cancelled") keyboard.text(run.input.language.startsWith("zh") ? "取消" : "Cancel", `agent:${run.id}:${run.revision}:cancel`);
+    keyboard.text(run.input.language.startsWith("zh") ? "确认执行" : "Confirm", `agent:${run.id}:${run.revision}:approve`);
     return keyboard;
+  }
+  private editReplyMarkup(run: Run): InlineKeyboard | { inline_keyboard: [] } {
+    // Explicitly clear an approval control when the task message changes state.
+    return this.keyboard(run) ?? { inline_keyboard: [] };
   }
   cancelRun(id: string, userId: number, chatId: number, threadId: number | null, key: string): boolean {
     const run = this.options.store.get(id);
@@ -177,8 +181,14 @@ export class AgentService {
     this.runtime?.enqueue({ ...run.input, key, text: "/cancel", media: [] });
     return true;
   }
-  private replyOptions(run: Run): { message_thread_id?: number; reply_parameters: { message_id: number; allow_sending_without_reply: boolean } } {
-    return { ...(run.input.threadId === null ? {} : { message_thread_id: run.input.threadId }), reply_parameters: { message_id: run.input.messageId, allow_sending_without_reply: true } };
+  private replyOptions(run: Run): { message_thread_id?: number; reply_parameters?: { message_id: number; allow_sending_without_reply: boolean } } {
+    const replyToMessageId = run.input.chatId === run.input.userId
+      ? run.input.replyToMessageId
+      : run.input.messageId;
+    return {
+      ...(run.input.threadId === null ? {} : { message_thread_id: run.input.threadId }),
+      ...(replyToMessageId === null ? {} : { reply_parameters: { message_id: replyToMessageId, allow_sending_without_reply: true } }),
+    };
   }
   private async notify(run: Run): Promise<number | null> {
     if (!this.api || !run.notice) return null;
@@ -189,10 +199,10 @@ export class AgentService {
       try {
         const chunk = renderTelegramRich(miaResponseFromText(run.notice))[0]!;
         try {
-          await this.api.editMessageText(run.input.chatId, run.noticeMessageId, chunk.richMessage, { reply_markup: this.keyboard(run) });
+          await this.api.editMessageText(run.input.chatId, run.noticeMessageId, chunk.richMessage, { reply_markup: this.editReplyMarkup(run) });
         } catch (error) {
           if (!formatRejected(error)) throw error;
-          await this.api.editMessageText(run.input.chatId, run.noticeMessageId, run.notice, { reply_markup: this.keyboard(run) });
+          await this.api.editMessageText(run.input.chatId, run.noticeMessageId, run.notice, { reply_markup: this.editReplyMarkup(run) });
         }
       } catch (error) {
         if (!(error instanceof Error && error.message.includes("message is not modified"))) return run.noticeMessageId;
@@ -204,7 +214,8 @@ export class AgentService {
     this.options.store.setDelivery(key, "sending");
     try {
       let sent: Message;
-      const options = { ...this.replyOptions(run), reply_markup: this.keyboard(run) };
+      const keyboard = this.keyboard(run);
+      const options = { ...this.replyOptions(run), ...(keyboard ? { reply_markup: keyboard } : {}) };
       try {
         sent = await this.api.sendRichMessage(run.input.chatId, renderTelegramRich(miaResponseFromText(run.notice))[0]!.richMessage, options);
       } catch (error) {
@@ -219,18 +230,11 @@ export class AgentService {
     }
   }
   private async progress(run: Run, phase: "started" | "receiving", current: () => boolean): Promise<void> {
-    if (!this.api || !current()) return;
-    const text = run.input.language.startsWith("zh")
-      ? (phase === "started" ? "正在思考..." : "正在整理回复...")
-      : (phase === "started" ? "Thinking..." : "Preparing the reply...");
-    if (run.notice === text && run.noticeMessageId) return;
-    run.notice = text;
-    run.noticeVersion++;
-    this.options.store.save(run);
-    const messageId = await this.notify(run);
-    if (messageId !== null) {
-      run.noticeMessageId = messageId;
-      this.options.store.save(run);
+    if (!this.api || !current() || phase !== "started") return;
+    try {
+      await this.api.sendChatAction(run.input.chatId, "typing", run.input.threadId === null ? {} : { message_thread_id: run.input.threadId });
+    } catch {
+      // Typing is best-effort and must not delay the response.
     }
   }
   private async sendOnce(key: string, send: () => Promise<Message>): Promise<void> {
@@ -300,6 +304,11 @@ export class AgentService {
     if (oldDelivery && oldDelivery.status !== "failed") throw new AgentModelError("delivery_outcome_unknown", false);
     // Media is the result. Do not follow it with a model-authored recap or table.
     if (run.final.status === "completed" && completedArtifacts.length > 0) {
+      if (run.noticeMessageId) {
+        await api.deleteMessage(run.input.chatId, run.noticeMessageId).catch(() => undefined);
+        run.noticeMessageId = null;
+        run.notice = null;
+      }
       this.options.store.setDelivery(answerKey, "delivered");
       this.finishDebug(run, "succeeded", { phase: "media_delivered", completedArtifacts: completedArtifacts.map(operation => operation.id) });
       return;
@@ -310,7 +319,7 @@ export class AgentService {
     if (run.noticeMessageId && chunks[0]) {
       const chunkKey = `${answerKey}:chunk:0`;
       if (this.options.store.delivery(chunkKey)?.status !== "delivered") {
-        const options = { reply_markup: this.keyboard(run) };
+        const options = { reply_markup: this.editReplyMarkup(run) };
         try {
           try {
             await api.editMessageText(run.input.chatId, run.noticeMessageId, chunks[0].richMessage, options);

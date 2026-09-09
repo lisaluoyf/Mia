@@ -50,7 +50,7 @@ function deliveryFixture() {
   task.status = "queued";
   task.final = { text: "Completed answer", status: "completed", revision: 1 };
   store.save(task);
-  const api = { sendRichMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, rich_message: { blocks: [] } }), sendMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, text: "Completed answer" }), sendDocument: vi.fn().mockResolvedValue({ message_id: 101, document: { file_id: "result-file", file_unique_id: "result-unique" } }) };
+  const api = { sendChatAction: vi.fn().mockResolvedValue(true), deleteMessage: vi.fn().mockResolvedValue(true), sendRichMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, rich_message: { blocks: [] } }), sendMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, text: "Completed answer" }), sendDocument: vi.fn().mockResolvedValue({ message_id: 101, document: { file_id: "result-file", file_unique_id: "result-unique" } }) };
   const media = mediaStore();
   const options = { store, media, enabled: false, logger: createLogger("silent"), contexts: { upsertUser: vi.fn(), saveMessage: vi.fn() }, client: {}, settings: {}, credentials: {}, botToken: "test", baseUrl: "https://example.invalid", model: () => "configured", timeoutMs: 1000, webSearch: false, debug } as unknown as ConstructorParameters<typeof AgentService>[0];
   const service = new AgentService(options);
@@ -59,6 +59,53 @@ function deliveryFixture() {
 }
 
 describe("agent delivery recovery", () => {
+  it("keeps ordinary model progress to Telegram typing, without a task message", async () => {
+    const f = deliveryFixture();
+    const progress = (f.service as unknown as { progress: (run: Run, phase: "started" | "receiving", current: () => boolean) => Promise<void> }).progress;
+    await progress.call(f.service, f.task, "started", () => true);
+    await progress.call(f.service, f.task, "receiving", () => true);
+    expect(f.api.sendChatAction).toHaveBeenCalledTimes(1);
+    expect(f.api.sendChatAction).toHaveBeenCalledWith(42, "typing", {});
+    expect(f.api.sendRichMessage).not.toHaveBeenCalled();
+    expect(f.api.sendMessage).not.toHaveBeenCalled();
+    expect(f.task.notice).toBeNull();
+    await f.service.stop();
+  });
+  it("sends private messages directly, retaining a reply only for an explicit user reply", async () => {
+    const f = deliveryFixture();
+    const replyOptions = (f.service as unknown as { replyOptions: (run: Run) => unknown }).replyOptions;
+    expect(replyOptions.call(f.service, f.task)).toEqual({});
+    f.task.input.replyToMessageId = 5;
+    expect(replyOptions.call(f.service, f.task)).toEqual({ reply_parameters: { message_id: 5, allow_sending_without_reply: true } });
+    f.task.input.chatId = -100;
+    expect(replyOptions.call(f.service, f.task)).toEqual({ reply_parameters: { message_id: 7, allow_sending_without_reply: true } });
+    await f.service.stop();
+  });
+  it("shows only pre-submission approval, never a cancel action", async () => {
+    const f = deliveryFixture();
+    const keyboard = (f.service as unknown as { keyboard: (run: Run) => { inline_keyboard: unknown[][] } | null }).keyboard;
+    expect(keyboard.call(f.service, f.task)).toBeNull();
+    f.task.status = "waiting_tool";
+    expect(keyboard.call(f.service, f.task)).toBeNull();
+    f.task.status = "waiting_approval";
+    expect(keyboard.call(f.service, f.task)?.inline_keyboard).toEqual([[{ text: "Confirm", callback_data: "agent:run-1:1:approve" }]]);
+    await f.service.stop();
+  });
+  it("clears the lightweight generation notice once the media result is delivered", async () => {
+    const f = deliveryFixture();
+    const claimed = f.media.claimJob({ telegramUserId: 42, chatId: 42, threadId: null, type: "image_edit", idempotencyKey: "agent:run-1:0", requestMessageId: 7, model: "image", instruction: "Make it brighter", options: { agentRunId: f.task.id } });
+    if (claimed.outcome !== "created") throw new Error("Expected image job");
+    f.media.transitionJob(claimed.job.id, ["queued"], "submitting");
+    f.media.transitionJob(claimed.job.id, ["submitting"], "submitted", { upstreamTaskId: "test-task" });
+    f.media.transitionJob(claimed.job.id, ["submitted"], "succeeded", { resultMimeType: "image/png" });
+    f.media.saveLocalResult(claimed.job.id, Buffer.from("result"));
+    f.task.noticeMessageId = 99;
+    f.task.operations = [{ ...op("edit_image"), state: "done", result: { status: "succeeded", artifact: { jobId: claimed.job.id, kind: "image", revision: 1 } } }];
+    f.store.save(f.task);
+    await f.service.drain();
+    expect(f.api.deleteMessage).toHaveBeenCalledWith(42, 99);
+    await f.service.stop();
+  });
   it("renders finish text and falls back to HTML after definite rich rejection", async () => {
     const f = deliveryFixture();
     f.task.final!.text = "Body <content>";

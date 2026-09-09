@@ -226,7 +226,7 @@ export class AgentRuntime {
             prepared.result = result;
             run.history.push(toolOutput(prepared.call.call_id, { ...result, operationId: prepared.id }));
             run.status = "waiting_tool";
-            run.notice = this.localized(run, "任务已提交，正在等待结果。可以继续补充需求或取消后续操作。", "Task submitted; waiting for the result. You can add requirements or cancel further actions.");
+            run.notice = this.mediaProgressText(run, prepared.call.name);
             run.noticeVersion++;
           } else this.complete(run, prepared, result);
           this.options.store.save(run);
@@ -346,4 +346,9 @@ export class AgentRuntime {
     this.options.store.save(run);
   }
   private localized(run: Run, zh: string, en: string): string { return run.input.language.startsWith("zh") ? zh : en; }
+  private mediaProgressText(run: Run, tool: string): string {
+    return tool === "generate_video"
+      ? this.localized(run, "正在生成视频...", "Generating video...")
+      : this.localized(run, "正在生成图片...", "Generating image...");
+  }
 }
