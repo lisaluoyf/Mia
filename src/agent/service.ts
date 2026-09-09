@@ -9,6 +9,8 @@ import type { MediaJob } from "../media/types.js";
 import type { ContextStore } from "../storage/store.js";
 import type { ConversationScope } from "../storage/types.js";
 import { loadConversationContext } from "../context/conversation.js";
+import type { DebugContextLayers } from "../debug/types.js";
+import type { DebugRecorder } from "../debug/recorder.js";
 import { isStickerSetNameOccupied, stickerSetName } from "../stickers/service.js";
 import type { AgentStore } from "./store.js";
 import { AgentRuntime, instructions } from "./runtime.js";
@@ -18,13 +20,14 @@ import { sendAgentChunk, formatRejected } from "./presentation.js";
 import { miaResponseFromText } from "../presentation/schema.js";
 import { renderTelegramRich } from "../presentation/telegram-rich.js";
 import { scopeKey, type AgentInput, type Operation, type Run } from "./types.js";
-import { promptText } from "../prompts.js";
+import { promptReference, promptText } from "../prompts.js";
 
 interface ServiceOptions {
   store: AgentStore; media: MediaStore; client: APIMasterClient; settings: ModelSettingsService;
   credentials: ChatCredentialProvider; contexts: ContextStore; logger: Logger;
   botToken: string; baseUrl: string; model: () => string; timeoutMs: number;
   enabled: boolean; webSearch: boolean;
+  debug?: DebugRecorder;
 }
 export class AgentService {
   private runtime: AgentRuntime | null = null;
@@ -34,6 +37,7 @@ export class AgentService {
   private ingressTimer: NodeJS.Timeout | null = null;
   private ingressWork: Promise<void> | null = null;
   private lastPrunedAt = 0;
+  private readonly debugIds = new Map<string, string | null>();
   constructor(private readonly options: ServiceOptions) {}
   enabled(userId: number): boolean {
     void userId;
@@ -67,14 +71,20 @@ export class AgentService {
       model: async (run, input, tools, signal) => {
         const selected = this.options.settings.getPreferences(run.input.userId).chatModel ?? this.options.model();
         const credential = await this.options.credentials.resolve(run.input.userId, selected);
+        this.startDebug(run, credential.model);
         const permittedTools = credential.source === "user" ? tools : tools.filter(tool => ["finish", "read_conversation"].includes(tool.name));
-        return responseStep({
-          baseUrl: this.options.baseUrl, apiKey: credential.apiKey, model: credential.model,
-          instructions: `${promptText("mia.system", run.input.language)}\n\n${instructions}`,
-          input, tools: permittedTools, signal, timeoutMs: this.options.timeoutMs,
-          // Hosted search runs inside this model response, not as a second model request.
-          webSearch: credential.source === "user" && this.options.webSearch,
-        });
+        try {
+          return await responseStep({
+            baseUrl: this.options.baseUrl, apiKey: credential.apiKey, model: credential.model,
+            instructions: `${promptText("mia.system", run.input.language)}\n\n${instructions}`,
+            input, tools: permittedTools, signal, timeoutMs: this.options.timeoutMs,
+            // Hosted search runs inside this model response, not as a second model request.
+            webSearch: credential.source === "user" && this.options.webSearch,
+          });
+        } catch (error) {
+          this.finishDebug(run, "failed", { phase: "model_request" }, error instanceof AgentModelError ? error.code : "model_request_failed");
+          throw error;
+        }
       },
       notify: run => this.notify(run),
       deliver: (run, current) => this.deliver(run, current),
@@ -275,6 +285,7 @@ export class AgentService {
     // Media is the result. Do not follow it with a model-authored recap or table.
     if (run.final.status === "completed" && completedArtifacts.length > 0) {
       this.options.store.setDelivery(answerKey, "delivered");
+      this.finishDebug(run, "succeeded", { phase: "media_delivered", completedArtifacts: completedArtifacts.map(operation => operation.id) });
       return;
     }
     const presentation = run.final.presentation ?? miaResponseFromText(run.final.text);
@@ -293,5 +304,64 @@ export class AgentService {
       this.options.store.setDelivery(chunkKey, "delivered");
     }
     this.options.store.setDelivery(answerKey, "delivered");
+    this.finishDebug(run, "succeeded", {
+      phase: "telegram_delivered",
+      delivery: { mode: "rich_message", chunkCount: chunks.length, richMessages: chunks.map(chunk => chunk.richMessage) },
+    });
+  }
+
+  private debugKey(run: Run): string {
+    return `${run.id}:${run.revision}`;
+  }
+
+  private debugContext(run: Run): DebugContextLayers {
+    let stored: { summary?: unknown; memories?: unknown; messages?: unknown } = {};
+    try {
+      const parsed: unknown = JSON.parse(run.input.context);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const record = parsed as Record<string, unknown>;
+        stored = { summary: record.summary, memories: record.memories, messages: record.messages };
+      }
+    } catch {
+      // The trace remains useful even when an older persisted run has no JSON context.
+    }
+    return {
+      systemRules: { prompts: [promptReference("mia.system")], runtime: "agent.runtime" },
+      conversation: { scope: run.scope, chatId: run.input.chatId, threadId: run.input.threadId, messageId: run.input.messageId },
+      longTermMemory: stored.memories ?? [],
+      rollingSummary: stored.summary ?? null,
+      recentMessages: stored.messages ?? [],
+    };
+  }
+
+  private startDebug(run: Run, model: string): string | null {
+    const key = this.debugKey(run);
+    const existing = this.debugIds.get(key);
+    if (existing !== undefined) return existing;
+    const id = this.options.debug?.start({
+      telegramUserId: run.input.userId,
+      chatId: run.input.chatId,
+      chatType: run.input.chatId === run.input.userId ? "private" : "group",
+      messageId: run.input.messageId,
+      kind: "agent_loop",
+      model,
+      promptRefs: [promptReference("mia.system")],
+      contextLayers: this.debugContext(run),
+      requestPreview: { text: run.input.text, replyToMessageId: run.input.replyToMessageId, media: run.input.media.map(media => ({ messageId: media.messageId, type: media.type, mimeType: media.mimeType })) },
+      details: { phase: "agent_run", runId: run.id, revision: run.revision, runtimeInstruction: "agent.runtime" },
+      externalKey: `agent:${key}`,
+    }) ?? null;
+    this.debugIds.set(key, id);
+    return id;
+  }
+
+  private finishDebug(run: Run, status: "succeeded" | "failed", details: Record<string, unknown>, errorCode?: string): void {
+    const id = this.startDebug(run, this.options.model());
+    this.options.debug?.finish(id, {
+      status,
+      responsePreview: run.final ? { status: run.final.status, text: run.final.text, presentation: run.final.presentation ?? null } : null,
+      details: { ...details, runId: run.id, revision: run.revision, operations: run.operations.map(operation => ({ id: operation.id, tool: operation.call.name, state: operation.state, result: operation.result?.status ?? null })) },
+      ...(errorCode ? { errorCode } : {}),
+    });
   }
 }

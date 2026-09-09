@@ -14,6 +14,8 @@ import { MediaWorker } from "../src/media/worker.js";
 import { MediaAPIError, type APIMasterClient } from "../src/clients/apimaster.js";
 import type { ModelSettingsService, SettingsSnapshot } from "../src/settings/service.js";
 import { createLogger } from "../src/logger.js";
+import { DebugRecorder } from "../src/debug/recorder.js";
+import { DebugStore } from "../src/debug/store.js";
 import { createServer } from "../src/server.js";
 import { createBot } from "../src/telegram/bot.js";
 import { miaResponseFromText } from "../src/presentation/schema.js";
@@ -43,16 +45,18 @@ function toolsFixture() {
 
 function deliveryFixture() {
   const store = new AgentStore(":memory:"); stores.push(store);
+  const debugStore = new DebugStore(":memory:"); stores.push(debugStore);
+  const debug = new DebugRecorder(debugStore, [42]);
   const task = run();
   task.status = "queued";
   task.final = { text: "Completed answer", status: "completed", revision: 1 };
   store.save(task);
   const api = { sendRichMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, rich_message: { blocks: [] } }), sendMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, text: "Completed answer" }), sendDocument: vi.fn().mockResolvedValue({ message_id: 101, document: { file_id: "result-file", file_unique_id: "result-unique" } }) };
   const media = mediaStore();
-  const options = { store, media, enabled: false, logger: createLogger("silent"), contexts: { upsertUser: vi.fn(), saveMessage: vi.fn() }, client: {}, settings: {}, credentials: {}, botToken: "test", baseUrl: "https://example.invalid", model: () => "configured", timeoutMs: 1000, webSearch: false } as unknown as ConstructorParameters<typeof AgentService>[0];
+  const options = { store, media, enabled: false, logger: createLogger("silent"), contexts: { upsertUser: vi.fn(), saveMessage: vi.fn() }, client: {}, settings: {}, credentials: {}, botToken: "test", baseUrl: "https://example.invalid", model: () => "configured", timeoutMs: 1000, webSearch: false, debug } as unknown as ConstructorParameters<typeof AgentService>[0];
   const service = new AgentService(options);
   service.attach(api as unknown as Api, 1000, "MiaBot");
-  return { service, store, task, api, media };
+  return { service, store, task, api, media, debugStore };
 }
 
 describe("agent delivery recovery", () => {
@@ -69,6 +73,21 @@ describe("agent delivery recovery", () => {
     f.task.status = "queued"; f.store.save(f.task);
     await f.service.drain();
     expect(f.api.sendMessage).toHaveBeenCalledTimes(1);
+    await f.service.stop();
+  });
+  it("records the Agent Loop input, raw presentation, and rendered rich delivery", async () => {
+    const f = deliveryFixture();
+    f.task.final!.presentation = { ...miaResponseFromText("Body"), title: { text: "Result", emoji: null } };
+    f.store.save(f.task);
+    await f.service.drain();
+    const trace = f.debugStore.list(42)[0];
+    expect(trace).toMatchObject({
+      kind: "agent_loop",
+      status: "succeeded",
+      requestPreview: { text: "Make a video" },
+      responsePreview: { presentation: { title: { text: "Result" } } },
+    });
+    expect(trace?.details).toMatchObject({ phase: "telegram_delivered", delivery: { mode: "rich_message", chunkCount: 1 } });
     await f.service.stop();
   });
   it("delivers a completed image once with a concise caption and no recap", async () => {

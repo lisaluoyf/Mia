@@ -92,7 +92,7 @@ async function main(): Promise<void> {
     contexts, logger, botToken: config.telegramBotToken, baseUrl: config.apimasterBaseUrl,
     model: () => modelConfig.get("intent_router") ?? config.miaRouterModel,
     timeoutMs: config.agentTimeoutMs, enabled: config.agentEnabled,
-    webSearch: config.agentWebSearch,
+    webSearch: config.agentWebSearch, debug,
   });
   const router = new IntentRouter(client, {
     model: () => modelConfig.get("intent_router") ?? config.miaRouterModel,
