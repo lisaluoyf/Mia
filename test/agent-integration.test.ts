@@ -60,7 +60,7 @@ function deliveryFixture() {
 }
 
 describe("agent delivery recovery", () => {
-  it("keeps hosted web search available for guest text credentials", async () => {
+  it("keeps hosted search and media tools available when guest chat plans a task", async () => {
     const store = new AgentStore(":memory:"); stores.push(store);
     const media = mediaStore();
     const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
@@ -76,12 +76,16 @@ describe("agent delivery recovery", () => {
     } as unknown as ConstructorParameters<typeof AgentService>[0]);
     service.attach({} as Api, 1000, "MiaBot");
     const model = (service as unknown as { runtime: { options: { model: (task: Run, input: Record<string, unknown>[], tools: typeof finishTool[], signal: AbortSignal) => Promise<unknown> } } }).runtime.options.model;
+    const mediaTools = createAgentTools({ client: {}, settings: {}, media: {}, api: {}, botToken: "test" } as Parameters<typeof createAgentTools>[0])
+      .map(tool => tool.definition);
 
-    await model(run(), [], [finishTool], new AbortController().signal);
+    await model(run(), [], [...mediaTools, finishTool], new AbortController().signal);
 
     const body = JSON.parse((fetcher.mock.calls[0]?.[1] as RequestInit).body as string) as { tools: Array<{ type: string; name?: string }> };
     expect(body.tools).toEqual(expect.arrayContaining([{ type: "web_search" }]));
-    expect(body.tools.filter(tool => tool.type === "function").map(tool => tool.name)).toEqual(["finish"]);
+    expect(body.tools.filter(tool => tool.type === "function").map(tool => tool.name)).toEqual([
+      "generate_image", "edit_image", "generate_video", "create_sticker", "inspect_image", "read_conversation", "cancel_operation", "finish",
+    ]);
     fetcher.mockRestore();
     await service.stop();
   });

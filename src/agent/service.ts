@@ -90,7 +90,9 @@ export class AgentService {
         const request = (current: typeof credential) => responseStep({
           baseUrl: this.options.baseUrl, apiKey: current.apiKey, model: current.model,
           instructions: `${promptText("mia.system", run.input.language)}\n\n${instructions}`,
-          input, tools: current.source === "user" ? tools : tools.filter(tool => ["finish", "read_conversation"].includes(tool.name)), signal, timeoutMs: this.options.timeoutMs,
+          // A guest credential only plans the task. Media tools independently resolve the
+          // Telegram user's credential before they can create a billable media job.
+          input, tools, signal, timeoutMs: this.options.timeoutMs,
           webSearch: this.options.webSearch,
           onProgress: phase => this.progress(run, phase, () => !signal.aborted && this.options.store.get(run.id)?.revision === run.revision),
         });
