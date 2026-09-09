@@ -7,6 +7,7 @@ import type { Update } from "grammy/types";
 import sharp from "sharp";
 import { AgentStore } from "../src/agent/store.js";
 import { AgentService } from "../src/agent/service.js";
+import { finishTool } from "../src/agent/runtime.js";
 import { createAgentTools } from "../src/agent/tools.js";
 import type { Operation, Run } from "../src/agent/types.js";
 import { MediaStore } from "../src/media/store.js";
@@ -59,6 +60,31 @@ function deliveryFixture() {
 }
 
 describe("agent delivery recovery", () => {
+  it("keeps hosted web search available for guest text credentials", async () => {
+    const store = new AgentStore(":memory:"); stores.push(store);
+    const media = mediaStore();
+    const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
+      status: "completed",
+      output: [{ type: "function_call", call_id: "finish-1", name: "finish", arguments: "{}" }],
+    }));
+    const service = new AgentService({
+      store, media, enabled: true, logger: createLogger("silent"), contexts: {}, client: {},
+      settings: { getPreferences: vi.fn().mockReturnValue({ chatModel: null }) },
+      credentials: { resolve: vi.fn().mockResolvedValue({ apiKey: "guest-key", model: "gpt-5.4", source: "guest", fallbackReason: "no_usable_api_key" }) },
+      botToken: "test", baseUrl: "https://example.invalid", model: () => "configured", timeoutMs: 1000,
+      webSearch: true,
+    } as unknown as ConstructorParameters<typeof AgentService>[0]);
+    service.attach({} as Api, 1000, "MiaBot");
+    const model = (service as unknown as { runtime: { options: { model: (task: Run, input: Record<string, unknown>[], tools: typeof finishTool[], signal: AbortSignal) => Promise<unknown> } } }).runtime.options.model;
+
+    await model(run(), [], [finishTool], new AbortController().signal);
+
+    const body = JSON.parse((fetcher.mock.calls[0]?.[1] as RequestInit).body as string) as { tools: Array<{ type: string; name?: string }> };
+    expect(body.tools).toEqual(expect.arrayContaining([{ type: "web_search" }]));
+    expect(body.tools.filter(tool => tool.type === "function").map(tool => tool.name)).toEqual(["finish"]);
+    fetcher.mockRestore();
+    await service.stop();
+  });
   it("keeps ordinary model progress to Telegram typing, without a task message", async () => {
     const f = deliveryFixture();
     const progress = (f.service as unknown as { progress: (run: Run, phase: "started" | "receiving", current: () => boolean) => Promise<void> }).progress;

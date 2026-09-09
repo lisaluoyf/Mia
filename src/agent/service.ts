@@ -77,7 +77,7 @@ export class AgentService {
           baseUrl: this.options.baseUrl, apiKey: current.apiKey, model: current.model,
           instructions: `${promptText("mia.system", run.input.language)}\n\n${instructions}`,
           input, tools: current.source === "user" ? tools : tools.filter(tool => ["finish", "read_conversation"].includes(tool.name)), signal, timeoutMs: this.options.timeoutMs,
-          webSearch: current.source === "user" && this.options.webSearch,
+          webSearch: this.options.webSearch,
           onProgress: phase => this.progress(run, phase, () => !signal.aborted && this.options.store.get(run.id)?.revision === run.revision),
         });
         try {
