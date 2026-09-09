@@ -38,4 +38,13 @@ describe("Mia configuration", () => {
     expect(config.agentSmokeIntervalMs).toBe(21_600_000);
     expect(() => loadConfig({ ...requiredEnvironment, MIA_GUEST_CHAT_API_KEY: "guest-test-key", MIA_AGENT_SMOKE_INTERVAL_MS: "299999" })).toThrow();
   });
+
+  it("accepts explicit administrator debug target identities", () => {
+    const config = loadConfig({
+      ...requiredEnvironment,
+      MIA_GUEST_CHAT_API_KEY: "guest-test-key",
+      MIA_DEBUG_ALLOWED_TELEGRAM_IDS: "123, 456, 123, invalid",
+    });
+    expect(config.debugAllowedTelegramIds).toEqual([123, 456]);
+  });
 });

@@ -25,6 +25,7 @@ const environmentSchema = z.object({
   MEDIA_WORKER_INTERVAL_MS: z.coerce.number().int().min(1000).max(60000).default(5000),
   MEDIA_RESULT_MAX_BYTES: z.coerce.number().int().min(1_000_000).max(2_000_000_000).default(50_000_000),
   MIA_DEBUG_ALLOWED_EMAILS: z.string().default("lisa.luoyf@gmail.com"),
+  MIA_DEBUG_ALLOWED_TELEGRAM_IDS: z.string().default(""),
   MIA_AGENT_ENABLED: z.enum(["true", "false"]).default("false"),
   MIA_AGENT_WEB_SEARCH: z.enum(["true", "false"]).default("false"),
   MIA_AGENT_TIMEOUT_MS: z.coerce.number().int().min(30_000).max(600_000).default(300_000),
@@ -60,6 +61,7 @@ export interface AppConfig {
   mediaWorkerIntervalMs: number;
   mediaResultMaxBytes: number;
   debugAllowedEmails: string[];
+  debugAllowedTelegramIds: number[];
   agentEnabled: boolean;
   agentWebSearch: boolean;
   agentTimeoutMs: number;
@@ -104,6 +106,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     mediaResultMaxBytes: parsed.MEDIA_RESULT_MAX_BYTES,
     debugAllowedEmails: [...new Set(parsed.MIA_DEBUG_ALLOWED_EMAILS.split(",")
       .map((email) => email.trim().toLocaleLowerCase()).filter(Boolean))],
+    debugAllowedTelegramIds: [...new Set(parsed.MIA_DEBUG_ALLOWED_TELEGRAM_IDS.split(",")
+      .map((id) => Number(id.trim())).filter((id) => Number.isSafeInteger(id) && id > 0))],
     agentEnabled: parsed.MIA_AGENT_ENABLED === "true",
     agentWebSearch: parsed.MIA_AGENT_WEB_SEARCH === "true",
     agentTimeoutMs: parsed.MIA_AGENT_TIMEOUT_MS,

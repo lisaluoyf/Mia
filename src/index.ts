@@ -49,13 +49,14 @@ async function main(): Promise<void> {
   });
   const debug = new DebugRecorder(debugStore);
   const refreshDebugUsers = async (): Promise<void> => {
+    const ids = new Set(config.debugAllowedTelegramIds);
     try {
-      const ids = await client.resolveDebugTelegramUsers(config.debugAllowedEmails);
-      debug.replaceAllowedUsers(ids);
-      logger.info({ developerCount: ids.length }, "Mia developer debug identities refreshed");
+      for (const id of await client.resolveDebugTelegramUsers(config.debugAllowedEmails)) ids.add(id);
     } catch (error) {
       logger.warn({ err: error }, "Mia developer debug identities could not be refreshed");
     }
+    debug.replaceAllowedUsers([...ids]);
+    logger.info({ developerCount: ids.size }, "Mia developer debug identities refreshed");
   };
   await refreshDebugUsers();
   const debugRefreshTimer = setInterval(() => void refreshDebugUsers(), 60 * 60 * 1_000);
