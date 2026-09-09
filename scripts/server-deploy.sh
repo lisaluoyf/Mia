@@ -179,11 +179,15 @@ done
 save_process_list || rollback
 
 # This is deliberately post-activation and never calls rollback: an intermittent provider
-# search failure must not replace an otherwise healthy release. It still fails deployment
-# acceptance clearly, so the release cannot be reported as verified.
-if ! sudo -u "$runtime_user" -H bash -lc "cd '$release' && node --env-file=.env dist/agent/loop-smoke.js"; then
-  echo "Mia release=$release_name sha=$git_sha health=ok agent_loop_smoke=failed rollback=$(basename \"$previous_release\")" >&2
-  exit 2
+# search failure must not replace an otherwise healthy release. Run it only when production
+# explicitly configures a smoke account; the default configuration intentionally has none.
+agent_loop_smoke="skipped"
+if grep -qE '^MIA_AGENT_SMOKE_ENABLED=true$' "$release/.env"; then
+  if ! sudo -u "$runtime_user" -H bash -lc "cd '$release' && node --env-file=.env dist/agent/loop-smoke.js"; then
+    echo "Mia release=$release_name sha=$git_sha health=ok agent_loop_smoke=failed rollback=$(basename \"$previous_release\")" >&2
+    exit 2
+  fi
+  agent_loop_smoke="passed"
 fi
 
 declare -A keep=(["$release"]=1)
@@ -203,4 +207,4 @@ while IFS= read -r candidate; do
   esac
 done < <(find "$releases" -mindepth 1 -maxdepth 1 -type d -print)
 
-echo "Mia release=$release_name sha=$git_sha health=ok agent_loop_smoke=passed process_cwd=$active_release duration=$((SECONDS - started_at))s rollback=$(basename "$previous_release")"
+echo "Mia release=$release_name sha=$git_sha health=ok agent_loop_smoke=$agent_loop_smoke process_cwd=$active_release duration=$((SECONDS - started_at))s rollback=$(basename "$previous_release")"
