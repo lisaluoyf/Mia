@@ -30,6 +30,19 @@ interface ServiceOptions {
   enabled: boolean; webSearch: boolean;
   debug?: DebugRecorder;
 }
+
+interface RichMessageDraftApi {
+  sendRichMessageDraft(input: {
+    chat_id: number;
+    draft_id: number;
+    message_thread_id?: number;
+    rich_message: { blocks: Array<{ type: "thinking"; text: string }> };
+  }): Promise<true>;
+}
+
+const DRAFT_LABELS = ["Thinking", "Cooking", "Typing"] as const;
+const DRAFT_ROTATION_MS = 4_000;
+
 export class AgentService {
   private runtime: AgentRuntime | null = null;
   private api: Api | null = null;
@@ -39,6 +52,7 @@ export class AgentService {
   private ingressWork: Promise<void> | null = null;
   private lastPrunedAt = 0;
   private readonly debugIds = new Map<string, string | null>();
+  private readonly draftTimers = new Map<string, NodeJS.Timeout>();
   constructor(private readonly options: ServiceOptions) {}
   enabled(userId: number): boolean {
     void userId;
@@ -117,6 +131,8 @@ export class AgentService {
   async stop(): Promise<void> {
     if (this.ingressTimer) clearInterval(this.ingressTimer);
     this.ingressTimer = null;
+    for (const timer of this.draftTimers.values()) clearInterval(timer);
+    this.draftTimers.clear();
     await this.ingressWork;
     await this.runtime?.stop();
   }
@@ -192,6 +208,7 @@ export class AgentService {
   }
   private async notify(run: Run): Promise<number | null> {
     if (!this.api || !run.notice) return null;
+    this.clearDraft(run);
     const key = `${run.id}:notice:${run.noticeVersion}`;
     const existing = this.options.store.delivery(key);
     if (existing?.status === "delivered") return existing.message_id;
@@ -231,11 +248,64 @@ export class AgentService {
   }
   private async progress(run: Run, phase: "started" | "receiving", current: () => boolean): Promise<void> {
     if (!this.api || !current() || phase !== "started") return;
+    if (run.input.chatId === run.input.userId) {
+      await this.startDraft(run, current);
+      return;
+    }
     try {
       await this.api.sendChatAction(run.input.chatId, "typing", run.input.threadId === null ? {} : { message_thread_id: run.input.threadId });
     } catch {
       // Typing is best-effort and must not delay the response.
     }
+  }
+  private draftKey(run: Run): string { return `${run.id}:${run.revision}`; }
+  private draftId(run: Run): number {
+    let hash = 2_166_136_261;
+    for (const character of this.draftKey(run)) {
+      hash ^= character.charCodeAt(0);
+      hash = Math.imul(hash, 16_777_619);
+    }
+    return (hash >>> 0) % 2_147_483_646 + 1;
+  }
+  private clearDraft(run: Run): void {
+    const prefix = `${run.id}:`;
+    for (const [key, timer] of this.draftTimers) {
+      if (!key.startsWith(prefix)) continue;
+      clearInterval(timer);
+      this.draftTimers.delete(key);
+    }
+  }
+  private async startDraft(run: Run, current: () => boolean): Promise<void> {
+    const api = this.api;
+    if (!api) return;
+    const key = this.draftKey(run);
+    if (this.draftTimers.has(key)) return;
+    const update = async (index: number): Promise<boolean> => {
+      if (!current()) return false;
+      try {
+        const raw = api.raw as unknown as RichMessageDraftApi;
+        await raw.sendRichMessageDraft({
+          chat_id: run.input.chatId,
+          draft_id: this.draftId(run),
+          rich_message: { blocks: [{ type: "thinking", text: DRAFT_LABELS[index % DRAFT_LABELS.length]! }] },
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (!await update(0)) {
+      await api.sendChatAction(run.input.chatId, "typing").catch(() => undefined);
+      return;
+    }
+    let index = 1;
+    const timer = setInterval(() => {
+      void update(index++).then(sent => {
+        if (!sent) this.clearDraft(run);
+      });
+    }, DRAFT_ROTATION_MS);
+    timer.unref();
+    this.draftTimers.set(key, timer);
   }
   private async sendOnce(key: string, send: () => Promise<Message>): Promise<void> {
     const existing = this.options.store.delivery(key);
@@ -263,6 +333,7 @@ export class AgentService {
   private async deliver(run: Run, current: () => boolean): Promise<void> {
     const api = this.api;
     if (!api || !run.final) return;
+    this.clearDraft(run);
     const completedArtifacts = run.operations.filter((operation) => operation.result?.artifact);
     for (const op of run.operations) {
       if (!current()) return;

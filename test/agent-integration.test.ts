@@ -51,7 +51,7 @@ function deliveryFixture() {
   task.status = "queued";
   task.final = { text: "Completed answer", status: "completed", revision: 1 };
   store.save(task);
-  const api = { sendChatAction: vi.fn().mockResolvedValue(true), deleteMessage: vi.fn().mockResolvedValue(true), sendRichMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, rich_message: { blocks: [] } }), sendMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, text: "Completed answer" }), sendDocument: vi.fn().mockResolvedValue({ message_id: 101, document: { file_id: "result-file", file_unique_id: "result-unique" } }) };
+  const api = { raw: { sendRichMessageDraft: vi.fn().mockResolvedValue(true) }, sendChatAction: vi.fn().mockResolvedValue(true), deleteMessage: vi.fn().mockResolvedValue(true), sendRichMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, rich_message: { blocks: [] } }), sendMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, text: "Completed answer" }), sendDocument: vi.fn().mockResolvedValue({ message_id: 101, document: { file_id: "result-file", file_unique_id: "result-unique" } }) };
   const media = mediaStore();
   const options = { store, media, enabled: false, logger: createLogger("silent"), contexts: { upsertUser: vi.fn(), saveMessage: vi.fn() }, client: {}, settings: {}, credentials: {}, botToken: "test", baseUrl: "https://example.invalid", model: () => "configured", timeoutMs: 1000, webSearch: false, debug } as unknown as ConstructorParameters<typeof AgentService>[0];
   const service = new AgentService(options);
@@ -85,16 +85,28 @@ describe("agent delivery recovery", () => {
     fetcher.mockRestore();
     await service.stop();
   });
-  it("keeps ordinary model progress to Telegram typing, without a task message", async () => {
+  it("shows a temporary rich thinking draft for private model progress", async () => {
     const f = deliveryFixture();
     const progress = (f.service as unknown as { progress: (run: Run, phase: "started" | "receiving", current: () => boolean) => Promise<void> }).progress;
     await progress.call(f.service, f.task, "started", () => true);
     await progress.call(f.service, f.task, "receiving", () => true);
-    expect(f.api.sendChatAction).toHaveBeenCalledTimes(1);
-    expect(f.api.sendChatAction).toHaveBeenCalledWith(42, "typing", {});
+    expect(f.api.raw.sendRichMessageDraft).toHaveBeenCalledOnce();
+    expect(f.api.raw.sendRichMessageDraft).toHaveBeenCalledWith(expect.objectContaining({
+      chat_id: 42,
+      rich_message: { blocks: [{ type: "thinking", text: "Thinking" }] },
+    }));
+    expect(f.api.sendChatAction).not.toHaveBeenCalled();
     expect(f.api.sendRichMessage).not.toHaveBeenCalled();
     expect(f.api.sendMessage).not.toHaveBeenCalled();
-    expect(f.task.notice).toBeNull();
+    await f.service.stop();
+  });
+  it("falls back to typing in group chats", async () => {
+    const f = deliveryFixture();
+    f.task.input.chatId = -100;
+    const progress = (f.service as unknown as { progress: (run: Run, phase: "started" | "receiving", current: () => boolean) => Promise<void> }).progress;
+    await progress.call(f.service, f.task, "started", () => true);
+    expect(f.api.raw.sendRichMessageDraft).not.toHaveBeenCalled();
+    expect(f.api.sendChatAction).toHaveBeenCalledWith(-100, "typing", {});
     await f.service.stop();
   });
   it("sends private messages directly, retaining a reply only for an explicit user reply", async () => {
