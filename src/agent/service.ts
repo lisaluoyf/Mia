@@ -223,9 +223,6 @@ export class AgentService {
       throw new AgentModelError(rejected ? "telegram_delivery_rejected" : error instanceof AgentModelError ? error.code : "delivery_outcome_unknown", false);
     }
   }
-  private hasDetailedDeliveryRequest(run: Run): boolean {
-    return /(?:\b(?:compare|comparison|summari[sz]e|summary|plan|steps?|list|table|explain|detail)\b|对比|比较|总结|汇总|方案|步骤|列表|表格|详细说明|展开)/i.test(run.input.text);
-  }
   private mediaCaption(run: Run, operation: Operation): string {
     const zh = run.input.language.startsWith("zh");
     if (operation.call.name === "generate_video") return zh ? "视频已生成。" : "Video generated.";
@@ -280,9 +277,7 @@ export class AgentService {
       this.options.store.setDelivery(answerKey, "delivered");
       return;
     }
-    const presentation = this.hasDetailedDeliveryRequest(run) && run.final.presentation
-      ? run.final.presentation
-      : miaResponseFromText(run.final.text);
+    const presentation = run.final.presentation ?? miaResponseFromText(run.final.text);
     const chunks = renderTelegramRich(presentation);
     for (const [index, chunk] of chunks.entries()) {
       if (!current()) return;

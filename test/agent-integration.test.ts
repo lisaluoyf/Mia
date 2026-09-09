@@ -58,7 +58,6 @@ function deliveryFixture() {
 describe("agent delivery recovery", () => {
   it("renders structured headings and falls back to HTML after definite rich rejection", async () => {
     const f = deliveryFixture();
-    f.task.input.text = "Give me a detailed summary";
     f.task.final!.presentation = { ...miaResponseFromText("Body <content>"), title: { text: "Result", emoji: null } };
     f.store.save(f.task);
     f.api.sendRichMessage.mockRejectedValueOnce(new GrammyError("unsupported", { ok: false, error_code: 400, description: "Unsupported rich message" }, "sendRichMessage", {}));
@@ -72,22 +71,19 @@ describe("agent delivery recovery", () => {
     expect(f.api.sendMessage).toHaveBeenCalledTimes(1);
     await f.service.stop();
   });
-  it("delivers completed media once with a short caption and no recap", async () => {
+  it("delivers a completed image once with a concise caption and no recap", async () => {
     const f = deliveryFixture();
-    f.task.input.text = "Make an image";
-    const claimed = f.media.claimJob({ telegramUserId: 42, chatId: 42, threadId: null, type: "image_generate", idempotencyKey: "agent:media", requestMessageId: 7, model: "image", instruction: "A landscape", options: { agentRunId: f.task.id } });
-    if (claimed.outcome !== "created") throw new Error("Expected media job creation");
-    f.media.saveLocalResult(claimed.job.id, new Uint8Array([1, 2, 3]));
+    const claimed = f.media.claimJob({ telegramUserId: 42, chatId: 42, threadId: null, type: "image_edit", idempotencyKey: "agent:run-1:0", requestMessageId: 7, model: "image", instruction: "Make it brighter", options: { agentRunId: f.task.id } });
+    if (claimed.outcome !== "created") throw new Error("Expected image job");
     f.media.transitionJob(claimed.job.id, ["queued"], "submitting");
-    f.media.transitionJob(claimed.job.id, ["submitting"], "succeeded", { progress: 100, resultMimeType: "image/png" });
-    const operation = op("generate_image");
-    operation.result = { status: "succeeded", artifact: { jobId: claimed.job.id, kind: "image", revision: 1 } };
-    f.task.operations = [operation];
-    f.task.final!.presentation = { ...miaResponseFromText("A long generated recap"), title: { text: "Result", emoji: null } };
+    f.media.transitionJob(claimed.job.id, ["submitting"], "submitted", { upstreamTaskId: "test-task" });
+    f.media.transitionJob(claimed.job.id, ["submitted"], "succeeded", { resultMimeType: "image/png" });
+    f.media.saveLocalResult(claimed.job.id, Buffer.from("result"));
+    f.task.operations = [{ ...op("edit_image"), state: "done", result: { status: "succeeded", artifact: { jobId: claimed.job.id, kind: "image", revision: 1 } } }];
+    f.task.final!.presentation = { ...miaResponseFromText("A long model recap that must not be delivered"), title: { text: "Completed", emoji: null } };
     f.store.save(f.task);
     await f.service.drain();
-    expect(f.api.sendDocument).toHaveBeenCalledOnce();
-    expect(f.api.sendDocument.mock.calls[0]?.[2]).toMatchObject({ caption: "Image generated." });
+    expect(f.api.sendDocument).toHaveBeenCalledWith(42, expect.anything(), expect.objectContaining({ caption: "Image edited." }));
     expect(f.api.sendRichMessage).not.toHaveBeenCalled();
     expect(f.api.sendMessage).not.toHaveBeenCalled();
     await f.service.stop();

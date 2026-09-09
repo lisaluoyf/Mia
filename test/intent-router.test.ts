@@ -649,21 +649,22 @@ describe("Mia intent router", () => {
     expect(basePrompt?.text).toContain("默认使用用户在当前 Telegram 会话中的系统语言回答");
     expect(basePrompt?.text).toContain("默认不超过 200 字或 3 个要点");
     expect(routerPrompt).toMatchObject({
-      version: 16,
+      version: 17,
       kind: "composed",
       includes: ["mia.system"],
     });
     expect(routerPrompt?.text).toContain(basePrompt?.text ?? "missing");
     expect(routerPrompt?.text).not.toContain("信息较多时");
     expect(routerPrompt?.text).not.toContain("list 用于并列重点");
-    expect(routerPrompt?.text).toContain("不得把段落正文放进 paragraph.items");
+    expect(routerPrompt?.text).toContain("内容本身决定需要多少层次和结构");
+    expect(routerPrompt?.text).not.toContain("不得把段落正文放进 paragraph.items");
     expect(participationPrompt).toMatchObject({ version: 4 });
     expect(participationPrompt?.text).toContain("只有存在这类证据时才允许 should_respond=true");
     expect(participationPrompt?.text).toContain("包含附件或描述附件，都不能单独构成介入理由");
     expect(participationPrompt?.text).toContain("不要从图片、视频、文件的存在或其文字描述推断");
     expect(participationPrompt?.text).not.toContain("简单附和或感谢、表情式回复");
     expect(followUpPrompt).toMatchObject({
-      version: 10,
+      version: 11,
       kind: "composed",
       includes: ["mia.system"],
     });

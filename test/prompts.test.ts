@@ -71,4 +71,14 @@ describe("prompt localization", () => {
     expect(groupContextInput).not.toContain("watermark summary");
     expect(groupContextInput).toContain("после границы текущей сводки");
   });
+
+  it("uses one content-first presentation rule instead of block-by-block display instructions", () => {
+    const router = promptText("mia.intent-router", "zh-CN");
+    const followUp = promptText("mia.follow-up-chat", "en");
+
+    expect(router).toContain("内容本身决定需要多少层次和结构");
+    expect(router).not.toContain("paragraph、code、quote 和 details");
+    expect(followUp).toContain("let the content itself determine how much hierarchy and structure it needs");
+    expect(followUp).not.toContain("Tables must have 2-8 columns");
+  });
 });
