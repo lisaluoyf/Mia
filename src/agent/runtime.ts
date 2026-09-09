@@ -123,6 +123,7 @@ export class AgentRuntime {
         return run;
       }
       for (const op of run.operations.filter(op => op.state === "approval" || op.state === "prepared")) {
+        this.tools.get(op.call.name)?.cancel?.(run, op);
         this.complete(run, op, { status: "failed", error: { code: "superseded", message: "User input changed before execution; reassess the goal and request fresh approval if needed.", retryable: false } });
       }
       run.revision++;
@@ -204,6 +205,15 @@ export class AgentRuntime {
             this.options.store.save(run);
           }
           if (tool.paid && !prepared.approved && (tool.alwaysApprove || priorPaid)) {
+            if (!prepared.draftJobId && tool.createApprovalDraft) {
+              try { prepared.draftJobId = await tool.createApprovalDraft(run, prepared); }
+              catch {
+                this.complete(run, prepared, { status: "failed", data: { submitted: false }, error: { code: "video_draft_unavailable", message: "Could not create the video draft. No action was submitted.", retryable: false } });
+                this.options.store.save(run);
+                continue;
+              }
+              if (!current()) return;
+            }
             prepared.state = "approval";
             run.status = "waiting_approval";
             run.notice = this.localized(run, "这一步需要确认后才能提交：", "Confirm before submitting this operation:") + `\n${prepared.call.name}\n${prepared.binding?.model ?? ""}\n${prepared.call.arguments.slice(0, 1800)}`;

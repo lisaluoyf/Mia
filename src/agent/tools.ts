@@ -69,6 +69,37 @@ export function createAgentTools(options: {
     definition: { type: "function", name, strict: true, description: `${name} using the user's selected model. null parameters mean channel/catalog defaults. source_message_ids must come from this task. Video and additional paid operations require user approval.`, parameters: z.toJSONSchema(mediaSchema) },
     paid: true,
     alwaysApprove: name === "generate_video",
+    ...(name === "generate_video" ? { createApprovalDraft: async (run: Run, op: Operation) => {
+      const args = mediaSchema.parse(JSON.parse(op.call.arguments));
+      const snapshot = await settings.getSnapshot(run.input.userId);
+      const model = snapshot.settings.videoModel;
+      const caps = snapshot.models.find(item => item.id.toLowerCase() === model?.toLowerCase())?.videoCapabilities;
+      if (!model || !caps || snapshot.unavailable.includes("video")) throw new MediaAPIError("capabilities_unknown");
+      const inputs = sources(run, args.source_message_ids, args.source_operation_id);
+      const sourceArtifact = args.source_operation_id ? run.operations.find(item => item.id === args.source_operation_id)?.result?.artifact : null;
+      const inputCount = inputs.length + (sourceArtifact && !inputs.length ? 1 : 0);
+      const duration = args.duration_seconds ?? caps.durationSeconds.default;
+      const ratio = args.aspect_ratio ?? caps.defaultAspectRatio;
+      const resolution = args.resolution === null ? undefined : caps.resolutions.find(value => value.toLowerCase() === args.resolution?.toLowerCase()) ?? (caps.resolutions.length ? null : args.resolution);
+      if (resolution === null || duration < caps.durationSeconds.min || duration > caps.durationSeconds.max || !caps.aspectRatios.includes(ratio) || inputCount > caps.maxReferenceImages || !caps.modes.includes(inputCount ? "image_to_video" : "text_to_video")) throw new MediaAPIError("invalid_video_parameters");
+      await client.resolveAPIKey(run.input.userId, model);
+      const job = media.createDraft({
+        telegramUserId: run.input.userId, chatId: run.input.chatId, threadId: run.input.threadId,
+        requestMessageId: run.input.messageId, type: "video_generate", idempotencyKey: `agent:${op.id}`,
+        model, instruction: args.prompt,
+        options: {
+          agentRunId: run.id, agentOperationId: op.id, agentRevision: run.revision,
+          locale: run.input.language, durationSeconds: duration, aspectRatio: ratio,
+          resolutionSource: resolution === undefined ? "channel_default" : "user",
+          ...(resolution === undefined ? {} : { resolution }),
+          mode: inputCount ? "image_to_video" : "text_to_video",
+          supportedAspectRatios: caps.aspectRatios, durationMin: caps.durationSeconds.min, durationMax: caps.durationSeconds.max,
+          ...(sourceArtifact && !inputs.length ? { agentSourceJobId: sourceArtifact.jobId } : {}),
+        },
+      }, inputs);
+      if (job.status !== "draft") throw new MediaAPIError("draft_unavailable");
+      return job.id;
+    } } : {}),
     async prepare(run, op) {
       const snapshot = await settings.getSnapshot(run.input.userId);
       const model = name === "generate_video" ? snapshot.settings.videoModel : snapshot.settings.imageModel;
@@ -90,6 +121,11 @@ export function createAgentTools(options: {
         const inputs = sources(run, args.source_message_ids, args.source_operation_id);
         const sourceArtifact = args.source_operation_id ? run.operations.find(item => item.id === args.source_operation_id)?.result?.artifact : null;
         if ((name === "edit_image" || name === "create_sticker") && !inputs.length && !sourceArtifact) return failed("image_required", "Provide a source image before editing.");
+        if (name === "generate_video" && op.draftJobId) {
+          const draft = media.getJob(op.draftJobId);
+          if (!draft || draft.status !== "queued" || draft.options.agentRunId !== run.id || draft.options.agentOperationId !== op.id || draft.options.agentRevision !== run.revision) return failed("video_draft_unavailable", "The video draft changed or expired. Request a fresh video draft; no action was submitted.");
+          return observe(draft, op);
+        }
         const jobOptions: Record<string, unknown> = { agentRunId: run.id, agentOperationId: op.id, locale: run.input.language, aspectRatio: args.aspect_ratio ?? "1:1" };
         if (sourceArtifact && !inputs.length) jobOptions.agentSourceJobId = sourceArtifact.jobId;
         if (name === "create_sticker") Object.assign(jobOptions, { outputMode: "telegram_sticker", stickerTitle: "Mia Sticker" });

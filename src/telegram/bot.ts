@@ -71,6 +71,7 @@ import { userFacingError } from "./messages.js";
 import type { AgentService } from "../agent/service.js";
 import { promptFromMessage, shouldRespond } from "./policy.js";
 import { sendTelegramRichText } from "./send-rich-text.js";
+import { draftKeyboard, videoDraftText } from "./video-draft.js";
 
 type TextContext = Filter<Context, "message:text">;
 type StorableMessage = Message.TextMessage | Message.PhotoMessage | Message.DocumentMessage |
@@ -1607,20 +1608,36 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
   }
   if (action === "generate") {
     if (!await ensureCallbackMediaAccess(ctx, job, dependencies, locale)) return;
-    const result = dependencies.mediaStore.claimDraft(job.id);
-    if (result.outcome === "claimed") {
+    const agentResult = typeof job.options.agentRunId === "string"
+      ? dependencies.agent?.approveVideoDraft(job, query.from.id) ?? "changed"
+      : null;
+    if (agentResult === "approved") {
       const processingText = botText(locale, "stillProcessing", { progress: "" });
       await ctx.answerCallbackQuery({ text: processingText });
       await editCallbackMessage(ctx, processingText);
-    } else if (result.outcome === "limit_reached") {
+    } else if (agentResult === "limit_reached") {
       await ctx.answerCallbackQuery({ text: botText(locale, "activeLimit"), show_alert: true });
+    } else if (agentResult === "changed") {
+      await ctx.answerCallbackQuery({ text: "Task changed or confirmation expired", show_alert: true });
     } else {
-      await ctx.answerCallbackQuery({ text: botText(locale, "draftExpiredOrUsed"), show_alert: true });
+      const result = dependencies.mediaStore.claimDraft(job.id);
+      if (result.outcome === "claimed") {
+        const processingText = botText(locale, "stillProcessing", { progress: "" });
+        await ctx.answerCallbackQuery({ text: processingText });
+        await editCallbackMessage(ctx, processingText);
+      } else if (result.outcome === "limit_reached") {
+        await ctx.answerCallbackQuery({ text: botText(locale, "activeLimit"), show_alert: true });
+      } else {
+        await ctx.answerCallbackQuery({ text: botText(locale, "draftExpiredOrUsed"), show_alert: true });
+      }
     }
     return;
   }
   if (action === "cancel") {
     const cancelled = dependencies.mediaStore.transitionJob(job.id, ["draft"], "expired");
+    if (cancelled && typeof job.options.agentRunId === "string") {
+      dependencies.agent?.cancelVideoDraft(job, query.from.id, `video-draft-cancel:${ctx.update.update_id}`);
+    }
     await ctx.answerCallbackQuery({ text: botText(locale, cancelled ? "cancelled" : "draftUnavailable") });
     if (cancelled) await editCallbackMessage(ctx, botText(locale, "videoDraftCancelled"));
     return;
@@ -1632,11 +1649,13 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
     }
     const options = { ...job.options };
     if (action === "ratio") {
-      const ratios = ["1:1", "16:9", "9:16"];
+      const ratios = Array.isArray(options.supportedAspectRatios) ? options.supportedAspectRatios.filter((value): value is string => typeof value === "string") : ["1:1", "16:9", "9:16"];
       options.aspectRatio = ratios[(ratios.indexOf(String(options.aspectRatio)) + 1) % ratios.length];
     } else {
       const delta = action === "dur_up" ? 1 : -1;
-      options.durationSeconds = Math.max(4, Math.min(15, Number(options.durationSeconds ?? 4) + delta));
+      const minimum = typeof options.durationMin === "number" ? options.durationMin : 4;
+      const maximum = typeof options.durationMax === "number" ? options.durationMax : 15;
+      options.durationSeconds = Math.max(minimum, Math.min(maximum, Number(options.durationSeconds ?? minimum) + delta));
     }
     const updated = dependencies.mediaStore.updateDraft(job.id, options);
     await ctx.answerCallbackQuery();
@@ -2355,36 +2374,6 @@ function parseImageOptions(text: string): { instruction: string; aspectRatio: "1
     instruction: text.replace(/(?:^|\s)(?:1:1|16:9|9:16)(?=\s|$)/g, " ").trim(),
     aspectRatio: ratio ?? null,
   };
-}
-
-function videoDraftText(job: MediaJob): string {
-  const locale = mediaJobLocale(job.options);
-  const mode = String(job.options.mode) === "image_to_video"
-    ? botText(locale, "modeImageToVideo")
-    : botText(locale, "modeTextToVideo");
-  return [
-    botText(locale, "videoDraftTitle"),
-    botText(locale, "modelLabel", { value: job.model }),
-    botText(locale, "modeLabel", { value: mode }),
-    botText(locale, "promptLabel", { value: job.instruction }),
-    botText(locale, "durationLabel", { value: String(job.options.durationSeconds) }),
-    botText(locale, "aspectRatioLabel", { value: String(job.options.aspectRatio) }),
-    botText(locale, "resolutionLabel", {
-      value: job.options.resolutionSource === "channel_default"
-        ? botText(locale, "channelDefaultResolution")
-        : String(job.options.resolution),
-    }),
-    botText(locale, "draftExpires"),
-  ].join("\n");
-}
-
-function draftKeyboard(job: MediaJob): InlineKeyboard {
-  const locale = mediaJobLocale(job.options);
-  return new InlineKeyboard()
-    .text("-1s", `media:${job.id}:dur_down`).text("+1s", `media:${job.id}:dur_up`)
-    .text(botText(locale, "ratioButton"), `media:${job.id}:ratio`).row()
-    .text(botText(locale, "generateVideoButton"), `media:${job.id}:generate`)
-    .text(botText(locale, "cancelButton"), `media:${job.id}:cancel`);
 }
 
 function requestKey(message: Message): string {

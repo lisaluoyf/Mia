@@ -30,6 +30,7 @@ export interface Operation {
   state: "prepared" | "approval" | "executing" | "waiting" | "done";
   approved: boolean;
   expiresAt: number;
+  draftJobId?: number;
   binding?: { model: string; capabilities: string };
   result?: ToolResult;
 }
@@ -61,6 +62,7 @@ export interface AgentTool {
   definition: ToolDefinition;
   paid: boolean;
   alwaysApprove?: boolean;
+  createApprovalDraft?: (run: Run, operation: Operation) => Promise<number>;
   prepare?: (run: Run, operation: Operation) => Promise<void>;
   execute: (run: Run, operation: Operation, signal: AbortSignal, current: () => boolean) => Promise<ToolResult>;
   recover?: (run: Run, operation: Operation) => Promise<ToolResult | null>;
