@@ -212,6 +212,10 @@ export interface StructuredResponseResult {
   webSearch: WebSearchUsage;
 }
 
+export interface ChatTextOptions {
+  webSearch?: boolean;
+}
+
 export type TelegramDeepLinkConfirmation =
   | { kind: "confirmed"; loginUrl: string }
   | { kind: "expired" }
@@ -467,16 +471,29 @@ export class APIMasterClient {
     };
   }
 
-  async chat(apiKey: string, model: string, userMessage: string, locale?: string | null): Promise<string> {
+  async chat(
+    apiKey: string,
+    model: string,
+    userMessage: string,
+    locale?: string | null,
+    options: ChatTextOptions = {},
+  ): Promise<string> {
     return this.chatMessages(apiKey, model, [
       { role: "system", content: promptText("mia.system", locale) },
       { role: "user", content: userMessage },
-    ]);
+    ], options);
   }
 
-  async chatMessages(apiKey: string, model: string, messages: readonly StructuredMessage[]): Promise<string> {
-    if (preferResponsesForModel(model)) {
-      return this.responsesText(apiKey, model, messages);
+  async chatMessages(
+    apiKey: string,
+    model: string,
+    messages: readonly StructuredMessage[],
+    options: ChatTextOptions = {},
+  ): Promise<string> {
+    // Native Web Search is available only on Responses. Keep the existing
+    // Chat Completions path for ordinary low-latency chat.
+    if (options.webSearch || preferResponsesForModel(model)) {
+      return this.responsesText(apiKey, model, messages, this.options.timeoutMs, options);
     }
     const response = await this.postChatCompletions(apiKey, model, messages, this.options.timeoutMs);
     if (response.ok) {
@@ -486,7 +503,7 @@ export class APIMasterClient {
       throw new ChatCompletionError(response.status);
     }
     if (await isResponsesOnlyError(response)) {
-      return this.responsesText(apiKey, model, messages);
+      return this.responsesText(apiKey, model, messages, this.options.timeoutMs, options);
     }
     throw await chatCompletionError(response);
   }
@@ -514,6 +531,7 @@ export class APIMasterClient {
     model: string,
     messages: readonly StructuredMessage[],
     timeoutMs = this.options.timeoutMs,
+    options: ChatTextOptions = {},
   ): Promise<string> {
     const instructions = messages.filter((message) => message.role === "system")
       .map((message) => contentAsText(message.content)).join("\n\n");
@@ -526,7 +544,11 @@ export class APIMasterClient {
       response = await this.fetcher(`${this.options.baseUrl}/v1/responses`, {
         method: "POST",
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({ model, instructions, input, stream: false, store: false }),
+        body: JSON.stringify({
+          model, instructions, input,
+          ...(options.webSearch ? { tools: [{ type: "web_search" }], tool_choice: "auto" } : {}),
+          stream: false, store: false,
+        }),
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {

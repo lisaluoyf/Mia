@@ -91,7 +91,7 @@ describe("Telegram Rich Message context", () => {
       },
     } as never);
 
-    expect(chat).toHaveBeenCalledWith("user-key", "gpt-5.4", "模型 | 速度\nA | 快", "zh-CN");
+    expect(chat).toHaveBeenCalledWith("user-key", "gpt-5.4", "模型 | 速度\nA | 快", "zh-CN", { webSearch: true });
     expect(saveMessage).toHaveBeenCalledWith(expect.objectContaining({
       messageId: 11,
       contentType: "rich_message",

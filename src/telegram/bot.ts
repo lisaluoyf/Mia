@@ -1893,8 +1893,8 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
         ? dependencies.client.chatMessages(current.apiKey, current.model, [
           { role: "system", content: promptText("mia.system", locale) },
           ...requestContext.messages,
-        ])
-        : dependencies.client.chat(current.apiKey, current.model, prompt, locale),
+        ], { webSearch: true })
+        : dependencies.client.chat(current.apiKey, current.model, prompt, locale, { webSearch: true }),
     );
     const { value: response, credential } = completed;
     const delivery = await sendConversationResponse(ctx, ctx.message, response, dependencies);

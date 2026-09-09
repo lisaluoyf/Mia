@@ -235,6 +235,31 @@ describe("APIMaster client", () => {
     });
   });
 
+  it("uses Responses with native Web Search for a text chat request when requested", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      output: [
+        { type: "web_search_call", status: "completed", action: { type: "search", query: "北京明天天气" } },
+        { type: "message", content: [{ type: "output_text", text: "北京明天晴。" }] },
+      ],
+    }));
+    const client = createClient(fetcher);
+
+    await expect(client.chat("platform-key", "gpt-5.4", "查一下北京明天天气", "zh-CN", { webSearch: true }))
+      .resolves.toBe("北京明天晴。");
+
+    const [url, init] = fetcher.mock.calls[0] ?? [];
+    expect(url).toBe("https://apimaster.example/v1/responses");
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer platform-key");
+    const requestBody = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+    expect(requestBody).toMatchObject({
+      model: "gpt-5.4",
+      tools: [{ type: "web_search" }],
+      tool_choice: "auto",
+      stream: false,
+      store: false,
+    });
+  });
+
   it("retries Responses when an unknown model rejects Chat Completions by protocol", async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ code: "protocol_not_supported", message: "model does not support chat completions" }, { status: 400 }))
