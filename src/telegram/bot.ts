@@ -686,8 +686,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         kind: "intent_router",
         model: routerCredential.model,
         promptRefs: automaticFollowUp
-          ? [promptReference("mia.follow-up-participation"), promptReference("mia.follow-up-chat"), promptReference("mia.response-presentation"), promptReference("mia.response-schema")]
-          : [promptReference("mia.intent-router"), promptReference("mia.response-presentation"), promptReference("mia.response-schema")],
+          ? [promptReference("mia.follow-up-participation"), promptReference("mia.follow-up-chat")]
+          : [promptReference("mia.intent-router")],
         contextLayers: requestContext?.layers ?? null,
         requestPreview: {
           currentRequestText: promptFromMessage(policyInput, identity),

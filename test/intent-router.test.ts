@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { IntentRouter, validateIntentRequirements } from "../src/intent/router.js";
-import { PROMPT_LIBRARY, configurePromptReader } from "../src/prompts.js";
+import { PROMPT_LIBRARY } from "../src/prompts.js";
 import { miaResponseFromText } from "../src/presentation/schema.js";
 
 const base = {
@@ -13,45 +13,27 @@ const base = {
 };
 
 const noSearch = { callCount: 0, queries: [], sources: [] };
-const response = (data: unknown, webSearch = noSearch) => {
-  if (!data || typeof data !== "object" || Array.isArray(data) ||
-      !("intent" in data) || !("final_response" in data)) return { data, webSearch };
-  const record = data as Record<string, unknown>;
-  const { final_response: finalResponse, ...rest } = record;
-  return {
-    data: { ...rest, reply: typeof finalResponse === "string" ? miaResponseFromText(finalResponse) : null },
-    webSearch,
-  };
-};
+const response = (data: unknown, webSearch = noSearch) => ({ data, webSearch });
 
 describe("Mia intent router", () => {
-  it("uses the editable presentation prompt and JSON Schema in the next Router request", async () => {
-    const schema = { type: "object", additionalProperties: false, properties: { version: { type: "integer" } } };
-    configurePromptReader({
-      get(id: string) {
-        if (id === "mia.response-presentation") return "只在真正需要比较时才使用 table。";
-        if (id === "mia.response-schema") return JSON.stringify(schema);
-        return undefined;
-      },
-    });
-    try {
-      const structuredResponse = vi.fn().mockResolvedValue(response({
-        intent: "chat", confidence: 0.99, instruction: "", media_source: "none",
-        image_options: null, video_options: null, final_response: "普通回复",
-        conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
-      }));
-      const router = new IntentRouter({ structuredResponse }, { model: "router-model", timeoutMs: 1000 });
-      await router.classify(base, "user-router-key");
+  it("keeps the Router response contract lightweight and renders rich text after routing", async () => {
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      intent: "chat", confidence: 0.99, instruction: "", media_source: "none",
+      image_options: null, video_options: null, final_response: "普通回复",
+      conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "router-model", timeoutMs: 1000 });
+    const result = await router.classify(base, "user-router-key");
 
-      const call = structuredResponse.mock.calls[0] ?? [];
-      const messages = call[2] as Array<{ content: unknown }>;
-      expect(String(messages[1]?.content)).toBe("只在真正需要比较时才使用 table。");
-      expect(call[4]).toMatchObject({
-        properties: expect.objectContaining({ reply: { anyOf: [{ type: "null" }, schema] } }),
-      });
-    } finally {
-      configurePromptReader(null);
-    }
+    const call = structuredResponse.mock.calls[0] ?? [];
+    const messages = call[2] as Array<{ content: unknown }>;
+    expect(messages).toHaveLength(2);
+    expect(call[4]).toMatchObject({
+      required: expect.arrayContaining(["final_response"]),
+      properties: expect.objectContaining({ final_response: { type: ["string", "null"], maxLength: 20000 } }),
+    });
+    expect((call[4] as { properties: Record<string, unknown> }).properties).not.toHaveProperty("reply");
+    expect(result.reply).toEqual(miaResponseFromText("普通回复"));
   });
 
   it("reads the configured router model again for every request", async () => {
@@ -120,8 +102,7 @@ describe("Mia intent router", () => {
     const messages = structuredResponse.mock.calls[0]?.[2] as Array<{ content: unknown }>;
     expect(String(messages[0]?.content)).toContain("You are Mia");
     expect(String(messages[0]?.content)).toContain("default system language for this chat");
-    expect(String(messages[1]?.content)).toContain("Return MiaResponse v1 structured presentation data");
-    expect(String(messages[2]?.content)).toContain("\"default_response_locale\":\"en\"");
+    expect(String(messages[1]?.content)).toContain("\"default_response_locale\":\"en\"");
   });
 
   it("falls back to chat for timeout, invalid schema, and low confidence", async () => {
@@ -192,7 +173,7 @@ describe("Mia intent router", () => {
     }, "key");
 
     const messages = structuredResponse.mock.calls[0]?.[2] as Array<{ content: unknown }>;
-    const metadata = JSON.parse(String(messages[2]?.content)) as {
+    const metadata = JSON.parse(String(messages[1]?.content)) as {
       current_request_text: string;
       replied_message_text: string;
     };
@@ -289,7 +270,7 @@ describe("Mia intent router", () => {
     expect(result).toMatchObject({ intent: "video_generate", media_source: "context", media_message_ids: [31] });
     expect(result.missingRequired).toEqual([]);
     const requestMessages = structuredResponse.mock.calls[0]?.[2] as Array<{ content: unknown }>;
-    const metadata = JSON.parse(String(requestMessages[2]?.content)) as { media_candidates: Array<{ message_id: number }> };
+    const metadata = JSON.parse(String(requestMessages[1]?.content)) as { media_candidates: Array<{ message_id: number }> };
     expect(metadata.media_candidates).toEqual([expect.objectContaining({ message_id: 31 })]);
     expect(metadata.media_candidates).not.toContainEqual(expect.objectContaining({ message_id: 999 }));
   });
