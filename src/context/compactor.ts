@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import type { APIMasterClient, StructuredMessage } from "../clients/apimaster.js";
 import type { ChatCredentialProvider } from "../credentials/chat.js";
 import type { DebugRecorder } from "../debug/recorder.js";
+import { debugFailureCode, debugFailureDetails } from "../debug/error.js";
 import { contextCompactionInputPrompt, promptReference, promptTemplate } from "../prompts.js";
 import type { ContextStore } from "../storage/store.js";
 import { CONTEXT_TURN_BATCH_SIZE, formatCompactionDialogue } from "./conversation.js";
@@ -178,7 +179,8 @@ export class ContextCompactor {
       failed = true;
       this.dependencies.debug?.finish(debugId, {
         status: "failed",
-        errorCode: error instanceof Error ? error.name.slice(0, 80) : "unknown_error",
+        errorCode: debugFailureCode(error),
+        details: debugFailureDetails(error),
       });
       this.dependencies.logger.warn({ err: error, chatId, userId }, "Mia context compaction failed");
     } finally {

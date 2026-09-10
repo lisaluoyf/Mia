@@ -16,6 +16,7 @@ import { buildConversationMessages, loadConversationContext, type ConversationCo
 import type { ContextCompactor } from "../context/compactor.js";
 import type { GroupContextCompactor } from "../context/group-compactor.js";
 import { debugContextLayers } from "../debug/context.js";
+import { debugFailureCode, debugFailureDetails } from "../debug/error.js";
 import type { DebugRecorder } from "../debug/recorder.js";
 import type { DebugContextLayers, DebugRequestKind } from "../debug/types.js";
 import { FollowUpCoordinator } from "../follow-up/coordinator.js";
@@ -801,6 +802,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       dependencies.debug?.finish(debugId, {
         status: "failed",
         errorCode: debugErrorCode(error),
+        details: debugFailureDetails(error),
       });
       if (!automaticFollowUp) {
         await replyTo(ctx, message, error instanceof MediaInputError
@@ -1080,7 +1082,11 @@ async function executeMediaIntent(
     }
     return handled;
   } catch (error) {
-    dependencies.debug?.finish(debugId, { status: "failed", errorCode: debugErrorCode(error) });
+    dependencies.debug?.finish(debugId, {
+      status: "failed",
+      errorCode: debugErrorCode(error),
+      details: debugFailureDetails(error),
+    });
     await replyMediaAccessError(ctx, message, error, locale);
     return true;
   }
@@ -1912,7 +1918,11 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
     recordCompletedChatTurn(ctx.message, assistantMessageId, dependencies);
     recordSuccessfulGroupTrigger(ctx.message, dependencies);
   } catch (error) {
-    dependencies.debug?.finish(debugId, { status: "failed", errorCode: debugErrorCode(error) });
+    dependencies.debug?.finish(debugId, {
+      status: "failed",
+      errorCode: debugErrorCode(error),
+      details: debugFailureDetails(error),
+    });
     dependencies.logger.warn({ err: error, telegramUserId: ctx.from.id, updateId: ctx.update.update_id }, "Telegram chat request failed");
     const model = dependencies.settings.getPreferences(ctx.from.id).chatModel ?? DEFAULT_MODELS.chat;
     await ctx.reply(userFacingError(error, model, locale));
@@ -2019,8 +2029,7 @@ async function resolveTextCredential(
 function debugErrorCode(error: unknown): string {
   if (error instanceof ResolverError) return error.code;
   if (error instanceof MediaInputError) return error.code;
-  if (error instanceof Error && error.name) return error.name.slice(0, 80);
-  return "unknown_error";
+  return debugFailureCode(error);
 }
 
 function recordCompletedChatTurn(

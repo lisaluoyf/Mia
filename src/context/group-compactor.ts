@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import type { APIMasterClient, StructuredMessage } from "../clients/apimaster.js";
 import type { ChatCredentialProvider } from "../credentials/chat.js";
 import type { DebugRecorder } from "../debug/recorder.js";
+import { debugFailureCode, debugFailureDetails } from "../debug/error.js";
 import {
   groupContextCompactionInputPrompt,
   promptReference,
@@ -248,7 +249,8 @@ export class GroupContextCompactor {
     } catch (error) {
       this.dependencies.debug?.finish(debugId, {
         status: "failed",
-        errorCode: error instanceof Error ? error.name.slice(0, 80) : "unknown_error",
+        errorCode: debugFailureCode(error),
+        details: debugFailureDetails(error),
       });
       this.dependencies.logger.warn({ err: error, scope, payerUserId }, "Mia group context compaction failed");
     } finally {

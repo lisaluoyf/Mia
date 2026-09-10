@@ -41,6 +41,10 @@ function parsed(value: string | null): unknown {
   return value === null ? null : JSON.parse(value) as unknown;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function fromRow(row: DebugRequestRow): DebugRequest {
   return {
     id: row.public_id,
@@ -133,10 +137,17 @@ export class DebugStore {
   }
 
   finish(id: string, input: FinishDebugRequest): void {
-    const row = this.database.prepare("SELECT created_at FROM debug_requests WHERE public_id = ?").get(id) as { created_at: string } | undefined;
+    const row = this.database.prepare("SELECT created_at, details_json FROM debug_requests WHERE public_id = ?").get(id) as {
+      created_at: string;
+      details_json: string | null;
+    } | undefined;
     if (!row) return;
     const completedAt = new Date().toISOString();
     const durationMs = Math.max(0, Date.parse(completedAt) - Date.parse(row.created_at));
+    const existingDetails = parsed(row.details_json);
+    const details = isRecord(existingDetails) && isRecord(input.details)
+      ? { ...existingDetails, ...input.details }
+      : input.details;
     this.database.prepare(`
       UPDATE debug_requests SET
         status = ?, duration_ms = ?, response_preview_json = COALESCE(?, response_preview_json),
@@ -144,7 +155,7 @@ export class DebugStore {
         error_code = ?, request_kind = COALESCE(?, request_kind), completed_at = ?
       WHERE public_id = ?
     `).run(
-      input.status, durationMs, json(input.responsePreview), json(input.details),
+      input.status, durationMs, json(input.responsePreview), json(details),
       input.taskId ?? null, input.errorCode ?? null, input.kind ?? null, completedAt, id,
     );
   }

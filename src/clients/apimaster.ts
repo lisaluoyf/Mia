@@ -5,6 +5,7 @@ import type { ModelOption } from "../settings/types.js";
 
 type Fetcher = typeof fetch;
 const IMAGE_EDIT_TIMEOUT_MS = 180_000;
+const MAX_UPSTREAM_ERROR_BODY_LENGTH = 8_000;
 
 const resolveResponseSchema = z.object({
   success: z.literal(true),
@@ -180,10 +181,24 @@ export class ResolverError extends Error {
 }
 
 export class ChatCompletionError extends Error {
-  constructor(public readonly status?: number, public readonly code?: string) {
+  constructor(
+    public readonly status?: number,
+    public readonly code?: string,
+    public readonly upstream?: UpstreamErrorDetails,
+  ) {
     super("APIMaster chat completion failed");
     this.name = "ChatCompletionError";
   }
+}
+
+export interface UpstreamErrorDetails {
+  endpoint: string;
+  status: number;
+  statusText: string | null;
+  requestId: string | null;
+  code: string | null;
+  message: string | null;
+  body: unknown;
 }
 
 export class MediaAPIError extends Error {
@@ -505,7 +520,7 @@ export class APIMasterClient {
     if (await isResponsesOnlyError(response)) {
       return this.responsesText(apiKey, model, messages, this.options.timeoutMs, options);
     }
-    throw await chatCompletionError(response);
+    throw await chatCompletionError(response, "/v1/chat/completions");
   }
 
   private async postChatCompletions(
@@ -554,7 +569,7 @@ export class APIMasterClient {
     } catch {
       throw new ChatCompletionError();
     }
-    if (!response.ok) throw await chatCompletionError(response);
+    if (!response.ok) throw await chatCompletionError(response, "/v1/responses");
     const payload: unknown = await response.json().catch(() => undefined);
     const parsed = responsesResponseSchema.safeParse(payload);
     if (!parsed.success) throw new ChatCompletionError(response.status);
@@ -599,7 +614,7 @@ export class APIMasterClient {
       const result = await this.structuredResponse(apiKey, model, messages, schemaName, schema, timeoutMs, { webSearch: false });
       return result.data;
     }
-    if (!response.ok) throw await chatCompletionError(response);
+    if (!response.ok) throw await chatCompletionError(response, "/v1/chat/completions");
     const payload: unknown = await response.json().catch(() => undefined);
     const parsed = structuredChatResponseSchema.safeParse(payload);
     if (!parsed.success) {
@@ -659,7 +674,7 @@ export class APIMasterClient {
     } catch {
       throw new ChatCompletionError();
     }
-    if (!response.ok) throw await chatCompletionError(response);
+    if (!response.ok) throw await chatCompletionError(response, "/v1/responses");
     const payload: unknown = await response.json().catch(() => undefined);
     const parsed = responsesResponseSchema.safeParse(payload);
     if (!parsed.success) throw new ChatCompletionError(response.status);
@@ -739,7 +754,7 @@ export class APIMasterClient {
         { role: "user", content },
       ]);
     }
-    if (!response.ok) throw new ChatCompletionError(response.status);
+    if (!response.ok) throw await chatCompletionError(response, "/v1/chat/completions");
     const payload: unknown = await response.json().catch(() => undefined);
     const parsed = chatResponseSchema.safeParse(payload);
     if (!parsed.success || parsed.data.choices[0] === undefined) {
@@ -1011,16 +1026,39 @@ async function isResponsesOnlyError(response: Response): Promise<boolean> {
     || (text.includes("不支持") && text.includes("chat completions"));
 }
 
-async function chatCompletionError(response: Response): Promise<ChatCompletionError> {
-  const payload = await response.clone().json().catch(() => null) as {
-    code?: unknown;
-    error?: { code?: unknown; type?: unknown };
-  } | null;
-  const rawCode = payload?.error?.code ?? payload?.code ?? payload?.error?.type;
+async function chatCompletionError(
+  response: Response,
+  endpoint: string,
+): Promise<ChatCompletionError> {
+  const raw = (await response.clone().text().catch(() => "")).slice(0, MAX_UPSTREAM_ERROR_BODY_LENGTH);
+  let body: unknown = raw || null;
+  if (raw) {
+    try {
+      body = JSON.parse(raw) as unknown;
+    } catch {
+      // Keep a bounded text body when the upstream response is not JSON.
+    }
+  }
+  const root = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
+  const nested = typeof root.error === "object" && root.error !== null
+    ? root.error as Record<string, unknown>
+    : root;
+  const rawCode = nested.code ?? root.code ?? nested.type;
   const code = typeof rawCode === "string" && /^[a-zA-Z0-9_.-]{1,100}$/.test(rawCode)
     ? rawCode
     : undefined;
-  return new ChatCompletionError(response.status, code);
+  const rawMessage = nested.message ?? root.message ?? (typeof root.error === "string" ? root.error : null);
+  const message = typeof rawMessage === "string" ? rawMessage : null;
+  return new ChatCompletionError(response.status, code, {
+    endpoint,
+    status: response.status,
+    statusText: response.statusText || null,
+    requestId: response.headers.get("x-request-id") ?? response.headers.get("request-id") ??
+      response.headers.get("x-correlation-id"),
+    code: code ?? null,
+    message,
+    body,
+  });
 }
 
 function normalizeTaskStatus(status: string): NormalizedTaskStatus["status"] {

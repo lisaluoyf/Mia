@@ -59,6 +59,42 @@ describe("developer debug snapshots", () => {
     store.close();
   });
 
+  it("keeps request diagnostics while adding a sanitized upstream failure", () => {
+    const store = new DebugStore(":memory:");
+    const id = store.start({
+      telegramUserId: 42,
+      kind: "chat",
+      model: "gpt-5.4",
+      details: { credentialSource: "user", phase: "chat" },
+    });
+    store.finish(id, {
+      status: "failed",
+      errorCode: "upstream_timeout",
+      details: {
+        upstreamError: {
+          endpoint: "/v1/responses",
+          status: 504,
+          message: "Provider rejected api_key=sk-1234567890abcdef",
+          body: { error: { code: "upstream_timeout", message: "Timed out" } },
+        },
+      },
+    });
+
+    const request = store.get(42, id);
+    expect(request?.details).toMatchObject({
+      credentialSource: "user",
+      phase: "chat",
+      upstreamError: {
+        endpoint: "/v1/responses",
+        status: 504,
+        message: "Provider rejected [redacted]",
+        body: { error: { code: "upstream_timeout", message: "Timed out" } },
+      },
+    });
+    expect(JSON.stringify(request)).not.toContain("sk-1234567890abcdef");
+    store.close();
+  });
+
   it("keeps only the newest configured number of snapshots per user", () => {
     const store = new DebugStore(":memory:", { maxPerUser: 2 });
     for (let index = 0; index < 3; index += 1) {

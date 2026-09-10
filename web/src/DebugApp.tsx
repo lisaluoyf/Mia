@@ -81,6 +81,9 @@ function Empty({ children }: { children: string }) {
 }
 
 function RequestDetails({ request, onPrompt }: { request: DebugRequest; onPrompt: (id: string) => void }) {
+  const upstreamError = request.details && typeof request.details === "object" && !Array.isArray(request.details)
+    ? (request.details as Record<string, unknown>).upstreamError
+    : null;
   return <article className="debug-detail">
     <header className="detail-head">
       <div><span className="detail-kicker">{requestKindNames[request.kind]}</span><h2>{request.model}</h2></div>
@@ -94,6 +97,7 @@ function RequestDetails({ request, onPrompt }: { request: DebugRequest; onPrompt
       {request.taskId && <div><dt>任务 ID</dt><dd className="mono-inline">{request.taskId}</dd></div>}
       {request.errorCode && <div><dt>错误代码</dt><dd className="error-text">{request.errorCode}</dd></div>}
     </dl>
+    {upstreamError != null && <section className="detail-section upstream-error"><h3>上游错误信息</h3><JsonBlock value={upstreamError} /></section>}
     <section className="detail-section">
       <h3>使用的 Prompt</h3>
       <div className="prompt-chips">{request.promptRefs.length ? request.promptRefs.map((prompt) =>

@@ -71,6 +71,9 @@ button, input { font: inherit; }
 .mono-inline { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }.error-text { color: #a84131; }
 .detail-section { margin-top: 26px; }
 .detail-section h3 { margin: 0 0 10px; font-size: 12px; font-weight: 750; }
+.upstream-error { overflow: hidden; border: 1px solid #e1aea3; border-radius: 6px; background: #fff8f6; }
+.upstream-error h3 { margin: 0; padding: 11px 14px; color: #8f3c2f; background: #fff0ec; }
+.upstream-error .debug-code { border-top-color: #efd0c9; }
 .prompt-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .prompt-chips button { display: inline-flex; align-items: center; gap: 7px; padding: 7px 8px 7px 10px; border: 1px solid #e6c8c0; border-radius: 5px; background: var(--debug-accent-soft); color: #66342b; cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 .prompt-chips button span { color: #a75b4d; }.muted { color: var(--debug-muted); font-size: 12px; }

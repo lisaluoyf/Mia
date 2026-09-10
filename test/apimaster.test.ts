@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { APIMasterClient } from "../src/clients/apimaster.js";
+import { APIMasterClient, ChatCompletionError } from "../src/clients/apimaster.js";
 import { DEFAULT_MODELS } from "../src/constants.js";
 import { MIA_SYSTEM_PROMPT } from "../src/prompts.js";
 
@@ -194,6 +194,33 @@ describe("APIMaster client", () => {
       ],
       stream: false,
     });
+  });
+
+  it("captures bounded upstream diagnostics for failed chat completions", async () => {
+    const client = createClient(vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        code: "upstream_timeout",
+        message: "Provider timed out after 60s",
+      },
+    }), {
+      status: 504,
+      statusText: "Gateway Timeout",
+      headers: { "content-type": "application/json", "x-request-id": "req_test_123" },
+    })));
+
+    await expect(client.chat("user-api-key", "gpt-5.5", "hello")).rejects.toMatchObject({
+      status: 504,
+      code: "upstream_timeout",
+      upstream: {
+        endpoint: "/v1/chat/completions",
+        status: 504,
+        statusText: "Gateway Timeout",
+        requestId: "req_test_123",
+        code: "upstream_timeout",
+        message: "Provider timed out after 60s",
+        body: { error: { code: "upstream_timeout", message: "Provider timed out after 60s" } },
+      },
+    } satisfies Partial<ChatCompletionError>);
   });
 
   it("uses the locale-specific system prompt for direct chat requests", async () => {
