@@ -229,6 +229,7 @@ export interface StructuredResponseResult {
 
 export interface ChatTextOptions {
   webSearch?: boolean;
+  onWebSearch?: (usage: WebSearchUsage) => void;
 }
 
 export type TelegramDeepLinkConfirmation =
@@ -573,6 +574,7 @@ export class APIMasterClient {
     const payload: unknown = await response.json().catch(() => undefined);
     const parsed = responsesResponseSchema.safeParse(payload);
     if (!parsed.success) throw new ChatCompletionError(response.status);
+    if (options.webSearch) options.onWebSearch?.(webSearchUsage(parsed.data));
     const text = responseOutputText(parsed.data);
     if (!text) throw new ChatCompletionError(response.status);
     return text;
@@ -686,23 +688,9 @@ export class APIMasterClient {
     } catch {
       throw new ChatCompletionError(response.status);
     }
-    const searchCalls = parsed.data.output.filter((item) => item.type === "web_search_call");
-    const sources = parsed.data.output.flatMap((item) => item.content ?? [])
-      .flatMap((content) => content.annotations ?? [])
-      .filter((annotation) => annotation.type === "url_citation")
-      .map((annotation) => ({
-        title: annotation.url_citation?.title ?? annotation.title ?? null,
-        url: annotation.url_citation?.url ?? annotation.url ?? "",
-      }))
-      .filter((source) => source.url !== "")
-      .filter((source, index, all) => all.findIndex((candidate) => candidate.url === source.url) === index);
     return {
       data,
-      webSearch: {
-        callCount: searchCalls.length,
-        queries: searchCalls.map((item) => item.action?.query).filter((query): query is string => Boolean(query)),
-        sources,
-      },
+      webSearch: webSearchUsage(parsed.data),
     };
   }
 
@@ -998,6 +986,24 @@ function responsesContent(content: unknown): unknown {
     }
     return { type: "input_text", text: JSON.stringify(value) };
   });
+}
+
+function webSearchUsage(payload: z.infer<typeof responsesResponseSchema>): WebSearchUsage {
+  const searchCalls = payload.output.filter((item) => item.type === "web_search_call");
+  const sources = payload.output.flatMap((item) => item.content ?? [])
+    .flatMap((content) => content.annotations ?? [])
+    .filter((annotation) => annotation.type === "url_citation")
+    .map((annotation) => ({
+      title: annotation.url_citation?.title ?? annotation.title ?? null,
+      url: annotation.url_citation?.url ?? annotation.url ?? "",
+    }))
+    .filter((source) => source.url !== "")
+    .filter((source, index, all) => all.findIndex((candidate) => candidate.url === source.url) === index);
+  return {
+    callCount: searchCalls.length,
+    queries: searchCalls.map((item) => item.action?.query).filter((query): query is string => Boolean(query)),
+    sources,
+  };
 }
 
 function responseOutputText(payload: z.infer<typeof responsesResponseSchema>): string {

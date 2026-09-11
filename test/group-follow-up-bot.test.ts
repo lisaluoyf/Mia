@@ -111,12 +111,14 @@ describe("Mia group follow-up", () => {
 
   function setup(
     classify: ReturnType<typeof vi.fn>,
-    options: { router?: IntentRouter; client?: APIMasterClient } = {},
+    options: { router?: IntentRouter; client?: APIMasterClient; webSearchModel?: string } = {},
   ) {
     let failMessages = false;
-    const resolveCredential = vi.fn().mockResolvedValue({
-      apiKey: "requester-key", model: "gpt-5.4", source: "user", fallbackReason: null,
-    });
+    const resolveCredential = vi.fn().mockImplementation(
+      (_userId: number, requestedModel: string) => Promise.resolve({
+        apiKey: "requester-key", model: requestedModel, source: "user", fallbackReason: null,
+      }),
+    );
     const credentials: ChatCredentialProvider = {
       resolve: resolveCredential,
     };
@@ -130,6 +132,7 @@ describe("Mia group follow-up", () => {
       mediaStore,
       botToken: "123:test",
       followUpCredential: { apiKey: "public-follow-up-key", model: "gpt-5.4" },
+      ...(options.webSearchModel === undefined ? {} : { webSearchModel: options.webSearchModel }),
     });
     bot.botInfo = botInfo;
     const calls: Array<{ method: string; payload: Record<string, unknown> }> = [];
@@ -153,6 +156,42 @@ describe("Mia group follow-up", () => {
     });
     return { bot, calls, credentials, resolveCredential, failMessages: () => { failMessages = true; } };
   }
+
+  it("routes router-flagged live-information chat to the web search model", async () => {
+    const classify = vi.fn().mockResolvedValue({
+      ...routed({ text: "路由阶段的草稿" }),
+      needsWebSearch: true,
+    });
+    const chatMessages = vi.fn().mockResolvedValue("北京今天晴，最高 28 度。");
+    const { bot, calls, resolveCredential } = setup(classify, {
+      client: { chatMessages } as unknown as APIMasterClient,
+      webSearchModel: "gpt-5.6-terra",
+    });
+
+    await bot.handleUpdate(update({ updateId: 1, messageId: 1, text: "@MiaAssistantBot 北京今天天气怎么样？", threadId: 12, mention: true }));
+
+    expect(chatMessages).toHaveBeenCalledTimes(1);
+    expect(chatMessages.mock.calls[0]?.[1]).toBe("gpt-5.6-terra");
+    expect(chatMessages.mock.calls[0]?.[3]).toMatchObject({ webSearch: true });
+    const replies = calls.filter((call) => call.method === "sendMessage");
+    expect(replies.at(-1)?.payload.text).toContain("北京今天晴");
+    expect(resolveCredential).toHaveBeenCalledWith(42, "gpt-5.6-terra", "gpt-5.6-terra");
+  });
+
+  it("answers ordinary chat from the router without touching the web search model", async () => {
+    const classify = vi.fn().mockResolvedValue({ ...routed({ text: "你好呀" }), needsWebSearch: false });
+    const chatMessages = vi.fn().mockResolvedValue("不应该被调用");
+    const { bot, calls } = setup(classify, {
+      client: { chatMessages } as unknown as APIMasterClient,
+      webSearchModel: "gpt-5.6-terra",
+    });
+
+    await bot.handleUpdate(update({ updateId: 1, messageId: 1, text: "@MiaAssistantBot 你好", threadId: 12, mention: true }));
+
+    expect(chatMessages).not.toHaveBeenCalled();
+    const replies = calls.filter((call) => call.method === "sendMessage");
+    expect(replies.at(-1)?.payload.text).toContain("你好呀");
+  });
 
   it("wakes on mention, batches every member, and silently observes unrelated discussion", async () => {
     const classify = vi.fn()

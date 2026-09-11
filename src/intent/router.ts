@@ -112,6 +112,7 @@ export const mediaIntentSchema = z.preprocess(withLegacyReply, z.object({
   }).nullable(),
   reply: miaResponseSchema.nullable().optional().default(null),
   final_response: z.string().max(20000).nullable().optional().default(null),
+  needs_web_search: z.boolean().optional().default(false),
   conversation_mode: z.enum(["casual", "task"]).optional().default("task"),
   onboarding_opportunity: z.boolean().optional().default(false),
   profile_updates: z.object({
@@ -179,6 +180,7 @@ export interface RoutedIntent extends MediaIntent {
   participationSource?: "heuristic" | "model";
   participationReason?: string;
   webSearch?: WebSearchUsage;
+  needsWebSearch?: boolean;
 }
 
 const ROUTER_SCHEMA = {
@@ -186,7 +188,7 @@ const ROUTER_SCHEMA = {
   additionalProperties: false,
   required: [
     "intent", "should_respond", "response_to_message_id", "confidence", "instruction", "media_source",
-    "media_message_ids", "image_options", "video_options", "final_response",
+    "media_message_ids", "image_options", "video_options", "final_response", "needs_web_search",
     "conversation_mode", "onboarding_opportunity", "profile_updates",
   ],
   properties: {
@@ -234,6 +236,7 @@ const ROUTER_SCHEMA = {
       ],
     },
     final_response: { type: ["string", "null"], maxLength: 20000 },
+    needs_web_search: { type: "boolean" },
     conversation_mode: { type: "string", enum: ["casual", "task"] },
     onboarding_opportunity: { type: "boolean" },
     profile_updates: {
@@ -270,6 +273,7 @@ function fallback(
     video_options: null,
     reply: null,
     final_response: null,
+    needs_web_search: false,
     conversation_mode: "task",
     onboarding_opportunity: false,
     profile_updates: null,
@@ -295,6 +299,7 @@ function observation(
     video_options: null,
     reply: null,
     final_response: null,
+    needs_web_search: false,
     conversation_mode: "task",
     onboarding_opportunity: false,
     profile_updates: null,
@@ -310,6 +315,7 @@ function followUpChatResult(input: {
   instruction: string;
   finalResponse: string;
   webSearch?: WebSearchUsage;
+  needsWebSearch?: boolean;
   responseFallback?: boolean;
   participationSource: NonNullable<RoutedIntent["participationSource"]>;
   participationReason: string;
@@ -326,6 +332,7 @@ function followUpChatResult(input: {
     video_options: null,
     reply: miaResponseFromText(input.finalResponse),
     final_response: input.finalResponse,
+    needs_web_search: input.needsWebSearch === true,
     conversation_mode: "task",
     onboarding_opportunity: false,
     profile_updates: null,
@@ -333,6 +340,7 @@ function followUpChatResult(input: {
     participationSource: input.participationSource,
     participationReason: input.participationReason,
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
+    ...(input.needsWebSearch ? { needsWebSearch: true } : {}),
     ...(input.responseFallback ? { fallbackReason: "response_fallback" as const } : {}),
   };
 }
@@ -576,6 +584,7 @@ export class IntentRouter {
         participationSource,
         participationReason: decision.reason,
         webSearch: result.webSearch,
+        needsWebSearch: decision.needs_web_search,
       });
     } catch {
       const usesCjk = /[\u3400-\u9fff\uf900-\ufaff]/u.test(input.text);
@@ -669,6 +678,7 @@ export class IntentRouter {
         media_message_ids: [],
         missingRequired: [],
         webSearch,
+        needsWebSearch: intent.needs_web_search,
       } : fallback("invalid_output", false);
     }
     const allowedMediaIds = new Set((input.mediaCandidates ?? []).map((candidate) => candidate.messageId));
@@ -687,6 +697,7 @@ export class IntentRouter {
       ...normalizedIntent,
       missingRequired: validateIntentRequirements(normalizedIntent, input),
       webSearch,
+      needsWebSearch: normalizedIntent.needs_web_search,
     };
   }
 }

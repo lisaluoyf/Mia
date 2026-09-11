@@ -36,6 +36,33 @@ describe("Mia intent router", () => {
     expect(result.reply).toEqual(miaResponseFromText("普通回复"));
   });
 
+  it("flags needsWebSearch when the router decides live information is required", async () => {
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      intent: "chat", confidence: 0.99, instruction: "", media_source: "none",
+      image_options: null, video_options: null, final_response: "略",
+      needs_web_search: true,
+      conversation_mode: "task", onboarding_opportunity: false, profile_updates: null,
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "router-model", timeoutMs: 1000 });
+    await expect(router.classify({ ...base, text: "北京今天天气怎么样？" }, "key")).resolves.toMatchObject({
+      intent: "chat",
+      needsWebSearch: true,
+    });
+  });
+
+  it("keeps needsWebSearch false for ordinary chat", async () => {
+    const structuredResponse = vi.fn().mockResolvedValue(response({
+      intent: "chat", confidence: 0.99, instruction: "", media_source: "none",
+      image_options: null, video_options: null, final_response: "你好",
+      conversation_mode: "casual", onboarding_opportunity: false, profile_updates: null,
+    }));
+    const router = new IntentRouter({ structuredResponse }, { model: "router-model", timeoutMs: 1000 });
+    await expect(router.classify({ ...base, text: "你好" }, "key")).resolves.toMatchObject({
+      intent: "chat",
+      needsWebSearch: false,
+    });
+  });
+
   it("reads the configured router model again for every request", async () => {
     let configuredModel = "router-a";
     const structuredResponse = vi.fn().mockResolvedValue(response({

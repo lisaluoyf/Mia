@@ -25,6 +25,19 @@ describe("model configuration store", () => {
     store.close();
   });
 
+  it("exposes a web search scenario defaulting to gpt-5.6-terra", () => {
+    const store = new ModelConfigStore(":memory:");
+    const entry = store.list().find((item) => item.key === "web_search_chat");
+    expect(entry).toMatchObject({
+      scenario: "联网搜索",
+      group: "user_default",
+      capability: "chat",
+      defaultModel: "gpt-5.6-terra",
+    });
+    expect(store.get("web_search_chat")).toBe("gpt-5.6-terra");
+    store.close();
+  });
+
   it("persists edits and uses environment values only for the first seed", () => {
     const directory = mkdtempSync(join(tmpdir(), "mia-model-config-"));
     const databasePath = join(directory, "mia.sqlite");

@@ -2,7 +2,7 @@ import { Bot, InlineKeyboard, InputFile, type Context, type Filter } from "gramm
 import type { Message, User } from "grammy/types";
 import type { Logger } from "pino";
 
-import type { APIMasterClient } from "../clients/apimaster.js";
+import type { APIMasterClient, StructuredMessage, WebSearchUsage } from "../clients/apimaster.js";
 import type { ActivationService } from "../activation/service.js";
 import { ChatCompletionError, ResolverError } from "../clients/apimaster.js";
 import {
@@ -70,7 +70,7 @@ import {
 } from "./introduction-panel.js";
 import { userFacingError } from "./messages.js";
 import type { AgentService } from "../agent/service.js";
-import { promptFromMessage, shouldRespond } from "./policy.js";
+import { promptFromMessage, shouldRespond, type BotIdentity } from "./policy.js";
 import { sendTelegramRichText } from "./send-rich-text.js";
 import { draftKeyboard, videoDraftText } from "./video-draft.js";
 
@@ -99,6 +99,7 @@ interface BotDependencies {
   mediaStore?: MediaStore;
   botToken?: string;
   resultMaxBytes?: number;
+  webSearchModel?: string | (() => string | null) | null;
   debug?: DebugRecorder;
   onboarding?: OnboardingService;
   followUpCredential?: Pick<ChatCredential, "apiKey" | "model">;
@@ -866,6 +867,27 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   }
 
   if (routed.intent === "chat") {
+    const searchModel = resolveWebSearchModel(dependencies);
+    if (routed.needsWebSearch === true && searchModel && !sameModelId(searchModel, routerCredential?.model ?? "")) {
+      const searched = await runWebSearchChat(ctx, message, policyInput, identity, searchModel, dependencies);
+      if (searched) {
+        dependencies.debug?.finish(routerDebugId, {
+          status: "succeeded",
+          details: {
+            phase: "intent_and_response",
+            routedIntent: routed.intent,
+            webSearchModel: searchModel,
+            webSearch: searched.webSearch,
+            presentation: searched.presentation,
+          },
+        });
+        if (searched.assistantMessageId !== null) request.onIntervention?.();
+        return;
+      }
+      await replyTo(ctx, message, botText(locale, "webSearchUnavailable"));
+      request.onIntervention?.();
+      return;
+    }
     const response = routed.reply ?? routed.final_response;
     if (response) {
       const delivery = await sendConversationResponse(ctx, message, response, dependencies);
@@ -949,6 +971,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         video_options: routed.video_options,
         reply: routed.reply,
         final_response: routed.final_response,
+        needs_web_search: routed.needs_web_search,
         conversation_mode: routed.conversation_mode,
         onboarding_opportunity: routed.onboarding_opportunity,
         profile_updates: routed.profile_updates,
@@ -1852,6 +1875,93 @@ async function handleMediaAdmin(ctx: Context, enabled: boolean, store: MediaStor
   await replyTo(ctx, message, botText(locale, enabled ? "mediaEnabled" : "mediaDisabledConfirmation"));
 }
 
+function resolveWebSearchModel(dependencies: BotDependencies): string | null {
+  const configured = dependencies.webSearchModel;
+  const model = typeof configured === "function" ? configured() : configured;
+  const trimmed = typeof model === "string" ? model.trim() : "";
+  return trimmed === "" ? null : trimmed;
+}
+
+async function runWebSearchChat(
+  ctx: Context,
+  message: Message,
+  policyInput: Parameters<typeof promptFromMessage>[0],
+  identity: BotIdentity,
+  searchModel: string,
+  dependencies: BotDependencies,
+): Promise<{ assistantMessageId: number | null; webSearch: WebSearchUsage; presentation: unknown } | null> {
+  if (!message.from) return null;
+  const locale = resolveBotLocale(message.from.language_code);
+  let debugId: string | null = null;
+  try {
+    await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
+    const credential = await resolveTextCredential(dependencies, message.from.id, searchModel, searchModel);
+    const requestContext = await buildRequestContext(
+      ctx,
+      message,
+      dependencies,
+      null,
+      null,
+      credential.source === "user",
+    );
+    const prompt = promptFromMessage(policyInput, identity);
+    debugId = dependencies.debug?.start({
+      telegramUserId: message.from.id,
+      chatId: message.chat.id,
+      chatType: message.chat.type,
+      messageId: message.message_id,
+      kind: "chat",
+      model: credential.model,
+      promptRefs: [promptReference("mia.system")],
+      contextLayers: requestContext?.layers ?? null,
+      requestPreview: { text: prompt },
+      details: { webSearchModel: searchModel, credentialSource: credential.source },
+    }) ?? null;
+    const messages: StructuredMessage[] = [
+      { role: "system", content: promptText("mia.system", locale) },
+      ...(requestContext ? requestContext.messages : [{ role: "user" as const, content: prompt }]),
+    ];
+    let usage: WebSearchUsage = { callCount: 0, queries: [], sources: [] };
+    const completed = await withGuestTextRequestFallback(
+      dependencies.chatCredentials,
+      credential,
+      current => dependencies.client.chatMessages(
+        current.apiKey,
+        current.model,
+        messages,
+        { webSearch: true, onWebSearch: (value) => { usage = value; } },
+      ),
+    );
+    const { value: response, credential: used } = completed;
+    const delivery = await sendConversationResponse(ctx, message, response, dependencies);
+    dependencies.debug?.finish(debugId, {
+      status: "succeeded",
+      responsePreview: response,
+      details: {
+        webSearchModel: searchModel,
+        credentialSource: used.source,
+        credentialFallbackReason: used.fallbackReason,
+        presentation: delivery.presentation,
+      },
+    });
+    recordCompletedChatTurn(message, delivery.assistantMessageId, dependencies);
+    recordSuccessfulGroupTrigger(message, dependencies);
+    return {
+      assistantMessageId: delivery.assistantMessageId,
+      webSearch: usage,
+      presentation: delivery.presentation,
+    };
+  } catch (error) {
+    dependencies.debug?.finish(debugId, {
+      status: "failed",
+      errorCode: debugErrorCode(error),
+      details: debugFailureDetails(error),
+    });
+    dependencies.logger.warn({ err: error, telegramUserId: message.from.id }, "Mia web search chat failed");
+    return null;
+  }
+}
+
 async function runChat(ctx: Context, prompt: string, dependencies: BotDependencies): Promise<void> {
   if (!ctx.from || !ctx.chat) return;
   const locale = resolveBotLocale(ctx.from.language_code);
@@ -2161,6 +2271,7 @@ function directIntent(intent: PendingMediaIntent, instruction: string, mediaSour
     } : null,
     reply: null,
     final_response: null,
+    needs_web_search: false,
     conversation_mode: "task",
     onboarding_opportunity: false,
     profile_updates: null,

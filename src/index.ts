@@ -112,6 +112,7 @@ async function main(): Promise<void> {
     mediaStore,
     botToken: config.telegramBotToken,
     resultMaxBytes: config.mediaResultMaxBytes,
+    webSearchModel: () => modelConfig.get("web_search_chat"),
     debug,
     onboarding,
     followUpCredential: {

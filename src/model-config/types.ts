@@ -4,6 +4,7 @@ export type ModelConfigGroup = "user_default" | "internal";
 
 export type ModelConfigKey =
   | "user_chat_default"
+  | "web_search_chat"
   | "user_vision_default"
   | "user_image_default"
   | "user_video_default"
@@ -35,6 +36,14 @@ export const MODEL_CONFIG_DEFINITIONS: readonly ModelConfigDefinition[] = [
     scenario: "普通聊天",
     description: "用户没有单独选择时的 Chat 默认模型",
     defaultModel: DEFAULT_MODELS.chat,
+    capability: "chat",
+  },
+  {
+    key: "web_search_chat",
+    group: "user_default",
+    scenario: "联网搜索",
+    description: "需要实时信息（天气、新闻、价格、比赛结果等）时使用的联网搜索模型",
+    defaultModel: "gpt-5.6-terra",
     capability: "chat",
   },
   {
