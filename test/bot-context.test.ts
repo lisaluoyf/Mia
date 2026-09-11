@@ -80,6 +80,8 @@ describe("Telegram context capture", () => {
       text: "你好，Roma",
       reply_to_message: { message_id: 7 },
     });
+    const sendRichMessageDraft = vi.fn().mockResolvedValue(true);
+    const sendChatAction = vi.fn();
     const handler = createTextHandler({
       client: {
         resolveAPIKey: vi.fn().mockResolvedValue("user-key"),
@@ -105,10 +107,15 @@ describe("Telegram context capture", () => {
         text: "你好",
       },
       me: { id: 100, is_bot: true, first_name: "Mia", username: "MiaAssistantBot" },
-      api: { sendChatAction: vi.fn(), sendMessage },
+      api: { raw: { sendRichMessageDraft }, sendChatAction, sendMessage },
       reply: vi.fn(),
     } as never);
 
+    expect(sendRichMessageDraft).toHaveBeenCalledWith(expect.objectContaining({
+      chat_id: 42,
+      rich_message: { blocks: [{ type: "thinking", text: "Thinking" }] },
+    }));
+    expect(sendChatAction).not.toHaveBeenCalled();
     expect(contexts.saveMessage).toHaveBeenCalledWith(expect.objectContaining({ messageId: 7, text: "你好" }));
     expect(contexts.saveMessage).toHaveBeenCalledWith(expect.objectContaining({ messageId: 8, text: "你好，Roma" }));
     expect(compactor.recordSuccessfulPrivateTurn).toHaveBeenCalledWith({

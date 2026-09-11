@@ -79,6 +79,15 @@ type StorableMessage = Message.TextMessage | Message.PhotoMessage | Message.Docu
   Message.StickerMessage | Message.RichMessageMessage;
 
 const TYPING_HEARTBEAT_MS = 4_000;
+const PROGRESS_DRAFT_LABELS = ["Thinking", "Cooking", "Typing"] as const;
+
+interface RichMessageDraftApi {
+  sendRichMessageDraft(input: {
+    chat_id: number;
+    draft_id: number;
+    rich_message: { blocks: Array<{ type: "thinking"; text: string }> };
+  }): Promise<true>;
+}
 
 interface BotDependencies {
   agent?: AgentService;
@@ -665,7 +674,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
     let stopTyping: (() => void) | null = null;
     try {
       if (!automaticFollowUp) {
-        stopTyping = await startTypingHeartbeat(ctx.api, message);
+        stopTyping = await startResponseProgress(ctx.api, message);
       }
       routerCredential = automaticFollowUp && dependencies.followUpCredential
         ? { ...dependencies.followUpCredential, source: "guest", fallbackReason: null }
@@ -765,7 +774,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
             const target = request.batch?.find((item) => item.message.message_id === responseToMessageId);
             if (!target) return;
             stopTyping?.();
-            stopTyping = await startTypingHeartbeat(target.ctx.api, target.message);
+            stopTyping = await startResponseProgress(target.ctx.api, target.message);
             followUpTypingSent = true;
           },
         } : {}),
@@ -1895,7 +1904,7 @@ async function runWebSearchChat(
   if (!message.from) return null;
   const locale = resolveBotLocale(message.from.language_code);
   let debugId: string | null = null;
-  const stopTyping = await startTypingHeartbeat(ctx.api, message);
+  const stopTyping = await startResponseProgress(ctx.api, message);
   try {
     const credential = await resolveTextCredential(dependencies, message.from.id, searchModel, searchModel);
     const requestContext = await buildRequestContext(
@@ -1970,7 +1979,7 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
   if (!ctx.from || !ctx.chat) return;
   const locale = resolveBotLocale(ctx.from.language_code);
   let debugId: string | null = null;
-  const stopTyping = ctx.message ? await startTypingHeartbeat(ctx.api, ctx.message) : () => undefined;
+  const stopTyping = ctx.message ? await startResponseProgress(ctx.api, ctx.message) : () => undefined;
   try {
     const selectedModel = dependencies.settings.getPreferences(ctx.from.id).chatModel ?? DEFAULT_MODELS.chat;
     const initialCredential = await resolveTextCredential(
@@ -2558,10 +2567,39 @@ function threadOption(message: Message) {
   return message.message_thread_id === undefined ? {} : { message_thread_id: message.message_thread_id };
 }
 
-async function startTypingHeartbeat(api: Context["api"], message: Message): Promise<() => void> {
+function progressDraftId(message: Message): number {
+  let hash = 2_166_136_261;
+  for (const character of `${message.chat.id}:${message.message_id}`) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0) % 2_147_483_646 + 1;
+}
+
+async function startResponseProgress(api: Context["api"], message: Message): Promise<() => void> {
   let stopped = false;
+  let labelIndex = 0;
+  let mode: "rich_draft" | "typing" = message.chat.type === "private" ? "rich_draft" : "typing";
   const send = async (): Promise<void> => {
     if (stopped) return;
+    if (mode === "rich_draft") {
+      try {
+        const raw = api.raw as unknown as RichMessageDraftApi;
+        await raw.sendRichMessageDraft({
+          chat_id: message.chat.id,
+          draft_id: progressDraftId(message),
+          rich_message: {
+            blocks: [{
+              type: "thinking",
+              text: PROGRESS_DRAFT_LABELS[labelIndex++ % PROGRESS_DRAFT_LABELS.length]!,
+            }],
+          },
+        });
+        return;
+      } catch {
+        mode = "typing";
+      }
+    }
     await Promise.resolve(api.sendChatAction(message.chat.id, "typing", threadOption(message))).catch(() => undefined);
   };
   await send();
