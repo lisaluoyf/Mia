@@ -197,6 +197,49 @@ describe("Telegram context capture", () => {
     }
   });
 
+  it("keeps a Rich Draft visible long enough to finish its entrance animation", async () => {
+    vi.useFakeTimers();
+    try {
+      const sendRichMessageDraft = vi.fn().mockResolvedValue(true);
+      const sendMessage = vi.fn().mockResolvedValue({ message_id: 8, date: 1_788_333_601, text: "快速回复" });
+      const handler = createTextHandler({
+        client: {
+          resolveAPIKey: vi.fn().mockResolvedValue("user-key"),
+          chat: vi.fn().mockResolvedValue("快速回复"),
+        } as unknown as APIMasterClient,
+        logger: createLogger("silent"),
+        settings: { getPreferences: vi.fn().mockReturnValue({ chatModel: "grok-4.5" }) },
+        contexts: {
+          upsertUser: vi.fn(), upsertChat: vi.fn(), upsertMember: vi.fn(), saveMessage: vi.fn(),
+        },
+      });
+
+      const handling = handler({
+        update: { update_id: 100 },
+        chat: { id: 42, type: "private", first_name: "Roma" },
+        from: { id: 42, is_bot: false, first_name: "Roma", language_code: "zh-CN" },
+        message: {
+          message_id: 7,
+          date: 1_788_333_600,
+          chat: { id: 42, type: "private", first_name: "Roma" },
+          from: { id: 42, is_bot: false, first_name: "Roma", language_code: "zh-CN" },
+          text: "你好",
+        },
+        me: { id: 100, is_bot: true, first_name: "Mia", username: "MiaAssistantBot" },
+        api: { raw: { sendRichMessageDraft }, sendChatAction: vi.fn(), sendMessage },
+        reply: vi.fn(),
+      } as never);
+
+      await vi.advanceTimersByTimeAsync(699);
+      expect(sendMessage).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await handling;
+      expect(sendMessage).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts group compaction only after a successful group call", async () => {
     const contexts = {
       upsertUser: vi.fn(),
