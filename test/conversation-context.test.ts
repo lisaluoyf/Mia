@@ -8,6 +8,17 @@ import {
 } from "../src/context/conversation.js";
 import { ContextStore } from "../src/storage/store.js";
 
+interface MessageIndex {
+  message_index: Array<Record<string, unknown>>;
+  message_index_note: string;
+}
+
+function readMessageIndex(messages: ReturnType<typeof buildConversationMessages>): MessageIndex {
+  const entry = messages[1];
+  if (entry === undefined) throw new Error("message index system message is missing");
+  return JSON.parse(String(entry.content)) as MessageIndex;
+}
+
 describe("conversation context", () => {
   let store: ContextStore | undefined;
 
@@ -58,13 +69,27 @@ describe("conversation context", () => {
     }], 99);
     const serialized = JSON.stringify(messages);
 
-    expect(messages.map((message) => message.role)).toEqual(["system", "user", "assistant", "user"]);
-    expect(serialized).toContain("第 1 轮");
-    expect(serialized).toContain("第 2 轮，当前消息");
+    expect(messages.map((message) => message.role)).toEqual(["system", "system", "user", "assistant", "user"]);
+    const index = readMessageIndex(messages);
+    expect(index.message_index).toEqual([
+      {
+        message_id: 1, turn: 1, role: "user", sender_user_id: 42, sender_name: "Roma",
+        image_id: "image_turn_1_1", image_status: "active", image_pixels: "provided",
+      },
+      { message_id: 2, turn: 1, role: "assistant", sender_user_id: 99, sender_name: "Mia", reply_to_message_id: 1 },
+      { message_id: 3, turn: 2, role: "user", current: true, sender_user_id: 42, sender_name: "Roma" },
+    ]);
     expect(serialized).toContain("image_turn_1_1");
-    expect(serialized).toContain("status=active");
     expect(serialized).toContain("data:image/jpeg;base64,AQID");
     expect(serialized).toContain("用户希望被称为 Roma");
+    // Message bodies stay clean: internal index markers never appear in user-visible text.
+    expect(messages[2]?.content).toEqual([
+      { type: "text", text: "看一下这张图" },
+      { type: "image_url", image_url: { url: "data:image/jpeg;base64,AQID" } },
+    ]);
+    expect(messages[4]?.content).toBe("里面的人在做什么？");
+    expect(messages.filter((message) => message.role !== "system")
+      .some((message) => /message_id=|第 \d+ 轮|sender_user_id=/.test(String(message.content)))).toBe(false);
   });
 
   it("keeps an active image available after its original turn was summarized", () => {
@@ -115,7 +140,9 @@ describe("conversation context", () => {
     expect(context.mediaInputs).toMatchObject([{ messageId: 1, fileId: "active-file" }]);
     expect(JSON.stringify(buildConversationMessages(context, [{
       bytes: new Uint8Array([4, 5, 6]), mimeType: "image/jpeg", filename: "active.jpg",
-    }], 99))).toContain("status=active");
+    }], 99)));
+    expect(readMessageIndex(buildConversationMessages(context, [], 99)).message_index)
+      .toContainEqual(expect.objectContaining({ message_id: 1, image_status: "active", image_pixels: "not_provided" }));
   });
 
   it("keeps the newest historical images when the context exceeds the image limit", () => {
@@ -188,13 +215,15 @@ describe("conversation context", () => {
         currentTime: "2026-09-03T11:01:00.000Z", timezone: null, trigger: "message", currentTask: null,
       },
     }, 99);
-    const serialized = JSON.stringify(buildConversationMessages(context, [], 99));
+    const built = buildConversationMessages(context, [], 99);
+    const serialized = JSON.stringify(built);
 
     expect(context.messages.map((item) => item.messageId)).toContain(1);
     expect(context.messages.at(-1)?.messageId).toBe(61);
     expect(context.memories.map((item) => item.content)).toEqual(["No ads", "Launch project"]);
     expect(serialized).toContain("Use the red design");
-    expect(serialized).toContain('sender=\\"Roma\\"');
+    expect(readMessageIndex(built).message_index)
+      .toContainEqual(expect.objectContaining({ message_id: 61, sender_name: "Roma" }));
     expect(serialized).not.toContain("PRIVATE SECRET");
   });
 
@@ -242,9 +271,8 @@ describe("conversation context", () => {
     expect(ids).toContain(21);
     expect(ids).toContain(40);
     expect(context.mediaInputs.map((media) => media.messageId)).toEqual([10, 2, 21]);
-    const serialized = JSON.stringify(buildConversationMessages(context, [], 99));
-    expect(serialized).toContain("message_id=10");
-    expect(serialized).toContain("pixels=not_provided");
+    expect(readMessageIndex(buildConversationMessages(context, [], 99)).message_index)
+      .toContainEqual(expect.objectContaining({ message_id: 10, image_status: "replied", image_pixels: "not_provided" }));
   });
 
   it("keeps the triggering member's eight latest messages even when they predate the group tail", () => {

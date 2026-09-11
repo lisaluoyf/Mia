@@ -254,6 +254,7 @@ export function buildConversationMessages(
     media_priority: ["current", "replied", "active", "historical"],
   };
   const result: StructuredMessage[] = [{ role: "system", content: JSON.stringify(layerData) }];
+  const index: MessageIndexEntry[] = [];
   let turn = 0;
   for (const message of context.messages) {
     const role = message.senderUserId === botUserId ? "assistant" : "user";
@@ -261,32 +262,58 @@ export function buildConversationMessages(
     const senderName = participant ? [participant.firstName, participant.lastName].filter(Boolean).join(" ") : null;
     if (role === "user") turn += 1;
     const isCurrent = message.messageId === context.currentMessageId;
-    const label = `[第 ${Math.max(turn, 1)} 轮${isCurrent ? "，当前消息" : ""} | message_id=${message.messageId}` +
-      `${message.senderUserId === null ? "" : ` | sender_user_id=${message.senderUserId}`}` +
-      `${senderName ? ` | sender=${JSON.stringify(senderName)}` : ""}` +
-      `${message.replyToMessageId === null ? "" : ` | reply_to=${message.replyToMessageId}`}]`;
-    const text = `${label}\n${message.text ?? message.caption ?? `[${message.contentType}]`}`;
     const media = mediaByMessage.get(message.messageId);
     const image = imageByMessage.get(message.messageId);
     const imageId = `image_turn_${Math.max(turn, 1)}_1`;
-    const mediaLabel = media
-      ? `[image id=${imageId} message_id=${message.messageId} turn=${Math.max(turn, 1)} ` +
-        `status=${mediaStatus(context, message.messageId)} pixels=${image ? "provided" : "not_provided"}]`
-      : null;
+    index.push({
+      message_id: message.messageId,
+      turn: Math.max(turn, 1),
+      role,
+      ...(isCurrent ? { current: true } : {}),
+      ...(message.senderUserId === null ? {} : { sender_user_id: message.senderUserId }),
+      ...(senderName ? { sender_name: senderName } : {}),
+      ...(message.replyToMessageId === null ? {} : { reply_to_message_id: message.replyToMessageId }),
+      ...(media
+        ? {
+          image_id: imageId,
+          image_status: mediaStatus(context, message.messageId),
+          image_pixels: image ? "provided" : "not_provided",
+        }
+        : {}),
+    });
+    const text = message.text ?? message.caption ?? `[${message.contentType}]`;
     if (!image || role === "assistant") {
-      result.push({ role, content: mediaLabel ? `${text}\n${mediaLabel}` : text });
+      result.push({ role, content: text });
       continue;
     }
     result.push({
       role,
       content: [
         { type: "text", text },
-        { type: "text", text: mediaLabel ?? `[image id=${imageId}]` },
         { type: "image_url", image_url: { url: `data:${image.mimeType};base64,${Buffer.from(image.bytes).toString("base64")}` } },
       ],
     });
   }
+  const indexPayload = {
+    message_index: index,
+    message_index_note: "每条消息的编号、轮次、发送者与图片信息都记录在 message_index 中，" +
+      "消息正文只包含内容本身。这些字段仅用于识别与定位，绝不要写进回复。",
+  };
+  result.splice(1, 0, { role: "system", content: JSON.stringify(indexPayload) });
   return result;
+}
+
+interface MessageIndexEntry {
+  message_id: number;
+  turn: number;
+  role: "user" | "assistant";
+  current?: boolean;
+  sender_user_id?: number;
+  sender_name?: string;
+  reply_to_message_id?: number;
+  image_id?: string;
+  image_status?: string;
+  image_pixels?: "provided" | "not_provided";
 }
 
 export function formatCompactionDialogue(messages: readonly StoredMessage[], userId: number): string {
