@@ -113,7 +113,10 @@ describe("Telegram context capture", () => {
 
     expect(sendRichMessageDraft).toHaveBeenCalledWith(expect.objectContaining({
       chat_id: 42,
-      rich_message: { blocks: [{ type: "thinking", text: "Thinking\n" }] },
+      rich_message: { blocks: [
+        { type: "paragraph", text: "Thinking" },
+        { type: "thinking", text: " " },
+      ] },
     }));
     expect(sendChatAction).not.toHaveBeenCalled();
     expect(contexts.saveMessage).toHaveBeenCalledWith(expect.objectContaining({ messageId: 7, text: "你好" }));

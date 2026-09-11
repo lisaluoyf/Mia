@@ -85,7 +85,9 @@ interface RichMessageDraftApi {
   sendRichMessageDraft(input: {
     chat_id: number;
     draft_id: number;
-    rich_message: { blocks: Array<{ type: "thinking"; text: string }> };
+    rich_message: { blocks: Array<
+      { type: "paragraph"; text: string } | { type: "thinking"; text: string }
+    > };
   }): Promise<true>;
 }
 
@@ -2599,10 +2601,10 @@ async function startResponseProgress(api: Context["api"], message: Message): Pro
           chat_id: message.chat.id,
           draft_id: progressDraftId(message),
           rich_message: {
-            blocks: [{
-              type: "thinking",
-              text: `${PROGRESS_DRAFT_LABELS[labelIndex++ % PROGRESS_DRAFT_LABELS.length]!}\n`,
-            }],
+            blocks: [
+              { type: "paragraph", text: PROGRESS_DRAFT_LABELS[labelIndex++ % PROGRESS_DRAFT_LABELS.length]! },
+              { type: "thinking", text: " " },
+            ],
           },
         });
         return;

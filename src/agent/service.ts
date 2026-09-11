@@ -38,7 +38,9 @@ interface RichMessageDraftApi {
     chat_id: number;
     draft_id: number;
     message_thread_id?: number;
-    rich_message: { blocks: Array<{ type: "thinking"; text: string }> };
+    rich_message: { blocks: Array<
+      { type: "paragraph"; text: string } | { type: "thinking"; text: string }
+    > };
   }): Promise<true>;
 }
 
@@ -337,7 +339,12 @@ export class AgentService {
         await raw.sendRichMessageDraft({
           chat_id: run.input.chatId,
           draft_id: this.draftId(run),
-          rich_message: { blocks: [{ type: "thinking", text: `${DRAFT_LABELS[index % DRAFT_LABELS.length]!}\n` }] },
+          rich_message: {
+            blocks: [
+              { type: "paragraph", text: DRAFT_LABELS[index % DRAFT_LABELS.length]! },
+              { type: "thinking", text: " " },
+            ],
+          },
         });
         return true;
       } catch {
