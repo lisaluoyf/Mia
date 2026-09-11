@@ -283,8 +283,8 @@ export function App({ t }: AppProps) {
   const visibleCapabilities: PreferenceCapability[] = data.models.some(
     (model) => model.capability === "chat" && model.supportsVision,
   )
-    ? ["chat", "vision", "image", "video"]
-    : ["chat", "image", "video"];
+    ? ["vision", "image", "video"]
+    : ["image", "video"];
 
   return (
     <main className="app-shell">
