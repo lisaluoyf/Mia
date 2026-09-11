@@ -337,7 +337,7 @@ export class AgentService {
         await raw.sendRichMessageDraft({
           chat_id: run.input.chatId,
           draft_id: this.draftId(run),
-          rich_message: { blocks: [{ type: "thinking", text: DRAFT_LABELS[index % DRAFT_LABELS.length]! }] },
+          rich_message: { blocks: [{ type: "thinking", text: `${DRAFT_LABELS[index % DRAFT_LABELS.length]!}\n` }] },
         });
         return true;
       } catch {

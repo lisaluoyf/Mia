@@ -2601,7 +2601,7 @@ async function startResponseProgress(api: Context["api"], message: Message): Pro
           rich_message: {
             blocks: [{
               type: "thinking",
-              text: PROGRESS_DRAFT_LABELS[labelIndex++ % PROGRESS_DRAFT_LABELS.length]!,
+              text: `${PROGRESS_DRAFT_LABELS[labelIndex++ % PROGRESS_DRAFT_LABELS.length]!}\n`,
             }],
           },
         });
