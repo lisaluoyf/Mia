@@ -178,6 +178,39 @@ describe("Mia group follow-up", () => {
     expect(resolveCredential).toHaveBeenCalledWith(42, "gpt-5.6-terra", "gpt-5.6-terra");
   });
 
+  it("keeps typing visible while web search is running and stops after the reply", async () => {
+    const classify = vi.fn().mockResolvedValue({
+      ...routed({ text: "路由阶段的草稿" }),
+      needsWebSearch: true,
+    });
+    let finishSearch: ((value: string) => void) | undefined;
+    const chatMessages = vi.fn().mockImplementation(() => new Promise<string>((resolve) => {
+      finishSearch = resolve;
+    }));
+    const { bot, calls } = setup(classify, {
+      client: { chatMessages } as unknown as APIMasterClient,
+      webSearchModel: "gpt-5.6-terra",
+    });
+
+    const handling = bot.handleUpdate(update({
+      updateId: 1,
+      messageId: 1,
+      text: "@MiaAssistantBot 查一下北京明天天气。",
+      threadId: 12,
+      mention: true,
+    }));
+    await vi.advanceTimersByTimeAsync(8_100);
+
+    const typingBeforeReply = calls.filter((call) => call.method === "sendChatAction").length;
+    expect(typingBeforeReply).toBeGreaterThanOrEqual(3);
+    finishSearch?.("北京明天多云。");
+    await handling;
+
+    const typingAfterReply = calls.filter((call) => call.method === "sendChatAction").length;
+    await vi.advanceTimersByTimeAsync(8_100);
+    expect(calls.filter((call) => call.method === "sendChatAction")).toHaveLength(typingAfterReply);
+  });
+
   it("answers ordinary chat from the router without touching the web search model", async () => {
     const classify = vi.fn().mockResolvedValue({ ...routed({ text: "你好呀" }), needsWebSearch: false });
     const chatMessages = vi.fn().mockResolvedValue("不应该被调用");

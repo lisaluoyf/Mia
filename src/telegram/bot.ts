@@ -78,6 +78,8 @@ type TextContext = Filter<Context, "message:text">;
 type StorableMessage = Message.TextMessage | Message.PhotoMessage | Message.DocumentMessage |
   Message.StickerMessage | Message.RichMessageMessage;
 
+const TYPING_HEARTBEAT_MS = 4_000;
+
 interface BotDependencies {
   agent?: AgentService;
   client: APIMasterClient;
@@ -660,9 +662,10 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       ? dependencies.onboarding.eligibility(message.chat.id, message.from.id)
       : null;
     let debugId: string | null = null;
+    let stopTyping: (() => void) | null = null;
     try {
       if (!automaticFollowUp) {
-        await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
+        stopTyping = await startTypingHeartbeat(ctx.api, message);
       }
       routerCredential = automaticFollowUp && dependencies.followUpCredential
         ? { ...dependencies.followUpCredential, source: "guest", fallbackReason: null }
@@ -761,11 +764,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           onParticipationDecision: async (responseToMessageId: number) => {
             const target = request.batch?.find((item) => item.message.message_id === responseToMessageId);
             if (!target) return;
-            await target.ctx.api.sendChatAction(
-              target.message.chat.id,
-              "typing",
-              threadOption(target.message),
-            );
+            stopTyping?.();
+            stopTyping = await startTypingHeartbeat(target.ctx.api, target.message);
             followUpTypingSent = true;
           },
         } : {}),
@@ -811,6 +811,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           : userFacingError(error, dependencies.router.model, locale));
       }
       return;
+    } finally {
+      stopTyping?.();
     }
     if (routed.should_respond === false) return;
     if (pending && routed.intent === "chat") {
@@ -1893,8 +1895,8 @@ async function runWebSearchChat(
   if (!message.from) return null;
   const locale = resolveBotLocale(message.from.language_code);
   let debugId: string | null = null;
+  const stopTyping = await startTypingHeartbeat(ctx.api, message);
   try {
-    await ctx.api.sendChatAction(message.chat.id, "typing", threadOption(message));
     const credential = await resolveTextCredential(dependencies, message.from.id, searchModel, searchModel);
     const requestContext = await buildRequestContext(
       ctx,
@@ -1959,6 +1961,8 @@ async function runWebSearchChat(
     });
     dependencies.logger.warn({ err: error, telegramUserId: message.from.id }, "Mia web search chat failed");
     return null;
+  } finally {
+    stopTyping();
   }
 }
 
@@ -1966,8 +1970,8 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
   if (!ctx.from || !ctx.chat) return;
   const locale = resolveBotLocale(ctx.from.language_code);
   let debugId: string | null = null;
+  const stopTyping = ctx.message ? await startTypingHeartbeat(ctx.api, ctx.message) : () => undefined;
   try {
-    await ctx.api.sendChatAction(ctx.chat.id, "typing", ctx.message ? threadOption(ctx.message) : {});
     const selectedModel = dependencies.settings.getPreferences(ctx.from.id).chatModel ?? DEFAULT_MODELS.chat;
     const initialCredential = await resolveTextCredential(
       dependencies,
@@ -2036,6 +2040,8 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
     dependencies.logger.warn({ err: error, telegramUserId: ctx.from.id, updateId: ctx.update.update_id }, "Telegram chat request failed");
     const model = dependencies.settings.getPreferences(ctx.from.id).chatModel ?? DEFAULT_MODELS.chat;
     await ctx.reply(userFacingError(error, model, locale));
+  } finally {
+    stopTyping();
   }
 }
 
@@ -2550,6 +2556,21 @@ function isDirectWake(message: Message, text: string, ctx: Context): boolean {
 
 function threadOption(message: Message) {
   return message.message_thread_id === undefined ? {} : { message_thread_id: message.message_thread_id };
+}
+
+async function startTypingHeartbeat(api: Context["api"], message: Message): Promise<() => void> {
+  let stopped = false;
+  const send = async (): Promise<void> => {
+    if (stopped) return;
+    await Promise.resolve(api.sendChatAction(message.chat.id, "typing", threadOption(message))).catch(() => undefined);
+  };
+  await send();
+  const timer = setInterval(() => void send(), TYPING_HEARTBEAT_MS);
+  timer.unref();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
 }
 
 function threadOptionFromJob(job: MediaJob) {
