@@ -89,6 +89,8 @@ interface RichMessageDraftApi {
   }): Promise<true>;
 }
 
+type StopResponseProgress = () => Promise<void>;
+
 interface BotDependencies {
   agent?: AgentService;
   client: APIMasterClient;
@@ -671,10 +673,10 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       ? dependencies.onboarding.eligibility(message.chat.id, message.from.id)
       : null;
     let debugId: string | null = null;
-    let stopTyping: (() => void) | null = null;
+    let stopProgress: StopResponseProgress | null = null;
     try {
       if (!automaticFollowUp) {
-        stopTyping = await startResponseProgress(ctx.api, message);
+        stopProgress = await startResponseProgress(ctx.api, message);
       }
       routerCredential = automaticFollowUp && dependencies.followUpCredential
         ? { ...dependencies.followUpCredential, source: "guest", fallbackReason: null }
@@ -773,8 +775,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           onParticipationDecision: async (responseToMessageId: number) => {
             const target = request.batch?.find((item) => item.message.message_id === responseToMessageId);
             if (!target) return;
-            stopTyping?.();
-            stopTyping = await startResponseProgress(target.ctx.api, target.message);
+            await stopProgress?.();
+            stopProgress = await startResponseProgress(target.ctx.api, target.message);
             followUpTypingSent = true;
           },
         } : {}),
@@ -809,6 +811,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         kind,
       });
     } catch (error) {
+      await stopProgress?.();
       dependencies.debug?.finish(debugId, {
         status: "failed",
         errorCode: debugErrorCode(error),
@@ -821,7 +824,7 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       }
       return;
     } finally {
-      stopTyping?.();
+      await stopProgress?.();
     }
     if (routed.should_respond === false) return;
     if (pending && routed.intent === "chat") {
@@ -1904,7 +1907,7 @@ async function runWebSearchChat(
   if (!message.from) return null;
   const locale = resolveBotLocale(message.from.language_code);
   let debugId: string | null = null;
-  const stopTyping = await startResponseProgress(ctx.api, message);
+  const stopProgress = await startResponseProgress(ctx.api, message);
   try {
     const credential = await resolveTextCredential(dependencies, message.from.id, searchModel, searchModel);
     const requestContext = await buildRequestContext(
@@ -1944,6 +1947,7 @@ async function runWebSearchChat(
       ),
     );
     const { value: response, credential: used } = completed;
+    await stopProgress();
     const delivery = await sendConversationResponse(ctx, message, response, dependencies);
     dependencies.debug?.finish(debugId, {
       status: "succeeded",
@@ -1963,6 +1967,7 @@ async function runWebSearchChat(
       presentation: delivery.presentation,
     };
   } catch (error) {
+    await stopProgress();
     dependencies.debug?.finish(debugId, {
       status: "failed",
       errorCode: debugErrorCode(error),
@@ -1971,7 +1976,7 @@ async function runWebSearchChat(
     dependencies.logger.warn({ err: error, telegramUserId: message.from.id }, "Mia web search chat failed");
     return null;
   } finally {
-    stopTyping();
+    await stopProgress();
   }
 }
 
@@ -1979,7 +1984,9 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
   if (!ctx.from || !ctx.chat) return;
   const locale = resolveBotLocale(ctx.from.language_code);
   let debugId: string | null = null;
-  const stopTyping = ctx.message ? await startResponseProgress(ctx.api, ctx.message) : () => undefined;
+  const stopProgress: StopResponseProgress = ctx.message
+    ? await startResponseProgress(ctx.api, ctx.message)
+    : () => Promise.resolve();
   try {
     const selectedModel = dependencies.settings.getPreferences(ctx.from.id).chatModel ?? DEFAULT_MODELS.chat;
     const initialCredential = await resolveTextCredential(
@@ -2027,6 +2034,7 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
         : dependencies.client.chat(current.apiKey, current.model, prompt, locale, { webSearch: true }),
     );
     const { value: response, credential } = completed;
+    await stopProgress();
     const delivery = await sendConversationResponse(ctx, ctx.message, response, dependencies);
     const assistantMessageId = delivery.assistantMessageId;
     dependencies.debug?.finish(debugId, {
@@ -2041,6 +2049,7 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
     recordCompletedChatTurn(ctx.message, assistantMessageId, dependencies);
     recordSuccessfulGroupTrigger(ctx.message, dependencies);
   } catch (error) {
+    await stopProgress();
     dependencies.debug?.finish(debugId, {
       status: "failed",
       errorCode: debugErrorCode(error),
@@ -2050,7 +2059,7 @@ async function runChat(ctx: Context, prompt: string, dependencies: BotDependenci
     const model = dependencies.settings.getPreferences(ctx.from.id).chatModel ?? DEFAULT_MODELS.chat;
     await ctx.reply(userFacingError(error, model, locale));
   } finally {
-    stopTyping();
+    await stopProgress();
   }
 }
 
@@ -2576,11 +2585,12 @@ function progressDraftId(message: Message): number {
   return (hash >>> 0) % 2_147_483_646 + 1;
 }
 
-async function startResponseProgress(api: Context["api"], message: Message): Promise<() => void> {
+async function startResponseProgress(api: Context["api"], message: Message): Promise<StopResponseProgress> {
   let stopped = false;
   let labelIndex = 0;
   let mode: "rich_draft" | "typing" = message.chat.type === "private" ? "rich_draft" : "typing";
-  const send = async (): Promise<void> => {
+  let inFlight: Promise<void> | null = null;
+  const performSend = async (): Promise<void> => {
     if (stopped) return;
     if (mode === "rich_draft") {
       try {
@@ -2602,12 +2612,24 @@ async function startResponseProgress(api: Context["api"], message: Message): Pro
     }
     await Promise.resolve(api.sendChatAction(message.chat.id, "typing", threadOption(message))).catch(() => undefined);
   };
+  const send = (): Promise<void> => {
+    if (stopped) return Promise.resolve();
+    if (inFlight) return inFlight;
+    const current = performSend().finally(() => {
+      if (inFlight === current) inFlight = null;
+    });
+    inFlight = current;
+    return current;
+  };
   await send();
   const timer = setInterval(() => void send(), TYPING_HEARTBEAT_MS);
   timer.unref();
-  return () => {
-    stopped = true;
-    clearInterval(timer);
+  return async () => {
+    if (!stopped) {
+      stopped = true;
+      clearInterval(timer);
+    }
+    await inFlight;
   };
 }
 

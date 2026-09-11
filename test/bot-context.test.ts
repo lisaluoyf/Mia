@@ -129,6 +129,71 @@ describe("Telegram context capture", () => {
     );
   });
 
+  it("waits for an in-flight Rich Draft refresh before sending the final reply", async () => {
+    vi.useFakeTimers();
+    try {
+      let finishChat: ((value: string) => void) | undefined;
+      let finishDraftRefresh: ((value: true) => void) | undefined;
+      const chat = vi.fn().mockImplementation(() => new Promise<string>((resolve) => {
+        finishChat = resolve;
+      }));
+      const sendRichMessageDraft = vi.fn()
+        .mockResolvedValueOnce(true)
+        .mockImplementationOnce(() => new Promise<true>((resolve) => {
+          finishDraftRefresh = resolve;
+        }));
+      const sendMessage = vi.fn().mockResolvedValue({
+        message_id: 8,
+        date: 1_788_333_601,
+        chat: { id: 42, type: "private", first_name: "Roma" },
+        from: { id: 100, is_bot: true, first_name: "Mia", username: "MiaAssistantBot" },
+        text: "最终回复",
+      });
+      const handler = createTextHandler({
+        client: {
+          resolveAPIKey: vi.fn().mockResolvedValue("user-key"),
+          chat,
+        } as unknown as APIMasterClient,
+        logger: createLogger("silent"),
+        settings: { getPreferences: vi.fn().mockReturnValue({ chatModel: "grok-4.5" }) },
+        contexts: {
+          upsertUser: vi.fn(), upsertChat: vi.fn(), upsertMember: vi.fn(), saveMessage: vi.fn(),
+        },
+      });
+
+      const handling = handler({
+        update: { update_id: 100 },
+        chat: { id: 42, type: "private", first_name: "Roma" },
+        from: { id: 42, is_bot: false, first_name: "Roma", language_code: "zh-CN" },
+        message: {
+          message_id: 7,
+          date: 1_788_333_600,
+          chat: { id: 42, type: "private", first_name: "Roma" },
+          from: { id: 42, is_bot: false, first_name: "Roma", language_code: "zh-CN" },
+          text: "查一下",
+        },
+        me: { id: 100, is_bot: true, first_name: "Mia", username: "MiaAssistantBot" },
+        api: { raw: { sendRichMessageDraft }, sendChatAction: vi.fn(), sendMessage },
+        reply: vi.fn(),
+      } as never);
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(sendRichMessageDraft).toHaveBeenCalledTimes(2);
+
+      finishChat?.("最终回复");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sendMessage).not.toHaveBeenCalled();
+
+      finishDraftRefresh?.(true);
+      await handling;
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(sendRichMessageDraft.mock.invocationCallOrder[1]).toBeLessThan(
+        sendMessage.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts group compaction only after a successful group call", async () => {
     const contexts = {
       upsertUser: vi.fn(),
