@@ -52,7 +52,7 @@ function deliveryFixture() {
   task.final = { text: "Completed answer", status: "completed", revision: 1 };
   store.save(task);
   let nextRichMessageId = 99;
-  const api = { sendChatAction: vi.fn().mockResolvedValue(true), deleteMessage: vi.fn().mockResolvedValue(true), sendRichMessage: vi.fn().mockImplementation(async () => ({ message_id: nextRichMessageId++, date: 1_788_333_600, rich_message: { blocks: [] } })), sendMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, text: "Completed answer" }), sendDocument: vi.fn().mockResolvedValue({ message_id: 101, document: { file_id: "result-file", file_unique_id: "result-unique" } }) };
+  const api = { sendChatAction: vi.fn().mockResolvedValue(true), editMessageText: vi.fn().mockResolvedValue(true), deleteMessage: vi.fn().mockResolvedValue(true), sendRichMessage: vi.fn().mockImplementation(() => Promise.resolve({ message_id: nextRichMessageId++, date: 1_788_333_600, rich_message: { blocks: [] } })), sendMessage: vi.fn().mockResolvedValue({ message_id: 100, date: 1_788_333_600, text: "Completed answer" }), sendDocument: vi.fn().mockResolvedValue({ message_id: 101, document: { file_id: "result-file", file_unique_id: "result-unique" } }) };
   const media = mediaStore();
   const options = { store, media, enabled: false, logger: createLogger("silent"), contexts: { upsertUser: vi.fn(), saveMessage: vi.fn() }, client: {}, settings: {}, credentials: {}, botToken: "test", baseUrl: "https://example.invalid", model: () => "configured", timeoutMs: 1000, webSearch: false, debug } as unknown as ConstructorParameters<typeof AgentService>[0];
   const service = new AgentService(options);
@@ -140,7 +140,7 @@ describe("agent delivery recovery", () => {
     expect(f.api.sendRichMessage).toHaveBeenCalledWith(42, {
       blocks: [
         { type: "paragraph", text: "Thinking" },
-        { type: "paragraph", text: "..." },
+        { type: "paragraph", text: "." },
       ],
     }, {});
     expect(f.api.sendChatAction).not.toHaveBeenCalled();

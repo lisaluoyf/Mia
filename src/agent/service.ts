@@ -33,12 +33,24 @@ interface ServiceOptions {
   debug?: DebugRecorder;
 }
 
-const RICH_PROGRESS_MESSAGE: InputRichMessage = {
-  blocks: [
-    { type: "paragraph", text: "Thinking" },
-    { type: "paragraph", text: "..." },
-  ],
-};
+const RICH_PROGRESS_ANIMATION_MS = 450;
+
+function richProgressMessage(frame: number): InputRichMessage {
+  return {
+    blocks: [
+      { type: "paragraph", text: "Thinking" },
+      { type: "paragraph", text: ".".repeat(frame % 3 + 1) },
+    ],
+  };
+}
+
+interface ProgressMessageState {
+  chatId: number;
+  messageId: number;
+  timer: NodeJS.Timeout | null;
+  inFlight: Promise<void> | null;
+  stopped: boolean;
+}
 
 export class AgentService {
   private runtime: AgentRuntime | null = null;
@@ -49,7 +61,7 @@ export class AgentService {
   private ingressWork: Promise<void> | null = null;
   private lastPrunedAt = 0;
   private readonly debugIds = new Map<string, string | null>();
-  private readonly progressMessages = new Map<string, { chatId: number; messageId: number }>();
+  private readonly progressMessages = new Map<string, ProgressMessageState>();
   constructor(private readonly options: ServiceOptions) {}
   enabled(userId: number): boolean {
     void userId;
@@ -139,8 +151,13 @@ export class AgentService {
     if (this.ingressTimer) clearInterval(this.ingressTimer);
     this.ingressTimer = null;
     if (this.api) {
-      await Promise.all([...this.progressMessages.values()].map(({ chatId, messageId }) =>
-        this.api!.deleteMessage(chatId, messageId).catch(() => undefined)));
+      await Promise.all([...this.progressMessages.entries()].map(async ([key, progress]) => {
+        this.progressMessages.delete(key);
+        progress.stopped = true;
+        if (progress.timer) clearInterval(progress.timer);
+        await progress.inFlight;
+        await this.api!.deleteMessage(progress.chatId, progress.messageId).catch(() => undefined);
+      }));
     }
     this.progressMessages.clear();
     await this.ingressWork;
@@ -313,7 +330,12 @@ export class AgentService {
     for (const [key, progress] of this.progressMessages) {
       if (!key.startsWith(prefix)) continue;
       this.progressMessages.delete(key);
-      pending.push(this.api?.deleteMessage(progress.chatId, progress.messageId).catch(() => undefined) ?? Promise.resolve());
+      progress.stopped = true;
+      if (progress.timer) clearInterval(progress.timer);
+      pending.push((async () => {
+        await progress.inFlight;
+        await this.api?.deleteMessage(progress.chatId, progress.messageId).catch(() => undefined);
+      })());
     }
     await Promise.all(pending);
   }
@@ -323,8 +345,28 @@ export class AgentService {
     const key = this.draftKey(run);
     if (this.progressMessages.has(key) || !current()) return;
     try {
-      const sent = await api.sendRichMessage(run.input.chatId, RICH_PROGRESS_MESSAGE, run.input.threadId === null ? {} : { message_thread_id: run.input.threadId });
-      this.progressMessages.set(key, { chatId: run.input.chatId, messageId: sent.message_id });
+      const sent = await api.sendRichMessage(run.input.chatId, richProgressMessage(0), run.input.threadId === null ? {} : { message_thread_id: run.input.threadId });
+      let frame = 0;
+      const state: ProgressMessageState = {
+        chatId: run.input.chatId,
+        messageId: sent.message_id,
+        timer: null,
+        inFlight: null,
+        stopped: false,
+      };
+      state.timer = setInterval(() => {
+        if (state.stopped || state.inFlight) return;
+        frame += 1;
+        const update = api.editMessageText(state.chatId, state.messageId, richProgressMessage(frame))
+          .then(() => undefined)
+          .catch(() => undefined)
+          .finally(() => {
+            if (state.inFlight === update) state.inFlight = null;
+          });
+        state.inFlight = update;
+      }, RICH_PROGRESS_ANIMATION_MS);
+      state.timer.unref();
+      this.progressMessages.set(key, state);
     } catch {
       await api.sendChatAction(run.input.chatId, "typing").catch(() => undefined);
     }

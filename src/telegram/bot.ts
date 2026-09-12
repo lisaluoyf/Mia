@@ -79,12 +79,16 @@ type StorableMessage = Message.TextMessage | Message.PhotoMessage | Message.Docu
   Message.StickerMessage | Message.RichMessageMessage;
 
 const TYPING_HEARTBEAT_MS = 4_000;
-const RICH_PROGRESS_MESSAGE: InputRichMessage = {
-  blocks: [
-    { type: "paragraph", text: "Thinking" },
-    { type: "paragraph", text: "..." },
-  ],
-};
+const RICH_PROGRESS_ANIMATION_MS = 450;
+
+function richProgressMessage(frame: number): InputRichMessage {
+  return {
+    blocks: [
+      { type: "paragraph", text: "Thinking" },
+      { type: "paragraph", text: ".".repeat(frame % 3 + 1) },
+    ],
+  };
+}
 
 type StopResponseProgress = () => Promise<void>;
 
@@ -628,6 +632,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   let routerCredential: ChatCredential | null = null;
   let onboardingEligibility: OnboardingEligibility | null = null;
   let followUpTypingSent = false;
+  let routedProgress: StopResponseProgress | null = null;
+  let handoffProgressToWebSearch = false;
   if (savedCallbackIntent?.success) {
     const callbackInstruction = request.text.trim() ||
       (stickerContinuation ? savedCallbackIntent.data.instruction : "");
@@ -670,10 +676,9 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       ? dependencies.onboarding.eligibility(message.chat.id, message.from.id)
       : null;
     let debugId: string | null = null;
-    let stopProgress: StopResponseProgress | null = null;
     try {
       if (!automaticFollowUp) {
-        stopProgress = await startResponseProgress(ctx.api, message);
+        routedProgress = await startResponseProgress(ctx.api, message);
       }
       routerCredential = automaticFollowUp && dependencies.followUpCredential
         ? { ...dependencies.followUpCredential, source: "guest", fallbackReason: null }
@@ -772,8 +777,8 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
           onParticipationDecision: async (responseToMessageId: number) => {
             const target = request.batch?.find((item) => item.message.message_id === responseToMessageId);
             if (!target) return;
-            await stopProgress?.();
-            stopProgress = await startResponseProgress(target.ctx.api, target.message);
+            await routedProgress?.();
+            routedProgress = await startResponseProgress(target.ctx.api, target.message);
             followUpTypingSent = true;
           },
         } : {}),
@@ -807,8 +812,13 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
         },
         kind,
       });
+      const searchModel = resolveWebSearchModel(dependencies);
+      handoffProgressToWebSearch = routed.should_respond !== false && !pending &&
+        routed.intent === "chat" && routed.needsWebSearch === true &&
+        Boolean(searchModel && !sameModelId(searchModel, routerCredential?.model ?? ""));
     } catch (error) {
-      await stopProgress?.();
+      await routedProgress?.();
+      routedProgress = null;
       dependencies.debug?.finish(debugId, {
         status: "failed",
         errorCode: debugErrorCode(error),
@@ -821,7 +831,10 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
       }
       return;
     } finally {
-      await stopProgress?.();
+      if (!handoffProgressToWebSearch) {
+        await routedProgress?.();
+        routedProgress = null;
+      }
     }
     if (routed.should_respond === false) return;
     if (pending && routed.intent === "chat") {
@@ -880,7 +893,16 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   if (routed.intent === "chat") {
     const searchModel = resolveWebSearchModel(dependencies);
     if (routed.needsWebSearch === true && searchModel && !sameModelId(searchModel, routerCredential?.model ?? "")) {
-      const searched = await runWebSearchChat(ctx, message, policyInput, identity, searchModel, dependencies);
+      const searched = await runWebSearchChat(
+        ctx,
+        message,
+        policyInput,
+        identity,
+        searchModel,
+        dependencies,
+        routedProgress ?? undefined,
+      );
+      routedProgress = null;
       if (searched) {
         dependencies.debug?.finish(routerDebugId, {
           status: "succeeded",
@@ -1900,11 +1922,12 @@ async function runWebSearchChat(
   identity: BotIdentity,
   searchModel: string,
   dependencies: BotDependencies,
+  inheritedProgress?: StopResponseProgress,
 ): Promise<{ assistantMessageId: number | null; webSearch: WebSearchUsage; presentation: unknown } | null> {
   if (!message.from) return null;
   const locale = resolveBotLocale(message.from.language_code);
   let debugId: string | null = null;
-  const stopProgress = await startResponseProgress(ctx.api, message);
+  const stopProgress = inheritedProgress ?? await startResponseProgress(ctx.api, message);
   try {
     const credential = await resolveTextCredential(dependencies, message.from.id, searchModel, searchModel);
     const requestContext = await buildRequestContext(
@@ -2578,16 +2601,18 @@ async function startResponseProgress(api: Context["api"], message: Message): Pro
   let mode: "rich_message" | "typing" = message.chat.type === "private" ? "rich_message" : "typing";
   let inFlight: Promise<void> | null = null;
   let progressMessageId: number | null = null;
+  let frame = 0;
   const performSend = async (): Promise<void> => {
     if (stopped) return;
     if (mode === "rich_message") {
       try {
         if (progressMessageId === null) {
-          const sent = await api.sendRichMessage(message.chat.id, RICH_PROGRESS_MESSAGE, threadOption(message));
+          const sent = await api.sendRichMessage(message.chat.id, richProgressMessage(frame), threadOption(message));
           progressMessageId = sent.message_id;
           return;
         }
-        await Promise.resolve(api.sendChatAction(message.chat.id, "typing", threadOption(message))).catch(() => undefined);
+        frame += 1;
+        await api.editMessageText(message.chat.id, progressMessageId, richProgressMessage(frame)).catch(() => undefined);
         return;
       } catch {
         mode = "typing";
@@ -2605,7 +2630,10 @@ async function startResponseProgress(api: Context["api"], message: Message): Pro
     return current;
   };
   await send();
-  const timer = setInterval(() => void send(), TYPING_HEARTBEAT_MS);
+  const timer = setInterval(
+    () => void send(),
+    mode === "rich_message" ? RICH_PROGRESS_ANIMATION_MS : TYPING_HEARTBEAT_MS,
+  );
   timer.unref();
   return async () => {
     if (!stopped) {
