@@ -1,5 +1,5 @@
 import { GrammyError, InlineKeyboard, InputFile, type Api } from "grammy";
-import type { Message, Update } from "grammy/types";
+import type { InputRichMessage, Message, Update } from "grammy/types";
 import type { Logger } from "pino";
 import type { APIMasterClient } from "../clients/apimaster.js";
 import type { ChatCredentialProvider } from "../credentials/chat.js";
@@ -33,20 +33,12 @@ interface ServiceOptions {
   debug?: DebugRecorder;
 }
 
-interface RichMessageDraftApi {
-  sendRichMessageDraft(input: {
-    chat_id: number;
-    draft_id: number;
-    message_thread_id?: number;
-    rich_message: { blocks: Array<
-      { type: "paragraph"; text: string } | { type: "thinking"; text: string }
-    > };
-  }): Promise<true>;
-}
-
-const DRAFT_LABELS = ["Thinking", "Cooking", "Typing"] as const;
-const DRAFT_ROTATION_MS = 4_000;
-const DRAFT_MIN_VISIBLE_MS = 700;
+const RICH_PROGRESS_MESSAGE: InputRichMessage = {
+  blocks: [
+    { type: "paragraph", text: "Thinking" },
+    { type: "paragraph", text: "..." },
+  ],
+};
 
 export class AgentService {
   private runtime: AgentRuntime | null = null;
@@ -57,8 +49,7 @@ export class AgentService {
   private ingressWork: Promise<void> | null = null;
   private lastPrunedAt = 0;
   private readonly debugIds = new Map<string, string | null>();
-  private readonly draftTimers = new Map<string, NodeJS.Timeout>();
-  private readonly draftStartedAt = new Map<string, number>();
+  private readonly progressMessages = new Map<string, { chatId: number; messageId: number }>();
   constructor(private readonly options: ServiceOptions) {}
   enabled(userId: number): boolean {
     void userId;
@@ -147,9 +138,11 @@ export class AgentService {
   async stop(): Promise<void> {
     if (this.ingressTimer) clearInterval(this.ingressTimer);
     this.ingressTimer = null;
-    for (const timer of this.draftTimers.values()) clearInterval(timer);
-    this.draftTimers.clear();
-    this.draftStartedAt.clear();
+    if (this.api) {
+      await Promise.all([...this.progressMessages.values()].map(({ chatId, messageId }) =>
+        this.api!.deleteMessage(chatId, messageId).catch(() => undefined)));
+    }
+    this.progressMessages.clear();
     await this.ingressWork;
     await this.runtime?.stop();
   }
@@ -252,7 +245,7 @@ export class AgentService {
   }
   private async notify(run: Run): Promise<number | null> {
     if (!this.api || !run.notice) return null;
-    await this.finishDraft(run);
+    await this.clearDraft(run);
     const draftOperation = run.status === "waiting_approval"
       ? run.operations.find(op => op.state === "approval" && op.call.name === "generate_video" && op.draftJobId)
       : null;
@@ -314,69 +307,27 @@ export class AgentService {
     }
   }
   private draftKey(run: Run): string { return `${run.id}:${run.revision}`; }
-  private draftId(run: Run): number {
-    let hash = 2_166_136_261;
-    for (const character of this.draftKey(run)) {
-      hash ^= character.charCodeAt(0);
-      hash = Math.imul(hash, 16_777_619);
-    }
-    return (hash >>> 0) % 2_147_483_646 + 1;
-  }
-  private clearDraft(run: Run): void {
+  private async clearDraft(run: Run): Promise<void> {
     const prefix = `${run.id}:`;
-    for (const [key, timer] of this.draftTimers) {
+    const pending: Promise<unknown>[] = [];
+    for (const [key, progress] of this.progressMessages) {
       if (!key.startsWith(prefix)) continue;
-      clearInterval(timer);
-      this.draftTimers.delete(key);
+      this.progressMessages.delete(key);
+      pending.push(this.api?.deleteMessage(progress.chatId, progress.messageId).catch(() => undefined) ?? Promise.resolve());
     }
-    for (const key of this.draftStartedAt.keys()) {
-      if (key.startsWith(prefix)) this.draftStartedAt.delete(key);
-    }
-  }
-  private async finishDraft(run: Run): Promise<void> {
-    const startedAt = this.draftStartedAt.get(this.draftKey(run));
-    this.clearDraft(run);
-    if (startedAt === undefined) return;
-    const remaining = DRAFT_MIN_VISIBLE_MS - (Date.now() - startedAt);
-    if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
+    await Promise.all(pending);
   }
   private async startDraft(run: Run, current: () => boolean): Promise<void> {
     const api = this.api;
     if (!api) return;
     const key = this.draftKey(run);
-    if (this.draftTimers.has(key)) return;
-    const update = async (index: number): Promise<boolean> => {
-      if (!current()) return false;
-      try {
-        const raw = api.raw as unknown as RichMessageDraftApi;
-        await raw.sendRichMessageDraft({
-          chat_id: run.input.chatId,
-          draft_id: this.draftId(run),
-          rich_message: {
-            blocks: [
-              { type: "paragraph", text: DRAFT_LABELS[index % DRAFT_LABELS.length]! },
-              { type: "thinking", text: " " },
-            ],
-          },
-        });
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    if (!await update(0)) {
+    if (this.progressMessages.has(key) || !current()) return;
+    try {
+      const sent = await api.sendRichMessage(run.input.chatId, RICH_PROGRESS_MESSAGE, run.input.threadId === null ? {} : { message_thread_id: run.input.threadId });
+      this.progressMessages.set(key, { chatId: run.input.chatId, messageId: sent.message_id });
+    } catch {
       await api.sendChatAction(run.input.chatId, "typing").catch(() => undefined);
-      return;
     }
-    this.draftStartedAt.set(key, Date.now());
-    let index = 1;
-    const timer = setInterval(() => {
-      void update(index++).then(sent => {
-        if (!sent) this.clearDraft(run);
-      });
-    }, DRAFT_ROTATION_MS);
-    timer.unref();
-    this.draftTimers.set(key, timer);
   }
   private async sendOnce(key: string, send: () => Promise<Message>): Promise<void> {
     const existing = this.options.store.delivery(key);
@@ -404,7 +355,7 @@ export class AgentService {
   private async deliver(run: Run, current: () => boolean): Promise<void> {
     const api = this.api;
     if (!api || !run.final) return;
-    await this.finishDraft(run);
+    await this.clearDraft(run);
     if (run.final.executionBlock) {
       const feedback = mediaExecutionFeedback(run.final.executionBlock, run.input.language);
       const message = renderTelegramRich(miaResponseFromText(feedback.text))[0]!;

@@ -1,5 +1,5 @@
 import { Bot, InlineKeyboard, InputFile, type Context, type Filter } from "grammy";
-import type { Message, User } from "grammy/types";
+import type { InputRichMessage, Message, User } from "grammy/types";
 import type { Logger } from "pino";
 
 import type { APIMasterClient, StructuredMessage, WebSearchUsage } from "../clients/apimaster.js";
@@ -79,18 +79,12 @@ type StorableMessage = Message.TextMessage | Message.PhotoMessage | Message.Docu
   Message.StickerMessage | Message.RichMessageMessage;
 
 const TYPING_HEARTBEAT_MS = 4_000;
-const RICH_DRAFT_MIN_VISIBLE_MS = 700;
-const PROGRESS_DRAFT_LABELS = ["Thinking", "Cooking", "Typing"] as const;
-
-interface RichMessageDraftApi {
-  sendRichMessageDraft(input: {
-    chat_id: number;
-    draft_id: number;
-    rich_message: { blocks: Array<
-      { type: "paragraph"; text: string } | { type: "thinking"; text: string }
-    > };
-  }): Promise<true>;
-}
+const RICH_PROGRESS_MESSAGE: InputRichMessage = {
+  blocks: [
+    { type: "paragraph", text: "Thinking" },
+    { type: "paragraph", text: "..." },
+  ],
+};
 
 type StopResponseProgress = () => Promise<void>;
 
@@ -2579,37 +2573,21 @@ function threadOption(message: Message) {
   return message.message_thread_id === undefined ? {} : { message_thread_id: message.message_thread_id };
 }
 
-function progressDraftId(message: Message): number {
-  let hash = 2_166_136_261;
-  for (const character of `${message.chat.id}:${message.message_id}`) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16_777_619);
-  }
-  return (hash >>> 0) % 2_147_483_646 + 1;
-}
-
 async function startResponseProgress(api: Context["api"], message: Message): Promise<StopResponseProgress> {
   let stopped = false;
-  let labelIndex = 0;
-  let mode: "rich_draft" | "typing" = message.chat.type === "private" ? "rich_draft" : "typing";
+  let mode: "rich_message" | "typing" = message.chat.type === "private" ? "rich_message" : "typing";
   let inFlight: Promise<void> | null = null;
-  let richDraftStartedAt: number | null = null;
+  let progressMessageId: number | null = null;
   const performSend = async (): Promise<void> => {
     if (stopped) return;
-    if (mode === "rich_draft") {
+    if (mode === "rich_message") {
       try {
-        const raw = api.raw as unknown as RichMessageDraftApi;
-        await raw.sendRichMessageDraft({
-          chat_id: message.chat.id,
-          draft_id: progressDraftId(message),
-          rich_message: {
-            blocks: [
-              { type: "paragraph", text: PROGRESS_DRAFT_LABELS[labelIndex++ % PROGRESS_DRAFT_LABELS.length]! },
-              { type: "thinking", text: " " },
-            ],
-          },
-        });
-        richDraftStartedAt ??= Date.now();
+        if (progressMessageId === null) {
+          const sent = await api.sendRichMessage(message.chat.id, RICH_PROGRESS_MESSAGE, threadOption(message));
+          progressMessageId = sent.message_id;
+          return;
+        }
+        await Promise.resolve(api.sendChatAction(message.chat.id, "typing", threadOption(message))).catch(() => undefined);
         return;
       } catch {
         mode = "typing";
@@ -2635,9 +2613,10 @@ async function startResponseProgress(api: Context["api"], message: Message): Pro
       clearInterval(timer);
     }
     await inFlight;
-    if (richDraftStartedAt !== null) {
-      const remaining = RICH_DRAFT_MIN_VISIBLE_MS - (Date.now() - richDraftStartedAt);
-      if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
+    if (progressMessageId !== null) {
+      const messageId = progressMessageId;
+      progressMessageId = null;
+      await api.deleteMessage(message.chat.id, messageId).catch(() => undefined);
     }
   };
 }

@@ -80,7 +80,10 @@ describe("Telegram context capture", () => {
       text: "你好，Roma",
       reply_to_message: { message_id: 7 },
     });
-    const sendRichMessageDraft = vi.fn().mockResolvedValue(true);
+    const sendRichMessage = vi.fn()
+      .mockResolvedValueOnce({ message_id: 6, date: 1_788_333_601, rich_message: { blocks: [] } })
+      .mockRejectedValueOnce(new Error("force plain final response"));
+    const deleteMessage = vi.fn().mockResolvedValue(true);
     const sendChatAction = vi.fn();
     const handler = createTextHandler({
       client: {
@@ -107,17 +110,17 @@ describe("Telegram context capture", () => {
         text: "你好",
       },
       me: { id: 100, is_bot: true, first_name: "Mia", username: "MiaAssistantBot" },
-      api: { raw: { sendRichMessageDraft }, sendChatAction, sendMessage },
+      api: { sendRichMessage, deleteMessage, sendChatAction, sendMessage },
       reply: vi.fn(),
     } as never);
 
-    expect(sendRichMessageDraft).toHaveBeenCalledWith(expect.objectContaining({
-      chat_id: 42,
-      rich_message: { blocks: [
+    expect(sendRichMessage).toHaveBeenCalledWith(42, {
+      blocks: [
         { type: "paragraph", text: "Thinking" },
-        { type: "thinking", text: " " },
-      ] },
-    }));
+        { type: "paragraph", text: "..." },
+      ],
+    }, {});
+    expect(deleteMessage).toHaveBeenCalledWith(42, 6);
     expect(sendChatAction).not.toHaveBeenCalled();
     expect(contexts.saveMessage).toHaveBeenCalledWith(expect.objectContaining({ messageId: 7, text: "你好" }));
     expect(contexts.saveMessage).toHaveBeenCalledWith(expect.objectContaining({ messageId: 8, text: "你好，Roma" }));
@@ -132,19 +135,17 @@ describe("Telegram context capture", () => {
     );
   });
 
-  it("waits for an in-flight Rich Draft refresh before sending the final reply", async () => {
+  it("deletes the static Rich progress message before the final reply", async () => {
     vi.useFakeTimers();
     try {
       let finishChat: ((value: string) => void) | undefined;
-      let finishDraftRefresh: ((value: true) => void) | undefined;
       const chat = vi.fn().mockImplementation(() => new Promise<string>((resolve) => {
         finishChat = resolve;
       }));
-      const sendRichMessageDraft = vi.fn()
-        .mockResolvedValueOnce(true)
-        .mockImplementationOnce(() => new Promise<true>((resolve) => {
-          finishDraftRefresh = resolve;
-        }));
+      const sendRichMessage = vi.fn()
+        .mockResolvedValueOnce({ message_id: 6, date: 1_788_333_601, rich_message: { blocks: [] } })
+        .mockRejectedValueOnce(new Error("force plain final response"));
+      const deleteMessage = vi.fn().mockResolvedValue(true);
       const sendMessage = vi.fn().mockResolvedValue({
         message_id: 8,
         date: 1_788_333_601,
@@ -176,20 +177,18 @@ describe("Telegram context capture", () => {
           text: "查一下",
         },
         me: { id: 100, is_bot: true, first_name: "Mia", username: "MiaAssistantBot" },
-        api: { raw: { sendRichMessageDraft }, sendChatAction: vi.fn(), sendMessage },
+        api: { sendRichMessage, deleteMessage, sendChatAction: vi.fn(), sendMessage },
         reply: vi.fn(),
       } as never);
       await vi.advanceTimersByTimeAsync(4_000);
-      expect(sendRichMessageDraft).toHaveBeenCalledTimes(2);
+      expect(sendRichMessage).toHaveBeenCalledTimes(1);
 
       finishChat?.("最终回复");
       await vi.advanceTimersByTimeAsync(0);
-      expect(sendMessage).not.toHaveBeenCalled();
-
-      finishDraftRefresh?.(true);
       await handling;
       expect(sendMessage).toHaveBeenCalledTimes(1);
-      expect(sendRichMessageDraft.mock.invocationCallOrder[1]).toBeLessThan(
+      expect(deleteMessage).toHaveBeenCalledWith(42, 6);
+      expect(deleteMessage.mock.invocationCallOrder[0]).toBeLessThan(
         sendMessage.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
       );
     } finally {
@@ -197,10 +196,13 @@ describe("Telegram context capture", () => {
     }
   });
 
-  it("keeps a Rich Draft visible long enough to finish its entrance animation", async () => {
+  it("shows a static two-line Rich progress message immediately", async () => {
     vi.useFakeTimers();
     try {
-      const sendRichMessageDraft = vi.fn().mockResolvedValue(true);
+      const sendRichMessage = vi.fn()
+        .mockResolvedValueOnce({ message_id: 6, date: 1_788_333_601, rich_message: { blocks: [] } })
+        .mockRejectedValueOnce(new Error("force plain final response"));
+      const deleteMessage = vi.fn().mockResolvedValue(true);
       const sendMessage = vi.fn().mockResolvedValue({ message_id: 8, date: 1_788_333_601, text: "快速回复" });
       const handler = createTextHandler({
         client: {
@@ -226,14 +228,18 @@ describe("Telegram context capture", () => {
           text: "你好",
         },
         me: { id: 100, is_bot: true, first_name: "Mia", username: "MiaAssistantBot" },
-        api: { raw: { sendRichMessageDraft }, sendChatAction: vi.fn(), sendMessage },
+        api: { sendRichMessage, deleteMessage, sendChatAction: vi.fn(), sendMessage },
         reply: vi.fn(),
       } as never);
 
-      await vi.advanceTimersByTimeAsync(699);
-      expect(sendMessage).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(1);
       await handling;
+      expect(sendRichMessage).toHaveBeenCalledWith(42, {
+        blocks: [
+          { type: "paragraph", text: "Thinking" },
+          { type: "paragraph", text: "..." },
+        ],
+      }, {});
+      expect(deleteMessage).toHaveBeenCalledWith(42, 6);
       expect(sendMessage).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
