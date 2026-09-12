@@ -139,10 +139,7 @@ describe("agent delivery recovery", () => {
     expect(f.api.raw.sendRichMessageDraft).toHaveBeenCalledOnce();
     expect(f.api.raw.sendRichMessageDraft).toHaveBeenCalledWith(expect.objectContaining({
       chat_id: 42,
-      rich_message: { blocks: [
-        { type: "paragraph", text: "Thinking" },
-        { type: "thinking", text: " " },
-      ] },
+      rich_message: { blocks: [{ type: "thinking", text: "Thinking" }] },
     }));
     expect(f.api.sendChatAction).not.toHaveBeenCalled();
     expect(f.api.sendRichMessage).not.toHaveBeenCalled();

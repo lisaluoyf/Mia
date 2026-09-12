@@ -38,15 +38,12 @@ interface RichMessageDraftApi {
     chat_id: number;
     draft_id: number;
     message_thread_id?: number;
-    rich_message: { blocks: Array<
-      { type: "paragraph"; text: string } | { type: "thinking"; text: string }
-    > };
+    rich_message: { blocks: Array<{ type: "thinking"; text: string }> };
   }): Promise<true>;
 }
 
 const DRAFT_LABELS = ["Thinking", "Cooking", "Typing"] as const;
 const DRAFT_ROTATION_MS = 4_000;
-const DRAFT_MIN_VISIBLE_MS = 700;
 
 export class AgentService {
   private runtime: AgentRuntime | null = null;
@@ -58,7 +55,6 @@ export class AgentService {
   private lastPrunedAt = 0;
   private readonly debugIds = new Map<string, string | null>();
   private readonly draftTimers = new Map<string, NodeJS.Timeout>();
-  private readonly draftStartedAt = new Map<string, number>();
   constructor(private readonly options: ServiceOptions) {}
   enabled(userId: number): boolean {
     void userId;
@@ -149,7 +145,6 @@ export class AgentService {
     this.ingressTimer = null;
     for (const timer of this.draftTimers.values()) clearInterval(timer);
     this.draftTimers.clear();
-    this.draftStartedAt.clear();
     await this.ingressWork;
     await this.runtime?.stop();
   }
@@ -252,7 +247,7 @@ export class AgentService {
   }
   private async notify(run: Run): Promise<number | null> {
     if (!this.api || !run.notice) return null;
-    await this.finishDraft(run);
+    this.clearDraft(run);
     const draftOperation = run.status === "waiting_approval"
       ? run.operations.find(op => op.state === "approval" && op.call.name === "generate_video" && op.draftJobId)
       : null;
@@ -329,16 +324,6 @@ export class AgentService {
       clearInterval(timer);
       this.draftTimers.delete(key);
     }
-    for (const key of this.draftStartedAt.keys()) {
-      if (key.startsWith(prefix)) this.draftStartedAt.delete(key);
-    }
-  }
-  private async finishDraft(run: Run): Promise<void> {
-    const startedAt = this.draftStartedAt.get(this.draftKey(run));
-    this.clearDraft(run);
-    if (startedAt === undefined) return;
-    const remaining = DRAFT_MIN_VISIBLE_MS - (Date.now() - startedAt);
-    if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
   }
   private async startDraft(run: Run, current: () => boolean): Promise<void> {
     const api = this.api;
@@ -352,12 +337,7 @@ export class AgentService {
         await raw.sendRichMessageDraft({
           chat_id: run.input.chatId,
           draft_id: this.draftId(run),
-          rich_message: {
-            blocks: [
-              { type: "paragraph", text: DRAFT_LABELS[index % DRAFT_LABELS.length]! },
-              { type: "thinking", text: " " },
-            ],
-          },
+          rich_message: { blocks: [{ type: "thinking", text: DRAFT_LABELS[index % DRAFT_LABELS.length]! }] },
         });
         return true;
       } catch {
@@ -368,7 +348,6 @@ export class AgentService {
       await api.sendChatAction(run.input.chatId, "typing").catch(() => undefined);
       return;
     }
-    this.draftStartedAt.set(key, Date.now());
     let index = 1;
     const timer = setInterval(() => {
       void update(index++).then(sent => {
@@ -404,7 +383,7 @@ export class AgentService {
   private async deliver(run: Run, current: () => boolean): Promise<void> {
     const api = this.api;
     if (!api || !run.final) return;
-    await this.finishDraft(run);
+    this.clearDraft(run);
     if (run.final.executionBlock) {
       const feedback = mediaExecutionFeedback(run.final.executionBlock, run.input.language);
       const message = renderTelegramRich(miaResponseFromText(feedback.text))[0]!;
