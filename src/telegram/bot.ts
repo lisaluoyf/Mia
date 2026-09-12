@@ -79,13 +79,16 @@ type StorableMessage = Message.TextMessage | Message.PhotoMessage | Message.Docu
   Message.StickerMessage | Message.RichMessageMessage;
 
 const TYPING_HEARTBEAT_MS = 4_000;
+const RICH_DRAFT_MIN_VISIBLE_MS = 700;
 const PROGRESS_DRAFT_LABELS = ["Thinking", "Cooking", "Typing"] as const;
 
 interface RichMessageDraftApi {
   sendRichMessageDraft(input: {
     chat_id: number;
     draft_id: number;
-    rich_message: { blocks: Array<{ type: "thinking"; text: string }> };
+    rich_message: { blocks: Array<
+      { type: "paragraph"; text: string } | { type: "thinking"; text: string }
+    > };
   }): Promise<true>;
 }
 
@@ -2590,6 +2593,7 @@ async function startResponseProgress(api: Context["api"], message: Message): Pro
   let labelIndex = 0;
   let mode: "rich_draft" | "typing" = message.chat.type === "private" ? "rich_draft" : "typing";
   let inFlight: Promise<void> | null = null;
+  let richDraftStartedAt: number | null = null;
   const performSend = async (): Promise<void> => {
     if (stopped) return;
     if (mode === "rich_draft") {
@@ -2598,8 +2602,14 @@ async function startResponseProgress(api: Context["api"], message: Message): Pro
         await raw.sendRichMessageDraft({
           chat_id: message.chat.id,
           draft_id: progressDraftId(message),
-          rich_message: { blocks: [{ type: "thinking", text: PROGRESS_DRAFT_LABELS[labelIndex++ % PROGRESS_DRAFT_LABELS.length]! }] },
+          rich_message: {
+            blocks: [
+              { type: "paragraph", text: PROGRESS_DRAFT_LABELS[labelIndex++ % PROGRESS_DRAFT_LABELS.length]! },
+              { type: "thinking", text: " " },
+            ],
+          },
         });
+        richDraftStartedAt ??= Date.now();
         return;
       } catch {
         mode = "typing";
@@ -2625,6 +2635,10 @@ async function startResponseProgress(api: Context["api"], message: Message): Pro
       clearInterval(timer);
     }
     await inFlight;
+    if (richDraftStartedAt !== null) {
+      const remaining = RICH_DRAFT_MIN_VISIBLE_MS - (Date.now() - richDraftStartedAt);
+      if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
+    }
   };
 }
 
