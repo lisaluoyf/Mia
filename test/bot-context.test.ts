@@ -184,7 +184,7 @@ describe("Telegram context capture", () => {
         api: { sendRichMessage, editMessageText, deleteMessage, sendChatAction: vi.fn(), sendMessage },
         reply: vi.fn(),
       } as never);
-      await vi.advanceTimersByTimeAsync(4_000);
+      await vi.advanceTimersByTimeAsync(6_000);
       expect(sendRichMessage).toHaveBeenCalledTimes(1);
       expect(editMessageText).toHaveBeenCalled();
       expect(editMessageText.mock.calls.every((call) => call[0] === 42 && call[1] === 6)).toBe(true);
@@ -192,6 +192,9 @@ describe("Telegram context capture", () => {
       expect(editedPayloads).toEqual(expect.arrayContaining([
         { blocks: [{ type: "paragraph", text: "Thinking" }, { type: "paragraph", text: ".." }] },
         { blocks: [{ type: "paragraph", text: "Thinking" }, { type: "paragraph", text: "..." }] },
+        { blocks: [{ type: "paragraph", text: "Reasoning" }, { type: "paragraph", text: "." }] },
+        { blocks: [{ type: "paragraph", text: "Cooking" }, { type: "paragraph", text: "." }] },
+        { blocks: [{ type: "paragraph", text: "Checking" }, { type: "paragraph", text: "." }] },
         { blocks: [{ type: "paragraph", text: "Thinking" }, { type: "paragraph", text: "." }] },
       ]));
 

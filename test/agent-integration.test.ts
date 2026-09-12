@@ -132,21 +132,32 @@ describe("agent delivery recovery", () => {
     fetcher.mockRestore();
     await service.stop();
   });
-  it("shows a static two-line Rich progress message for private model progress", async () => {
-    const f = deliveryFixture();
-    const progress = (f.service as unknown as { progress: (run: Run, phase: "started" | "receiving", current: () => boolean) => Promise<void> }).progress;
-    await progress.call(f.service, f.task, "started", () => true);
-    await progress.call(f.service, f.task, "receiving", () => true);
-    expect(f.api.sendRichMessage).toHaveBeenCalledWith(42, {
-      blocks: [
-        { type: "paragraph", text: "Thinking" },
-        { type: "paragraph", text: "." },
-      ],
-    }, {});
-    expect(f.api.sendChatAction).not.toHaveBeenCalled();
-    expect(f.api.sendMessage).not.toHaveBeenCalled();
-    await f.service.stop();
-    expect(f.api.deleteMessage).toHaveBeenCalledWith(42, 99);
+  it("rotates status labels in the two-line Rich progress message", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = deliveryFixture();
+      const progress = (f.service as unknown as { progress: (run: Run, phase: "started" | "receiving", current: () => boolean) => Promise<void> }).progress;
+      await progress.call(f.service, f.task, "started", () => true);
+      await progress.call(f.service, f.task, "receiving", () => true);
+      expect(f.api.sendRichMessage).toHaveBeenCalledWith(42, {
+        blocks: [
+          { type: "paragraph", text: "Thinking" },
+          { type: "paragraph", text: "." },
+        ],
+      }, {});
+      await vi.advanceTimersByTimeAsync(4_050);
+      const editedPayloads = f.api.editMessageText.mock.calls.map((call) => call[2] as { blocks: Array<{ text: string }> });
+      expect(editedPayloads).toEqual(expect.arrayContaining([
+        { blocks: [{ type: "paragraph", text: "Reasoning" }, { type: "paragraph", text: "." }] },
+        { blocks: [{ type: "paragraph", text: "Cooking" }, { type: "paragraph", text: "." }] },
+      ]));
+      expect(f.api.sendChatAction).not.toHaveBeenCalled();
+      expect(f.api.sendMessage).not.toHaveBeenCalled();
+      await f.service.stop();
+      expect(f.api.deleteMessage).toHaveBeenCalledWith(42, 99);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("falls back to typing in group chats", async () => {
     const f = deliveryFixture();

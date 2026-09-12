@@ -34,11 +34,12 @@ interface ServiceOptions {
 }
 
 const RICH_PROGRESS_ANIMATION_MS = 450;
+const RICH_PROGRESS_LABELS = ["Thinking", "Reasoning", "Cooking", "Checking"] as const;
 
 function richProgressMessage(frame: number): InputRichMessage {
   return {
     blocks: [
-      { type: "paragraph", text: "Thinking" },
+      { type: "paragraph", text: RICH_PROGRESS_LABELS[Math.floor(frame / 3) % RICH_PROGRESS_LABELS.length] ?? "Thinking" },
       { type: "paragraph", text: ".".repeat(frame % 3 + 1) },
     ],
   };
