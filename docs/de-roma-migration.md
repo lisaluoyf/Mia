@@ -26,6 +26,8 @@ CONFIRM_MIA_CUTOVER=YES bash scripts/cutover-de-roma.sh
 
 `deploy:de-roma` builds the exact GitHub `main` commit but intentionally does not start Mia. The cutover copies `/etc/mia/mia.env`, replaces only location-dependent URLs, stops the old Mia process, transfers all of `/var/lib/mia` while SQLite is closed, starts the target process, checks both local and Caddy health, then updates APIMaster's webhook and `/mia` proxies.
 
+The deploy command verifies and pushes GitHub `main`, then uploads a temporary Git bundle containing that branch. The target does not store a GitHub token, SSH private key, or package-registry credential.
+
 On any error after the old process stops, the cutover attempts to restore APIMaster's backed-up env/Nginx files, stop the target Mia, and restart the source Mia. Backups are timestamped with the printed `cutover_id`.
 
 ## Sandbox
