@@ -31,11 +31,13 @@ response="$(curl -fsS -X POST "https://api.telegram.org/bot${bot_token}/setWebho
   --data-urlencode "secret_token=$webhook_secret" \
   --data-urlencode 'allowed_updates=["message","edited_message","callback_query","inline_query"]' \
   --data-urlencode 'drop_pending_updates=false')"
-jq -e '.ok == true' <<< "$response" >/dev/null
+node -e 'if (JSON.parse(process.argv[1]).ok !== true) process.exit(1)' "$response"
 
 info="$(curl -fsS "https://api.telegram.org/bot${bot_token}/getWebhookInfo")"
-jq -e --arg url "$EXPECTED_WEBHOOK_URL" '.ok == true and .result.url == $url and ((.result.last_error_message // "") == "")' \
-  <<< "$info" >/dev/null
-pending="$(jq -r '.result.pending_update_count // 0' <<< "$info")"
+pending="$(node -e '
+  const data = JSON.parse(process.argv[1]);
+  if (data.ok !== true || data.result?.url !== process.argv[2] || data.result?.last_error_message) process.exit(1);
+  process.stdout.write(String(data.result?.pending_update_count ?? 0));
+' "$info" "$EXPECTED_WEBHOOK_URL")"
 echo "Telegram webhook now points to $EXPECTED_WEBHOOK_URL; pending_update_count=$pending."
 REMOTE
