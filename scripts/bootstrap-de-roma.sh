@@ -24,7 +24,7 @@ install -d -m 750 -o root -g roma /etc/mia
 install -d -m 700 -o root -g root /etc/mia-sandbox
 install -d -m 700 -o roma -g roma /var/lib/mia
 install -d -m 700 -o root -g root /srv/mia-sandbox /srv/mia-sandbox/projects /srv/mia-sandbox/jobs
-install -d -m 700 -o roma -g roma /home/roma/.cache /home/roma/.cache/node /home/roma/.pm2
+install -d -m 700 -o roma -g roma /home/roma/.cache /home/roma/.cache/node /home/roma/.npm /home/roma/.pm2
 
 if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
   if ! ufw status | grep -qE '3010/tcp\s+ALLOW IN\s+172\.20\.0\.0/16'; then

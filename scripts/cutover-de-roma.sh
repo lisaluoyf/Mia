@@ -105,7 +105,7 @@ ssh "${ssh_options[@]}" "$source_host" "bash -s -- '$cutover_id'" \
 trap - ERR
 curl -fsS https://apimaster.ai/mia/ >/dev/null ||
   echo "Warning: de-roma is live, but the public Mia page health check failed." >&2
-source_ssh "for container in apimaster-new-api-worker apimaster-new-api-green; do docker inspect \"\$container\" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -q '^MIA_TELEGRAM_WEBHOOK_URL=https://de-api.romaapi.com/mia-internal/telegram/update$'; done" ||
+source_ssh 'active_port=$(sed -n '\''/upstream newapi_backend/,/}/ s/.*127\.0\.0\.1:\([0-9][0-9]*\).*/\1/p'\'' /etc/nginx/conf.d/newapi-bluegreen.conf); case "$active_port" in 3002) active_container=apimaster-new-api-blue ;; 3003) active_container=apimaster-new-api-green ;; *) exit 1 ;; esac; for container in apimaster-new-api-worker "$active_container"; do docker inspect "$container" --format '\''{{range .Config.Env}}{{println .}}{{end}}'\'' | grep -q '\''^MIA_TELEGRAM_WEBHOOK_URL=https://de-api.romaapi.com/mia-internal/telegram/update$'\''; done' ||
   echo "Warning: de-roma is live, but APIMaster webhook configuration needs manual verification." >&2
 source_ssh "sudo -u roma -H bash -lc 'pm2 delete mia && pm2 save'" ||
   echo "Warning: de-roma is live, but the stopped source PM2 entry still needs cleanup." >&2

@@ -11,15 +11,29 @@ cutover_id="${1:-}"
 newapi_root="/opt/newapi"
 mia_env="$newapi_root/.env.mia"
 nginx_config="/etc/nginx/sites-enabled/apimaster.ai"
+bluegreen_config="/etc/nginx/conf.d/newapi-bluegreen.conf"
 webhook_url="https://de-api.romaapi.com/mia-internal/telegram/update"
 backup_root="/var/backups/mia-cutover/$cutover_id"
 env_backup="$backup_root/apimaster.env.mia"
 nginx_backup="$backup_root/apimaster.nginx"
+active_service_file="$backup_root/active-service"
 
-[[ -f "$mia_env" && -f "$nginx_config" ]] || { echo "APIMaster runtime config is missing." >&2; exit 1; }
+[[ -f "$mia_env" && -f "$nginx_config" && -f "$bluegreen_config" ]] || {
+  echo "APIMaster runtime config is missing." >&2
+  exit 1
+}
+
+active_port="$(sed -n '/upstream newapi_backend/,/}/ s/.*127\.0\.0\.1:\([0-9][0-9]*\).*/\1/p' "$bluegreen_config")"
+case "$active_port" in
+  3002) active_service="new-api-blue"; active_container="apimaster-new-api-blue" ;;
+  3003) active_service="new-api-green"; active_container="apimaster-new-api-green" ;;
+  *) echo "Could not identify the active NewAPI color from port: ${active_port:-missing}." >&2; exit 1 ;;
+esac
+
 install -d -m 700 "$backup_root"
 cp -a "$mia_env" "$env_backup"
 cp -a "$nginx_config" "$nginx_backup"
+printf '%s\n' "$active_service" > "$active_service_file"
 
 temporary_env="$(mktemp)"
 awk -F= -v value="$webhook_url" '
@@ -74,10 +88,10 @@ if ! nginx -t; then
 fi
 
 cd "$newapi_root"
-docker compose up -d --no-build --pull never --force-recreate new-api-worker new-api-green
+docker compose up -d --no-build --pull never --force-recreate new-api-worker "$active_service"
 nginx -s reload
 
-for container in apimaster-new-api-worker apimaster-new-api-green; do
+for container in apimaster-new-api-worker "$active_container"; do
   configured="$(docker inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}' |
     sed -n 's/^MIA_TELEGRAM_WEBHOOK_URL=//p')"
   [[ "$configured" == "$webhook_url" ]] || {
@@ -86,4 +100,4 @@ for container in apimaster-new-api-worker apimaster-new-api-green; do
   }
 done
 
-echo "APIMaster now forwards Mia traffic to de-roma; cutover_id=$cutover_id"
+echo "APIMaster now forwards Mia traffic to de-roma; active=$active_service cutover_id=$cutover_id"
