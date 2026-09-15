@@ -5,6 +5,8 @@ git_sha="${1:-}"
 deploy_root="${MIA_DEPLOY_ROOT:-/srv/mia}"
 repository_url="${MIA_REPOSITORY_URL:-https://github.com/lisaluoyf/Mia.git}"
 runtime_user="${MIA_RUNTIME_USER:-roma}"
+health_url="${MIA_HEALTH_URL:-http://172.17.0.1:3010/health}"
+activate_release_enabled="${MIA_ACTIVATE_RELEASE:-true}"
 keep_releases=3
 pnpm_version="10.28.2"
 
@@ -137,6 +139,11 @@ mv -Tf "$deploy_root/current.next" "$current_link"
 ln -sfn "$release" "$runtime_link.next"
 mv -Tf "$runtime_link.next" "$runtime_link"
 
+if [[ "$activate_release_enabled" != "true" ]]; then
+  echo "Mia release=$release_name sha=$git_sha staged=yes process_cwd=none duration=$((SECONDS - started_at))s"
+  exit 0
+fi
+
 activate_release() {
   local target="$1"
   sudo -u "$runtime_user" -H bash -lc \
@@ -169,7 +176,7 @@ healthy=0
 for _attempt in {1..15}; do
   active_release="$(running_release || true)"
   if [[ "$active_release" == "$release" ]] &&
-     curl -fsS http://172.17.0.1:3010/health >/dev/null 2>&1; then
+     curl -fsS "$health_url" >/dev/null 2>&1; then
     healthy=1
     break
   fi

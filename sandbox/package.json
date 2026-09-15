@@ -1,0 +1,10 @@
+{
+  "name": "mia-web-sandbox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test gateway.node-test.js",
+    "check": "node --check gateway.js && node --check run-codex.js"
+  }
+}

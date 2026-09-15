@@ -150,6 +150,11 @@ PM2 switch with health-check rollback, and keeps exactly three runnable server
 releases. Local `dist/` uploads are reserved for explicitly requested emergency
 deployments.
 
+The isolated de-roma deployment and Codex Web Sandbox are documented in
+[`docs/de-roma-migration.md`](docs/de-roma-migration.md). The target server is
+`116.203.216.59`; APIMaster remains the account, Key, quota, billing, and model
+API boundary.
+
 Mia does not own Telegram's public webhook. APIMaster's existing `new-api`
 webhook keeps handling account-verification commands and forwards all other
 updates to Mia over the authenticated internal receiver.

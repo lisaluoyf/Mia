@@ -1,0 +1,21 @@
+  # BEGIN MIA DE-ROMA ROUTES
+  handle_path /mia-internal/* {
+    reverse_proxy 172.20.0.1:3010 {
+      transport http {
+        dial_timeout 5s
+        response_header_timeout 300s
+        read_timeout 300s
+      }
+    }
+  }
+
+  handle /mia* {
+    reverse_proxy 172.20.0.1:3010 {
+      transport http {
+        dial_timeout 5s
+        response_header_timeout 300s
+        read_timeout 300s
+      }
+    }
+  }
+  # END MIA DE-ROMA ROUTES
