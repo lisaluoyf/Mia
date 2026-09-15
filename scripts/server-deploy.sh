@@ -48,7 +48,7 @@ if [[ "$remote_sha" != "$git_sha" ]]; then
 fi
 
 pm2_pid() {
-  sudo -u "$runtime_user" -H bash -lc "pm2 pid mia" 2>/dev/null | tail -n 1
+  sudo -u "$runtime_user" -H bash -lc "cd '$deploy_root' && pm2 pid mia" 2>/dev/null | tail -n 1
 }
 
 running_release() {
@@ -151,7 +151,7 @@ activate_release() {
 }
 
 save_process_list() {
-  sudo -u "$runtime_user" -H bash -lc "pm2 save"
+  sudo -u "$runtime_user" -H bash -lc "cd '$deploy_root' && pm2 save"
 }
 
 rollback() {

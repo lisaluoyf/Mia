@@ -35,7 +35,7 @@ rollback() {
       < "$repository_root/scripts/rollback-apimaster-from-de-roma.sh" || true
   fi
   if [[ "$target_started" -eq 1 ]]; then
-    target_ssh "sudo -u roma -H bash -lc 'pm2 stop mia >/dev/null 2>&1 || true'" || true
+    target_ssh "sudo -u roma -H bash -lc 'cd /srv/mia && pm2 stop mia >/dev/null 2>&1 || true'" || true
   fi
   if [[ "$old_stopped" -eq 1 ]]; then
     source_ssh "sudo -u roma -H bash -lc 'pm2 delete mia >/dev/null 2>&1 || true; cd /srv/mia/current && pm2 start ecosystem.config.cjs --update-env && pm2 save'" || true
@@ -93,7 +93,7 @@ old_stopped=1
 target_ssh "if [ -d /var/lib/mia ] && [ -n \"\$(find /var/lib/mia -mindepth 1 -maxdepth 1 -print -quit)\" ]; then mv /var/lib/mia '/var/lib/mia.pre-$cutover_id'; fi; install -d -m 700 -o roma -g roma /var/lib/mia"
 source_ssh "tar -C /var/lib/mia -cpf - ." | target_ssh "tar -C /var/lib/mia -xpf - && chown -R roma:roma /var/lib/mia"
 
-target_ssh "sudo -u roma -H bash -lc 'pm2 delete mia >/dev/null 2>&1 || true; cd /srv/mia/current && pm2 start ecosystem.config.cjs --update-env && pm2 save'"
+target_ssh "sudo -u roma -H bash -lc 'cd /srv/mia && pm2 delete mia >/dev/null 2>&1 || true; cd /srv/mia/current && pm2 start ecosystem.config.cjs --update-env && pm2 save'"
 target_started=1
 target_ssh "for attempt in \$(seq 1 20); do curl -fsS http://172.20.0.1:3010/health >/dev/null && exit 0; sleep 1; done; exit 1"
 curl -fsS https://de-api.romaapi.com/mia-internal/health >/dev/null
