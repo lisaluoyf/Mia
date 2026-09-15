@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 
 const promptPath = process.env.PROMPT_FILE || "/run/job/prompt.txt";
 const resultPath = process.env.RESULT_FILE || "/run/job/result.txt";
-const model = process.env.ALLOWED_MODEL || "gpt-5.4";
+const model = process.env.ALLOWED_MODEL || "gpt-5.6-sol";
 const gatewayBaseURL = process.env.GATEWAY_BASE_URL || "http://gateway:8080/v1";
 const home = process.env.HOME || "/tmp/home";
 const codexHome = process.env.CODEX_HOME || "/tmp/codex-home";
