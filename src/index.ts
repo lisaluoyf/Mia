@@ -181,6 +181,7 @@ async function main(): Promise<void> {
   const server = createServer({
     logger,
     serviceKey: config.miaInternalServiceKey,
+    telegramWebhookSecret: config.telegramWebhookSecret,
     handleUpdate: (update) => bot.handleUpdate(update),
     enqueueUpdate: update => agent.enqueueUpdate(update),
     miniApp: {

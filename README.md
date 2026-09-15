@@ -132,9 +132,9 @@ The APIMaster `new-api` process must have the same `MIA_INTERNAL_SERVICE_KEY`
 and expose the Telegram Key resolver and Mia model catalog. `MIA_GUEST_CHAT_API_KEY`
 must be a deployment-only APIMaster Token restricted to `gpt-5.4`; it is never
 used for vision, images, or video. `MIA_ROUTER_MODEL` and `MIA_CONTEXT_MODEL`
-default to `gpt-5.4`. Mia exposes `GET /health`
-and the authenticated `POST /telegram/update` receiver on `127.0.0.1:3010` by
-default.
+default to `gpt-5.4`. Mia exposes `GET /health`, the Telegram-authenticated
+public `POST /telegram/webhook`, and the legacy service-key-authenticated
+`POST /telegram/update` rollback receiver on `127.0.0.1:3010` by default.
 
 ## Production deployment
 
@@ -152,9 +152,10 @@ deployments.
 
 The isolated de-roma deployment and Codex Web Sandbox are documented in
 [`docs/de-roma-migration.md`](docs/de-roma-migration.md). The target server is
-`116.203.216.59`; APIMaster remains the account, Key, quota, billing, and model
+`116.203.216.59`; `mia.apimaster.ai` serves Telegram and Mini App traffic
+directly, while APIMaster remains the account, Key, quota, billing, and model
 API boundary.
 
-Mia does not own Telegram's public webhook. APIMaster's existing `new-api`
-webhook keeps handling account-verification commands and forwards all other
-updates to Mia over the authenticated internal receiver.
+Mia owns Telegram's public webhook and handles community verification deep
+links. APIMaster's old webhook and Mia forwarding receiver remain available for
+one release cycle as a rollback path.

@@ -4,10 +4,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { AgentStore } from "../src/agent/store.js";
 import { createLogger } from "../src/logger.js";
 import { createServer } from "../src/server.js";
 
 const serviceKey = "test-internal-service-key";
+const telegramWebhookSecret = "test-telegram-webhook-secret-123456";
 
 describe("Mia server", () => {
   it("reports readiness", async () => {
@@ -66,6 +68,105 @@ describe("Mia server", () => {
     expect(response.json()).toEqual({ accepted: true });
     await handled;
     expect(handleUpdate).toHaveBeenCalledWith(update);
+    await app.close();
+  });
+
+  it("accepts only Telegram-authenticated updates on the public webhook", async () => {
+    const handleUpdate = vi.fn<(update: Update) => Promise<void>>().mockResolvedValue();
+    const app = createServer({
+      logger: createLogger("silent"),
+      serviceKey,
+      telegramWebhookSecret,
+      handleUpdate,
+    });
+    const update = { update_id: 102 } satisfies Update;
+
+    const missing = await app.inject({ method: "POST", url: "/telegram/webhook", payload: update });
+    const wrong = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: { "x-telegram-bot-api-secret-token": "wrong-secret" },
+      payload: update,
+    });
+    const accepted = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: { "x-telegram-bot-api-secret-token": telegramWebhookSecret },
+      payload: update,
+    });
+
+    expect(missing.statusCode).toBe(401);
+    expect(wrong.statusCode).toBe(401);
+    expect(accepted.statusCode).toBe(202);
+    await vi.waitFor(() => expect(handleUpdate).toHaveBeenCalledWith(update));
+    await app.close();
+  });
+
+  it("rejects malformed public webhook updates before enqueueing", async () => {
+    const enqueueUpdate = vi.fn().mockReturnValue(true);
+    const app = createServer({
+      logger: createLogger("silent"),
+      serviceKey,
+      telegramWebhookSecret,
+      handleUpdate: vi.fn(),
+      enqueueUpdate,
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: { "x-telegram-bot-api-secret-token": telegramWebhookSecret },
+      payload: { message: { text: "missing update id" } },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(enqueueUpdate).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("durably deduplicates repeated public webhook updates", async () => {
+    const store = new AgentStore(":memory:");
+    const app = createServer({
+      logger: createLogger("silent"),
+      serviceKey,
+      telegramWebhookSecret,
+      handleUpdate: vi.fn(),
+      enqueueUpdate: (update) => {
+        store.enqueueUpdate(update);
+        return true;
+      },
+    });
+    const request = {
+      method: "POST" as const,
+      url: "/telegram/webhook",
+      headers: { "x-telegram-bot-api-secret-token": telegramWebhookSecret },
+      payload: { update_id: 103 },
+    };
+
+    expect((await app.inject(request)).statusCode).toBe(202);
+    expect((await app.inject(request)).statusCode).toBe(202);
+    expect(store.updates()).toEqual([{ update_id: 103 }]);
+    store.close();
+    await app.close();
+  });
+
+  it("does not acknowledge a public webhook when durable enqueue fails", async () => {
+    const handleUpdate = vi.fn();
+    const app = createServer({
+      logger: createLogger("silent"),
+      serviceKey,
+      telegramWebhookSecret,
+      handleUpdate,
+      enqueueUpdate: () => { throw new Error("disk unavailable"); },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/telegram/webhook",
+      headers: { "x-telegram-bot-api-secret-token": telegramWebhookSecret },
+      payload: { update_id: 104 },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(handleUpdate).not.toHaveBeenCalled();
     await app.close();
   });
 

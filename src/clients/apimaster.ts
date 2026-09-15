@@ -153,6 +153,14 @@ const telegramDeepLinkLoginResponseSchema = z.object({
   data: z.object({ login_url: z.string().url() }),
 });
 
+const telegramCommunityVerificationResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({
+    status: z.enum(["confirmed", "replay"]),
+    group_url: z.string().url(),
+  }),
+});
+
 export interface ModelCatalog {
   apimasterUserId: number;
   models: ModelOption[];
@@ -235,6 +243,13 @@ export interface ChatTextOptions {
 export type TelegramDeepLinkConfirmation =
   | { kind: "confirmed"; loginUrl: string }
   | { kind: "expired" }
+  | { kind: "unavailable"; status: number | null };
+
+export type TelegramCommunityVerification =
+  | { kind: "confirmed"; groupUrl: string }
+  | { kind: "replay" }
+  | { kind: "invalid_or_expired" }
+  | { kind: "telegram_already_linked" }
   | { kind: "unavailable"; status: number | null };
 
 export interface MediaBinary {
@@ -365,6 +380,44 @@ export class APIMasterClient {
     return parsed.success
       ? { kind: "confirmed", loginUrl: parsed.data.data.login_url }
       : { kind: "unavailable", status: response.status };
+  }
+
+  async consumeTelegramCommunityVerification(
+    token: string,
+    telegramUserId: number,
+  ): Promise<TelegramCommunityVerification> {
+    let response: Response;
+    try {
+      response = await this.fetcher(
+        `${this.options.internalBaseUrl}/api/user/internal/mia-telegram-verification`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-mia-internal-key": this.options.serviceKey,
+          },
+          body: JSON.stringify({ token, telegram_user_id: String(telegramUserId) }),
+          signal: AbortSignal.timeout(this.options.timeoutMs),
+        },
+      );
+    } catch {
+      return { kind: "unavailable", status: null };
+    }
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch(() => undefined);
+      const parsedError = errorResponseSchema.safeParse(payload);
+      const code = parsedError.success ? parsedError.data.code : undefined;
+      if (code === "invalid_or_expired" || code === "telegram_already_linked") {
+        return { kind: code };
+      }
+      return { kind: "unavailable", status: response.status };
+    }
+    const payload: unknown = await response.json().catch(() => undefined);
+    const parsed = telegramCommunityVerificationResponseSchema.safeParse(payload);
+    if (!parsed.success) return { kind: "unavailable", status: response.status };
+    return parsed.data.data.status === "replay"
+      ? { kind: "replay" }
+      : { kind: "confirmed", groupUrl: parsed.data.data.group_url };
   }
 
   async resolveDebugTelegramUsers(emails: readonly string[]): Promise<number[]> {

@@ -462,9 +462,15 @@ async function handleIncoming(request: IncomingRequest, dependencies: BotDepende
   if (!automaticFollowUp && !shouldRespond(policyInput, identity) && !explicit && !namedMediaReply && !suppliesPendingMedia) return;
 
   const startPayload = message.chat.type === "private" ? parseStartPayload(request.text) : null;
-  if (startPayload !== null && typeof startPayload === "object" && startPayload.type === "login") {
-    await handleTelegramDeepLinkLogin(ctx, message, startPayload.code, dependencies);
-    return;
+  if (startPayload !== null && typeof startPayload === "object") {
+    if (startPayload.type === "login") {
+      await handleTelegramDeepLinkLogin(ctx, message, startPayload.code, dependencies);
+      return;
+    }
+    if (startPayload.type === "verify") {
+      await handleTelegramCommunityVerification(ctx, message, startPayload.token, dependencies);
+      return;
+    }
   }
 
   const translations = translationStore(dependencies);
@@ -2465,7 +2471,9 @@ function translationStatusText(session: TranslationSession, locale: BotLocale): 
   });
 }
 
-type StartPayload = "sticker" | "settings" | { type: "login"; code: string };
+type StartPayload = "sticker" | "settings" |
+  { type: "login"; code: string } |
+  { type: "verify"; token: string };
 
 function parseStartPayload(text: string): StartPayload | null {
   const match = /^\/start(?:@\w+)?\s+([^\s]+)$/i.exec(text.trim());
@@ -2474,7 +2482,10 @@ function parseStartPayload(text: string): StartPayload | null {
   if (normalized === "sticker" || normalized === "settings") return normalized;
   const login = /^login_([A-Za-z0-9_-]{32,128})$/.exec(payload);
   const code = login?.[1];
-  return code ? { type: "login", code } : null;
+  if (code) return { type: "login", code };
+  const verification = /^verify_([A-Za-z0-9_-]{43})$/.exec(payload);
+  const token = verification?.[1];
+  return token ? { type: "verify", token } : null;
 }
 
 async function handleTelegramDeepLinkLogin(
@@ -2507,6 +2518,37 @@ async function handleTelegramDeepLinkLogin(
   }
   await replyPlainTo(ctx, message, botText(locale, "telegramLoginConfirmed"), {
     reply_markup: new InlineKeyboard().url(botText(locale, "telegramLoginButton"), confirmation.loginUrl),
+  });
+}
+
+async function handleTelegramCommunityVerification(
+  ctx: Context,
+  message: Message,
+  token: string,
+  dependencies: BotDependencies,
+): Promise<void> {
+  if (!message.from || message.chat.type !== "private") return;
+  const locale = resolveBotLocale(message.from.language_code);
+  const verification = await dependencies.client.consumeTelegramCommunityVerification(token, message.from.id);
+  if (verification.kind === "replay") return;
+  if (verification.kind === "invalid_or_expired") {
+    await replyPlainTo(ctx, message, botText(locale, "telegramCommunityExpired"));
+    return;
+  }
+  if (verification.kind === "telegram_already_linked") {
+    await replyPlainTo(ctx, message, botText(locale, "telegramCommunityAlreadyLinked"));
+    return;
+  }
+  if (verification.kind === "unavailable") {
+    dependencies.logger.warn(
+      { telegramUserId: message.from.id, status: verification.status },
+      "Telegram community verification is unavailable",
+    );
+    await replyPlainTo(ctx, message, botText(locale, "telegramCommunityUnavailable"));
+    return;
+  }
+  await replyPlainTo(ctx, message, botText(locale, "telegramCommunityVerified"), {
+    reply_markup: new InlineKeyboard().url(botText(locale, "telegramCommunityJoinButton"), verification.groupUrl),
   });
 }
 

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { APIMasterClient, ChatCompletionError } from "../src/clients/apimaster.js";
+import { APIMasterClient } from "../src/clients/apimaster.js";
+import type { ChatCompletionError } from "../src/clients/apimaster.js";
 import { DEFAULT_MODELS } from "../src/constants.js";
 import { MIA_SYSTEM_PROMPT } from "../src/prompts.js";
 
@@ -68,6 +69,42 @@ describe("APIMaster client", () => {
     const [, init] = fetcher.mock.calls[0] ?? [];
     const body: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
     expect(body).toMatchObject({ code: "abc", telegram_user_id: "123456", first_name: "Lisa" });
+  });
+
+  it("consumes APIMaster community verification through the internal API", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      success: true,
+      data: { status: "confirmed", group_url: "https://t.me/apimaster_test" },
+    }));
+    const client = createClient(fetcher);
+
+    await expect(client.consumeTelegramCommunityVerification("a".repeat(43), 123456)).resolves.toEqual({
+      kind: "confirmed",
+      groupUrl: "https://t.me/apimaster_test",
+    });
+    const [url, init] = fetcher.mock.calls[0] ?? [];
+    expect(url).toBe("http://127.0.0.1:3000/api/user/internal/mia-telegram-verification");
+    expect(new Headers(init?.headers).get("x-mia-internal-key")).toBe("internal-secret-value");
+    expect(typeof init?.body === "string" ? JSON.parse(init.body) as unknown : null).toEqual({
+      token: "a".repeat(43),
+      telegram_user_id: "123456",
+    });
+  });
+
+  it("preserves community verification outcomes without throwing", async () => {
+    const invalid = createClient(vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      success: false,
+      code: "invalid_or_expired",
+    }, { status: 410 })));
+    const conflict = createClient(vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      success: false,
+      code: "telegram_already_linked",
+    }, { status: 409 })));
+
+    await expect(invalid.consumeTelegramCommunityVerification("a".repeat(43), 123456))
+      .resolves.toEqual({ kind: "invalid_or_expired" });
+    await expect(conflict.consumeTelegramCommunityVerification("a".repeat(43), 123456))
+      .resolves.toEqual({ kind: "telegram_already_linked" });
   });
 
   it("submits text images asynchronously and reference images through synchronous edits", async () => {

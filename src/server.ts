@@ -26,6 +26,7 @@ const telegramUpdateSchema = z.object({
 interface ServerOptions {
   logger: Logger;
   serviceKey: string;
+  telegramWebhookSecret?: string;
   handleUpdate: (update: Update) => Promise<void>;
   enqueueUpdate?: (update: Update) => boolean;
   miniApp?: {
@@ -51,7 +52,7 @@ function authenticated(provided: string | string[] | undefined, expected: string
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
-export function createServer({ logger, serviceKey, handleUpdate, enqueueUpdate, miniApp, mediaDownload, debug }: ServerOptions) {
+export function createServer({ logger, serviceKey, telegramWebhookSecret, handleUpdate, enqueueUpdate, miniApp, mediaDownload, debug }: ServerOptions) {
   const app = Fastify({ loggerInstance: logger, bodyLimit: 1024 * 1024, trustProxy: true });
 
   app.addHook("onRequest", (request, reply, done) => {
@@ -159,11 +160,7 @@ export function createServer({ logger, serviceKey, handleUpdate, enqueueUpdate, 
       return reply.type("text/html; charset=utf-8").send(sharePage(imageUrl));
     });
   }
-  app.post("/telegram/update", (request, reply) => {
-    if (!authenticated(request.headers["x-mia-internal-key"], serviceKey)) {
-      return reply.code(401).send({ accepted: false });
-    }
-
+  const acceptTelegramUpdate = (request: FastifyRequest, reply: FastifyReply) => {
     const parsed = telegramUpdateSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({ accepted: false });
@@ -176,6 +173,21 @@ export function createServer({ logger, serviceKey, handleUpdate, enqueueUpdate, 
       });
     });
     return reply.code(202).send({ accepted: true });
+  };
+  app.post("/telegram/update", (request, reply) => {
+    if (!authenticated(request.headers["x-mia-internal-key"], serviceKey)) {
+      return reply.code(401).send({ accepted: false });
+    }
+    return acceptTelegramUpdate(request, reply);
+  });
+  app.post("/telegram/webhook", (request, reply) => {
+    if (!telegramWebhookSecret || !authenticated(
+      request.headers["x-telegram-bot-api-secret-token"],
+      telegramWebhookSecret,
+    )) {
+      return reply.code(401).send({ accepted: false });
+    }
+    return acceptTelegramUpdate(request, reply);
   });
 
   return app;

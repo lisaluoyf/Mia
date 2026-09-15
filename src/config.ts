@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const environmentSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().trim().min(1),
+  TELEGRAM_WEBHOOK_SECRET: z.string().trim().regex(/^[A-Za-z0-9_-]{32,256}$/),
   APIMASTER_BASE_URL: z.url(),
   APIMASTER_INTERNAL_BASE_URL: z.url().optional(),
   APIMASTER_IDENTITY_BASE_URL: z.url(),
@@ -42,6 +43,7 @@ const environmentSchema = z.object({
 
 export interface AppConfig {
   telegramBotToken: string;
+  telegramWebhookSecret: string;
   apimasterBaseUrl: string;
   apimasterInternalBaseUrl: string;
   apimasterIdentityBaseUrl: string;
@@ -84,6 +86,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   const parsed = environmentSchema.parse(environment);
   return {
     telegramBotToken: parsed.TELEGRAM_BOT_TOKEN,
+    telegramWebhookSecret: parsed.TELEGRAM_WEBHOOK_SECRET,
     apimasterBaseUrl: withoutTrailingSlash(parsed.APIMASTER_BASE_URL),
     apimasterInternalBaseUrl: withoutTrailingSlash(
       parsed.APIMASTER_INTERNAL_BASE_URL ?? parsed.APIMASTER_BASE_URL,

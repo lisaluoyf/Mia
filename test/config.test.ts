@@ -4,6 +4,7 @@ import { loadConfig } from "../src/config.js";
 
 const requiredEnvironment = {
   TELEGRAM_BOT_TOKEN: "123:test-token",
+  TELEGRAM_WEBHOOK_SECRET: "test-telegram-webhook-secret-123456",
   APIMASTER_BASE_URL: "https://apimaster.example",
   APIMASTER_IDENTITY_BASE_URL: "http://127.0.0.1:3000",
   MIA_INTERNAL_SERVICE_KEY: "internal-test-key-long-enough",
@@ -12,6 +13,14 @@ const requiredEnvironment = {
 describe("Mia configuration", () => {
   it("fails fast without the guest text-chat Token", () => {
     expect(() => loadConfig(requiredEnvironment)).toThrow();
+  });
+
+  it("requires a Telegram-compatible webhook secret", () => {
+    expect(() => loadConfig({
+      ...requiredEnvironment,
+      TELEGRAM_WEBHOOK_SECRET: "invalid webhook secret with spaces",
+      MIA_GUEST_CHAT_API_KEY: "guest-test-key",
+    })).toThrow();
   });
 
   it("accepts a deployment-only guest Token and fixes its model to GPT-5.4", () => {

@@ -119,6 +119,11 @@ const ENGLISH = {
   telegramLoginButton: "Log in now",
   telegramLoginExpired: "This login link expired. Return to APIMaster and try again.",
   telegramLoginUnavailable: "Login confirmation is temporarily unavailable. Please try again shortly.",
+  telegramCommunityVerified: "Verification complete. You can now join the APIMaster community.",
+  telegramCommunityJoinButton: "Join the community",
+  telegramCommunityExpired: "This verification link is invalid or expired. Request a new link from APIMaster.",
+  telegramCommunityAlreadyLinked: "This Telegram account is already connected to another APIMaster account.",
+  telegramCommunityUnavailable: "Community verification is temporarily unavailable. Please try again shortly.",
 } as const;
 
 export type BotMessageKey = keyof typeof ENGLISH;
@@ -238,6 +243,11 @@ const CHINESE_SIMPLIFIED: MessageOverrides = {
   telegramLoginButton: "登录 APIMaster",
   telegramLoginExpired: "这个登录链接已过期，请返回 APIMaster 后重试。",
   telegramLoginUnavailable: "登录确认暂时不可用，请稍后重试。",
+  telegramCommunityVerified: "验证完成，现在可以加入 APIMaster 社群。",
+  telegramCommunityJoinButton: "加入社群",
+  telegramCommunityExpired: "这个验证链接无效或已过期，请返回 APIMaster 获取新链接。",
+  telegramCommunityAlreadyLinked: "这个 Telegram 账号已经绑定到另一个 APIMaster 账号。",
+  telegramCommunityUnavailable: "社群验证暂时不可用，请稍后重试。",
 };
 
 const CHINESE_TRADITIONAL: MessageOverrides = {

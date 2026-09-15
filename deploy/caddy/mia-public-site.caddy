@@ -1,0 +1,32 @@
+# BEGIN MIA PUBLIC SITE
+mia.apimaster.ai {
+  handle / {
+    redir /mia/ 308
+  }
+
+  handle /telegram/webhook {
+    reverse_proxy 172.20.0.1:3010
+  }
+
+  handle /health {
+    reverse_proxy 172.20.0.1:3010
+  }
+
+  @private path /mia/debug /mia/debug/* /internal/debug/* /telegram/update
+  handle @private {
+    respond 404
+  }
+
+  handle /mia* {
+    reverse_proxy 172.20.0.1:3010 {
+      transport http {
+        dial_timeout 5s
+        response_header_timeout 300s
+        read_timeout 300s
+      }
+    }
+  }
+
+  respond 404
+}
+# END MIA PUBLIC SITE
