@@ -1,7 +1,7 @@
 # BEGIN MIA PUBLIC SITE
 mia.apimaster.ai {
   handle / {
-    redir /mia/ 308
+    redir * /mia/ 308
   }
 
   handle /telegram/webhook {
