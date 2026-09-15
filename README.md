@@ -162,7 +162,7 @@ one release cycle as a rollback path.
 
 ## Work archive: 2026-09-15
 
-Today's work moves Mia's public traffic to the isolated German server while
+Today's work moved Mia's public traffic to the isolated German server while
 keeping APIMaster as the account and model service boundary:
 
 ```text
@@ -180,7 +180,8 @@ Completed:
   APIMaster internal verification API. Login and Telegram account binding still
   use APIMaster deep-link APIs.
 - The Mia direct-entry code and deployment scripts are committed and pushed on
-  `main`; the deployed Mia release is `2d6ad6b16748310092e5f7af56bb358f29fd4a7`.
+  `main`. Cutover used release `c004fe2734eef30aec289a75561255b378e42032`,
+  including the corrected Caddy `308` route and idempotent site updater.
 - de-roma (`116.203.216.59`) has the Mia PM2 process, Caddy public route, Mini
   App, health endpoint, media boundary, and matching sandbox runner installed.
 - Production Mia is configured with `MIA_PUBLIC_BASE_URL=https://mia.apimaster.ai`.
@@ -200,21 +201,30 @@ Validation completed:
   serving, media token rejection, Caddy validation/reload, and sandbox release
   consistency checks passed.
 - The existing APIMaster webhook rollback path was verified with a synthetic
-  Update; Telegram currently has no pending updates.
+  Update.
 
-Remaining cutover work:
+Production cutover completed:
 
-- Add the DNS-only A record `mia.apimaster.ai -> 116.203.216.59` in Cloudflare.
-  Until DNS propagates, Caddy cannot obtain the public TLS certificate and
-  Telegram remains on `https://apimaster.ai/api/telegram/webhook`.
-- After DNS and TLS verification, switch Telegram with
-  `scripts/switch-telegram-direct.sh`, keeping `drop_pending_updates=false`.
-- Test `login_*`, `bind_existing`, and `verify_*` with the Lisa test account,
-  then finalize APIMaster's `/mia` redirect and remove
-  `MIA_TELEGRAM_WEBHOOK_URL` from the active NewAPI runtime.
-- Run the final production audit: Telegram webhook status and pending updates,
-  `/mia` redirect, protected `/mia/debug`, no Mia process or port `3010` on
-  APIMaster, matching GitHub/release/sandbox SHAs, and no Mia forwarding logs.
+- The DNS-only A record `mia.apimaster.ai -> 116.203.216.59` is active on public
+  resolvers. Caddy serves a valid Let's Encrypt certificate for the hostname.
+- Telegram now posts directly to `https://mia.apimaster.ai/telegram/webhook`.
+  The cutover kept pending updates, and repeated post-cutover checks reported
+  `pending_update_count=0` with no Telegram webhook error.
+- A direct duplicate-Update probe returned `202` both times. A private
+  `/start settings` probe for the Lisa account reached de-roma and persisted
+  both the inbound message and outbound Telegram reply.
+- `https://apimaster.ai/mia` and `/mia/*` now return `308` redirects to the new
+  host. `/mia/debug` remains on APIMaster and redirects unauthenticated users to
+  login; its API remains authenticated.
+- `MIA_TELEGRAM_WEBHOOK_URL` is absent from the APIMaster environment, active
+  NewAPI instance, and worker. Finalizer rollback data is stored under ID
+  `20260915T153315Z`.
+- APIMaster has no Mia listener on port `3010`, no old Mia PM2 application or
+  resurrection entry, and no orphaned `/opt/mia` deployment process. No Mia
+  forwarding errors appeared after finalization.
+- The final audit found no Telegram pending updates and no unconsumed Mia Agent
+  ingress updates. The Caddy site matches the active release, and the installed
+  sandbox runner matches that release.
 
 The user-created game and Mini App sandbox integration remains a separate next
 phase; this migration only changes Mia's public entry point and service
