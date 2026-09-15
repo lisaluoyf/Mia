@@ -5,6 +5,11 @@ const promptPath = process.env.PROMPT_FILE || "/run/job/prompt.txt";
 const resultPath = process.env.RESULT_FILE || "/run/job/result.txt";
 const model = process.env.ALLOWED_MODEL || "gpt-5.4";
 const gatewayBaseURL = process.env.GATEWAY_BASE_URL || "http://gateway:8080/v1";
+const home = process.env.HOME || "/tmp/home";
+const codexHome = process.env.CODEX_HOME || "/tmp/codex-home";
+
+fs.mkdirSync(home, { recursive: true });
+fs.mkdirSync(codexHome, { recursive: true });
 
 const userPrompt = fs.readFileSync(promptPath, "utf8").trim();
 if (!userPrompt) throw new Error("prompt must not be empty");
@@ -51,8 +56,8 @@ const child = spawn("codex", args, {
   stdio: "inherit",
   env: {
     PATH: process.env.PATH,
-    HOME: process.env.HOME || "/tmp/home",
-    CODEX_HOME: process.env.CODEX_HOME || "/tmp/codex-home",
+    HOME: home,
+    CODEX_HOME: codexHome,
     CODEX_API_KEY: process.env.JOB_TOKEN || "",
     LANG: "C.UTF-8",
   },
