@@ -11,8 +11,6 @@ Each project lives at `<projects-root>/<user-id>/<project-id>`. Every edit start
 
 Use a dedicated low-quota APIMaster token for the first PoC. A later Mia integration should write the user's resolved key to a root-only temporary file and pass that file through `MIA_APIMASTER_API_KEY_FILE`; the runner never receives the real key.
 
-CI publishes the credential-free sandbox image for anonymous pull. Production pins the immutable digest and never builds the image locally.
-
 ```bash
 sudo install -d -m 700 /etc/mia-sandbox /srv/mia-sandbox/projects /srv/mia-sandbox/jobs
 printf '%s' 'sk-REPLACE_WITH_POC_TOKEN' | sudo tee /etc/mia-sandbox/apimaster_api_key >/dev/null
