@@ -4,6 +4,7 @@ set -Eeuo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 deploy_host="${MIA_DE_ROMA_HOST:-root@116.203.216.59}"
 ssh_jump="${MIA_DE_ROMA_SSH_JUMP:-roma-prod}"
+activate_release="${MIA_DE_ROMA_ACTIVATE_RELEASE:-false}"
 bundle="$(mktemp -t mia-de-roma.XXXXXX.bundle)"
 remote_bundle="/tmp/mia-de-roma-$$.bundle"
 
@@ -39,6 +40,6 @@ scp -o "ProxyJump=$ssh_jump" "$bundle" "$deploy_host:$remote_bundle"
 
 started_at="$SECONDS"
 ssh -J "$ssh_jump" "$deploy_host" \
-  "MIA_REPOSITORY_URL='$remote_bundle' MIA_RUNTIME_USER=roma MIA_HEALTH_URL=http://172.20.0.1:3010/health MIA_ACTIVATE_RELEASE=false bash -s -- '$git_sha'" \
+  "MIA_REPOSITORY_URL='$remote_bundle' MIA_RUNTIME_USER=roma MIA_HEALTH_URL=http://172.20.0.1:3010/health MIA_ACTIVATE_RELEASE='$activate_release' bash -s -- '$git_sha'" \
   < "$repository_root/scripts/server-deploy.sh"
-echo "Mia de-roma staging finished in $((SECONDS - started_at))s at $git_sha. The release is not running."
+echo "Mia de-roma deployment finished in $((SECONDS - started_at))s at $git_sha; activate=$activate_release."

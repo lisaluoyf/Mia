@@ -13,6 +13,9 @@ const sensitivePaths = [
   "headers.x-mia-internal-key",
   "req.headers.authorization",
   "req.headers.x-mia-internal-key",
+  "ctx.api.token",
+  "err.ctx.api.token",
+  "err.error.ctx.api.token",
 ];
 
 export function createLogger(level: string, destination?: DestinationStream): Logger {

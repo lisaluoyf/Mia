@@ -27,6 +27,26 @@ describe("logger redaction", () => {
     expect(output).not.toContain("secret-api-key");
   });
 
+  it("redacts Telegram tokens nested in Grammy errors", async () => {
+    let output = "";
+    const destination = new Writable({
+      write(chunk: unknown, _encoding, callback) {
+        output += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+        callback();
+      },
+    });
+    const logger = createLogger("info", destination);
+    const error = Object.assign(new Error("Telegram update failed"), {
+      ctx: { api: { token: "123456:secret-telegram-token" } },
+    });
+
+    logger.error({ err: error }, "Unhandled Telegram update error");
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(output).not.toContain("123456:secret-telegram-token");
+    expect(output).toContain("[REDACTED]");
+  });
+
   it("redacts expiring media access tokens from request URLs", async () => {
     let output = "";
     const destination = new Writable({

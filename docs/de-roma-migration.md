@@ -28,6 +28,12 @@ CONFIRM_MIA_CUTOVER=YES bash scripts/cutover-de-roma.sh
 
 The deploy command verifies and pushes GitHub `main`, then uploads a temporary Git bundle containing that branch. The target does not store a GitHub token, SSH private key, or package-registry credential.
 
+After the initial migration, activate a normal production release with health-checked rollback:
+
+```bash
+MIA_DE_ROMA_ACTIVATE_RELEASE=true pnpm deploy:de-roma
+```
+
 On any error after the old process stops, the cutover attempts to restore APIMaster's backed-up env/Nginx files, stop the target Mia, and restart the source Mia. Backups are timestamped with the printed `cutover_id`.
 
 ## Sandbox
