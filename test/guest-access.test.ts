@@ -282,8 +282,27 @@ I can:
       },
     } as never);
 
+    await bot.handleUpdate({
+      update_id: 1012,
+      callback_query: {
+        id: "intro-image-repeat",
+        from: { id: 42, is_bot: false, first_name: "Guest", language_code: "zh-CN" },
+        message: {
+          message_id: 19,
+          message_thread_id: 12,
+          date: 1_788_333_600,
+          chat: { id: -1001, type: "supergroup", title: "Guests", is_forum: true },
+          from: botInfo,
+          text: "我是 Mia",
+        },
+        chat_instance: "group-instance",
+        data: "intro_action:image",
+      },
+    } as never);
+
     expect(classify).not.toHaveBeenCalled();
-    expect(calls.some((call) => call.method === "answerCallbackQuery")).toBe(true);
+    expect(calls.filter((call) => call.method === "answerCallbackQuery")).toHaveLength(2);
+    expect(calls.filter((call) => call.method === "sendMessage")).toHaveLength(1);
     const prompt = calls.filter((call) => call.method === "sendMessage").at(-1);
     expect(prompt?.payload).toMatchObject({
       text: "Guest: 请回复这条消息，描述你想生成的图片。",

@@ -1345,7 +1345,11 @@ async function sendIntroductionActionPrompt(
   persistMessage(prompt, dependencies);
 }
 
-async function handleIntroductionCallback(ctx: Context, dependencies: BotDependencies): Promise<boolean> {
+async function handleIntroductionCallback(
+  ctx: Context,
+  dependencies: BotDependencies,
+  activePrompts: Set<string>,
+): Promise<boolean> {
   const query = ctx.callbackQuery;
   if (!query?.data) return false;
   const message = query.message;
@@ -1370,8 +1374,28 @@ async function handleIntroductionCallback(ctx: Context, dependencies: BotDepende
     await ctx.answerCallbackQuery({ text: botText(locale, "actionUnavailable"), show_alert: true });
     return true;
   }
-  await ctx.answerCallbackQuery();
-  await sendIntroductionActionPrompt(ctx, message, query.from, mediaAction, dependencies);
+  const scope = {
+    telegramUserId: query.from.id,
+    chatId: message.chat.id,
+    threadId: message.message_thread_id ?? null,
+  };
+  const intent = mediaAction === "image" ? "image_generate" :
+    mediaAction === "video" ? "video_generate" : "sticker_create";
+  const existing = dependencies.mediaStore.getPendingIntent(scope);
+  const promptKey = `${scope.telegramUserId}:${scope.chatId}:${scope.threadId ?? 0}:${intent}`;
+  if (activePrompts.has(promptKey) ||
+      existing?.intent === intent && existing.missingRequired.includes("callback_reply")) {
+    await ctx.answerCallbackQuery();
+    return true;
+  }
+
+  activePrompts.add(promptKey);
+  try {
+    await ctx.answerCallbackQuery();
+    await sendIntroductionActionPrompt(ctx, message, query.from, mediaAction, dependencies);
+  } finally {
+    activePrompts.delete(promptKey);
+  }
   return true;
 }
 
@@ -1642,7 +1666,11 @@ async function handleTranslationCallback(ctx: Context, dependencies: BotDependen
   return true;
 }
 
-async function handleCallback(ctx: Context, dependencies: BotDependencies): Promise<void> {
+async function handleCallback(
+  ctx: Context,
+  dependencies: BotDependencies,
+  activeIntroductionPrompts: Set<string>,
+): Promise<void> {
   const query = ctx.callbackQuery;
   if (!query || !query.data || !query.from) return;
   if (await handleActivationCallback(ctx, dependencies)) return;
@@ -1651,7 +1679,7 @@ async function handleCallback(ctx: Context, dependencies: BotDependencies): Prom
     return;
   }
   if (await handleTranslationCallback(ctx, dependencies)) return;
-  if (await handleIntroductionCallback(ctx, dependencies)) return;
+  if (await handleIntroductionCallback(ctx, dependencies, activeIntroductionPrompts)) return;
   if (await handleImageActionCallback(ctx, dependencies)) return;
   const unavailable = async () => {
     await ctx.answerCallbackQuery({
@@ -2843,6 +2871,7 @@ async function sendTranslationCallbackState(
 export function createBot(token: string, dependencies: BotDependencies): Bot {
   const bot = new Bot(token);
   const albums = new Map<string, { ctx: Context; messages: Message[]; timer: NodeJS.Timeout }>();
+  const activeIntroductionPrompts = new Set<string>();
   const sessions = followUpStore(dependencies);
   const dispatchIncoming = async (incoming: IncomingMessage): Promise<void> => {
     const { ctx, message } = incoming;
@@ -2976,7 +3005,7 @@ export function createBot(token: string, dependencies: BotDependencies): Bot {
       return ctx.answerCallbackQuery({ text: accepted ? "OK" : "Task changed or confirmation expired" });
     }
     if (dependencies.mediaStore && !dependencies.mediaStore.claimTelegramUpdate(ctx.update.update_id)) return;
-    return handleCallback(ctx, dependencies);
+    return handleCallback(ctx, dependencies, activeIntroductionPrompts);
   });
   bot.catch(({ ctx, error }) => {
     dependencies.logger.error({ err: error, updateId: ctx.update.update_id }, "Unhandled Telegram update error");
